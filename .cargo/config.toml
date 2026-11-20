@@ -1,0 +1,4 @@
+# Windows MSVC 目标用 rust-lld 链接：link.exe 串行扫所有符号，lld 并行，链接更快；
+# 对启动的影响是 lld 生成的 PE 导入表/重排布局更利于加载器（实测首启时间有可见下降）。
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

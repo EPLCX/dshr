@@ -1,0 +1,25 @@
+[package]
+name = "dshr-tools"
+description = "工具抽象、工具注册表与内置工具"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dshr-context.workspace = true
+dshr-llm.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+globset.workspace = true
+grep-regex.workspace = true
+grep-searcher.workspace = true
+ignore.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+similar.workspace = true
+tokio.workspace = true
+dshr-sandbox.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

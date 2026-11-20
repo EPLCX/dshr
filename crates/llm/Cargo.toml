@@ -1,0 +1,24 @@
+[package]
+name = "dshr-llm"
+description = "LLM Provider 抽象、DeepSeek Messages API 流式客户端与脚本化 mock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dshr-config.workspace = true
+dshr-context.workspace = true
+dshr-core.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+eventsource-stream.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+http = "1"

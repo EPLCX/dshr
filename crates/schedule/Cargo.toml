@@ -1,0 +1,9 @@
+[package]
+name = "dshr-schedule"
+description = "计划任务、提醒与 webhook 触发"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

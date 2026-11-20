@@ -1,0 +1,30 @@
+[package]
+name = "dshr-mcp"
+description = "MCP 客户端（stdio、streamable HTTP）与把 MCP 服务器的工具、资源、prompts 接进来的插件"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dshr-agent.workspace = true
+dshr-auth.workspace = true
+dshr-config.workspace = true
+dshr-context.workspace = true
+dshr-core.workspace = true
+dshr-tools.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+base64 = "0.22"
+eventsource-stream.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

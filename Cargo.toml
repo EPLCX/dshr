@@ -1,0 +1,154 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+# GPUI 相关 crate 编译较重，不放进默认成员；用 `cargo run -p dshr-desktop` 单独构建。
+# `crates/rpc`、`crates/schedule` 还是占位 crate（M4、M5），没有代码，也不放进默认成员。
+default-members = [
+    "crates/core",
+    "crates/llm",
+    "crates/tools",
+    "crates/agent",
+    "crates/auth",
+    "crates/config",
+    "crates/context",
+    "crates/sandbox",
+    "crates/mcp",
+    "crates/skills",
+    "crates/plugins",
+    "apps/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.95"
+
+[workspace.dependencies]
+dshr-core = { path = "crates/core" }
+dshr-llm = { path = "crates/llm" }
+dshr-tools = { path = "crates/tools" }
+dshr-agent = { path = "crates/agent" }
+dshr-auth = { path = "crates/auth" }
+dshr-config = { path = "crates/config" }
+dshr-context = { path = "crates/context" }
+dshr-mcp = { path = "crates/mcp" }
+dshr-plugins = { path = "crates/plugins" }
+dshr-sandbox = { path = "crates/sandbox" }
+dshr-skills = { path = "crates/skills" }
+dshr-ui = { path = "crates/ui" }
+
+anyhow = "1.0.104"
+arc-swap = "1.9.5"
+async-trait = "0.1.92"
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = "7.0.0"
+eventsource-stream = "0.2.3"
+futures = "0.3.34"
+globset = "0.4.21"
+grep-regex = "0.1.14"
+grep-searcher = "0.1.17"
+gpui-kit = "0.9.1"
+ignore = "0.4.34"
+regex = "1.13.1"
+similar = "3.2.1"
+keyring = "4.2.0"
+rust-i18n = "4.2.4"
+schemars = "1.2.3"
+rquickjs = { version = "0.14.0", default-features = false, features = ["std", "loader"] }
+reqwest = { version = "0.13.5", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "fs", "io-util", "io-std", "signal"] }
+tokio-util = "0.7"
+toml = "0.9"
+tracing = "0.1"
+# 只用 rustls 的 aws-lc-rs 后端（和 reqwest 一致）：`ureq` 的 `rustls` feature 会再打开 `ring`，两个后端同时在时
+# rustls 选不出进程级的 CryptoProvider，tokio-tungstenite 连 `wss://` 会 panic。见 `dshr_config::tls`。
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.29.2", features = ["v4"] }
+zstd = "0.14.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+# 整体按体积优化；下面这些依赖在热路径上（解析会话日志与流式响应、grep、diff、Markdown），按速度优化。
+opt-level = "s"
+# 用 unwind，不用 abort：后台任务（一轮对话、MCP 连接、插件的异步操作）里的 panic 只让那个 tokio 任务失败
+# （`JoinError`），界面照常运行、显示出错并从日志重新打开会话；abort 的话任何一处 panic 都会让整个程序直接退出，
+# 正在写的会话也来不及收尾。代价是发布版体积略大。
+panic = "unwind"
+
+[profile.release.package.serde_json]
+opt-level = 3
+
+[profile.release.package.regex-automata]
+opt-level = 3
+
+[profile.release.package.aho-corasick]
+opt-level = 3
+
+[profile.release.package.memchr]
+opt-level = 3
+
+[profile.release.package.similar]
+opt-level = 3
+
+[profile.release.package.markdown]
+opt-level = 3
+
+[profile.release.package.dshr-core]
+opt-level = 3
+
+# 打过补丁的 GPUI Windows 后端：修复调整窗口大小时内存膨胀，见 vendor/gpui-pre-windows/PATCHED.md。
+[patch.crates-io]
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+
+# 界面每一帧都要跑的 CPU 代码：元素树与样式（gpui）、布局（taffy）、虚拟列表和 Markdown 的块布局（gpui-base、
+# gpui-component）、文本换行（unicode-*）、场景编码（Windows 的 DirectX、macOS 的 Metal 后端），以及本项目的视图。
+# 这些按速度优化，其余（网络、TLS、JS 引擎、图片格式、启动时才跑一次的代码）仍按体积优化。
+# 文字排版在 Windows、macOS 上由系统（DirectWrite、Core Text）完成，cosmic-text、swash 等只在 Linux 上用，不在这里。
+
+[profile.release.package.dshr-ui]
+opt-level = 3
+
+[profile.release.package.gpui-pre]
+opt-level = 3
+
+[profile.release.package.gpui-pre-windows]
+opt-level = 3
+
+[profile.release.package.gpui-pre-macos]
+opt-level = 3
+
+[profile.release.package.gpui-pre-sum-tree]
+opt-level = 3
+
+[profile.release.package.gpui-pre-collections]
+opt-level = 3
+
+[profile.release.package.gpui-pre-refineable]
+opt-level = 3
+
+[profile.release.package.gpui-pre-shared-string]
+opt-level = 3
+
+[profile.release.package.gpui-base]
+opt-level = 3
+
+[profile.release.package.gpui-component]
+opt-level = 3
+
+[profile.release.package.taffy]
+opt-level = 3
+
+[profile.release.package.unicode-linebreak]
+opt-level = 3
+
+[profile.release.package.unicode-segmentation]
+opt-level = 3

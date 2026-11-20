@@ -1,0 +1,30 @@
+[package]
+name = "dshr-cli"
+description = "DSHR 命令行：headless 运行与会话管理"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dshr"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+dshr-agent.workspace = true
+dshr-config.workspace = true
+dshr-context.workspace = true
+dshr-core.workspace = true
+dshr-llm.workspace = true
+dshr-mcp.workspace = true
+dshr-plugins.workspace = true
+dshr-skills.workspace = true
+dshr-tools.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

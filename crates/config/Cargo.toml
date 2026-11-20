@@ -1,0 +1,22 @@
+[package]
+name = "dshr-config"
+description = "数据目录、配置文件、环境变量与 API Key 存取"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dirs.workspace = true
+keyring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+# 账号登录（account.rs）：同步平台 HTTP、PKCE、随机数。
+ureq.workspace = true
+rustls.workspace = true
+dshr-auth.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

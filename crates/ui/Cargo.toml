@@ -1,0 +1,42 @@
+[package]
+name = "dshr-ui"
+description = "GPUI 视图：工作区窗口、侧边栏、对话区与输入框"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dshr-agent.workspace = true
+dshr-config.workspace = true
+dshr-context.workspace = true
+dshr-core.workspace = true
+dshr-llm.workspace = true
+dshr-mcp.workspace = true
+dshr-plugins.workspace = true
+dshr-tools.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+gpui-kit.workspace = true
+rust-i18n.workspace = true
+base64 = "0.22"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+accesskit = "0.24"
+raw-window-handle = "0.6"
+tray-icon = "0.26.1"
+notify-rust = "4.19"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+gpui = { package = "gpui-pre", version = "0.3.12", features = ["test-support"] }

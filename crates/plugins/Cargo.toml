@@ -1,0 +1,64 @@
+[package]
+name = "dshr-plugins"
+description = "外部插件宿主：JS 插件（内嵌 QuickJS）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["js"]
+# JS 插件。QuickJS 是 C 代码，编译需要 C 编译器；没有的环境可以关掉这个 feature。
+js = [
+    "dep:rquickjs",
+    "dep:reqwest",
+    "dep:base64",
+    "dep:globset",
+    "dep:ignore",
+    "dep:regex",
+    "dep:futures",
+    "dep:tokio-tungstenite",
+]
+
+[dependencies]
+dshr-agent.workspace = true
+dshr-auth.workspace = true
+dshr-config.workspace = true
+dshr-context.workspace = true
+dshr-core.workspace = true
+dshr-llm.workspace = true
+dshr-mcp.workspace = true
+dshr-sandbox.workspace = true
+dshr-skills.workspace = true
+dshr-tools.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+base64 = { version = "0.22", optional = true }
+futures = { workspace = true, optional = true }
+getrandom = "0.3"
+# 插件目录的文件变化通知（热重载）。
+notify = "8"
+globset = { workspace = true, optional = true }
+ignore = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+sha2 = "0.10"
+# 插件包签名（`dshr plugin pack --sign`）。
+ed25519-dalek = "2"
+# 清单里 `[engines] dshr = ">=0.2"`、插件索引挑版本。
+semver = "1"
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+reqwest = { workspace = true, optional = true }
+tokio-tungstenite = { version = "0.28", optional = true, default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rquickjs = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zstd.workspace = true

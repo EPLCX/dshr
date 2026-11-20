@@ -1,0 +1,18 @@
+[package]
+name = "dshr-context"
+description = "插件内核：服务、扩展点、钩子、事件，注册随插件停用自动撤销"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+arc-swap.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "dshr-auth"
+description = "OAuth 2.0 授权码 + PKCE：本机回调、换取与刷新 token（JS 插件的 host.oauth 和 MCP 远程服务器共用）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = "0.22"
+getrandom = "0.3"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tokio.workspace = true
+tracing.workspace = true

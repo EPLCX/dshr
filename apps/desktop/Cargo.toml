@@ -1,0 +1,29 @@
+[package]
+name = "dshr-desktop"
+description = "DSHR Desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dshr-desktop"
+path = "src/main.rs"
+
+[dependencies]
+dshr-agent.workspace = true
+dshr-context.workspace = true
+dshr-config.workspace = true
+dshr-llm.workspace = true
+dshr-mcp.workspace = true
+dshr-plugins.workspace = true
+dshr-skills.workspace = true
+dshr-tools.workspace = true
+dshr-ui.workspace = true
+gpui-kit.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+embed-resource = "3"

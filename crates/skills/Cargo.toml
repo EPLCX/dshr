@@ -1,0 +1,16 @@
+[package]
+name = "dshr-skills"
+description = "Skills（SKILL.md）的发现，以及把它们列进系统提示词的插件"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dshr-agent.workspace = true
+dshr-context.workspace = true
+dshr-tools.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
