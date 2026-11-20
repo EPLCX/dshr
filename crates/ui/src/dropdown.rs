@@ -10,7 +10,8 @@
 //!   Tab / Shift+Tab 选中当前项、收起，再把焦点移到组合框的下一个 / 上一个控件——不会飘走。
 //!
 //! 无障碍：触发器是“组合框”，名称是调用方给的标签（带上所属区块），值是当前选项，读出展开状态；
-//! 列表是“列表框”，每项是“列表项”，读出“第几项，共几项”和是否已选择。
+//! 列表是“列表框”，每项是“列表项”，读出“第几项，共几项”和是否已选择。macOS 上列表是“菜单”、每项是
+//! “单选菜单项”，原因见 [`LIST_ROLE`]。
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -43,6 +44,26 @@ actions!(
 );
 
 const TRIGGER_CONTEXT: &str = "AppDropdown";
+
+/// 展开的列表在无障碍树里的角色。
+///
+/// macOS 上是“菜单”，选项是“单选菜单项”，用勾选状态（`aria_toggled`）表示当前选项，和系统弹出按钮
+/// （`NSPopUpButton`）以及本程序其他弹出菜单（[`crate::design::menu_choice`]）一致。
+/// 不能用“列表框 + `aria_selected`”：那样选项在 VoiceOver 眼里是可选择的列表行（accesskit 允许
+/// `setAccessibilitySelected:`，并把它翻译成点击），VoiceOver 光标一落到某一项（鼠标碰到、或焦点移过去）
+/// 就选中它，等于直接点了这一项：列表收起，值也改了。
+///
+/// 其他平台照旧是列表框和列表项：讲述人通过 UIA 的 SelectionItem 读出“已选择”，没有这个问题。
+const LIST_ROLE: Role = if cfg!(target_os = "macos") { Role::Menu } else { Role::ListBox };
+
+/// 选项的角色和“是否当前选项”（见 [`LIST_ROLE`]）。
+fn option_semantics(option: Stateful<Div>, selected: bool) -> Stateful<Div> {
+    if cfg!(target_os = "macos") {
+        option.role(Role::MenuItemRadio).aria_toggled(if selected { Toggled::True } else { Toggled::False })
+    } else {
+        option.role(Role::ListBoxOption).aria_selected(selected)
+    }
+}
 const LIST_CONTEXT: &str = "AppDropdownList";
 
 /// 注册按键。比组件库在根上注册的 Tab 更深一层，所以列表展开时 Tab 先到这里。
@@ -410,9 +431,8 @@ impl DropdownState {
                     .id(("dropdown-option", index))
                     .flex_none()
                     .track_focus(&self.options[index])
-                    .role(Role::ListBoxOption)
+                    .map(|option| option_semantics(option, selected))
                     .aria_label(self.full_label(index).unwrap_or_else(|| item.clone()))
-                    .aria_selected(selected)
                     // accesskit 的位置从 0 数，读屏时各平台的适配层再加 1（以前在这里先加了 1，读出来多一个：第一项读成“项 2”）。
                     .aria_position_in_set(index)
                     .aria_size_of_set(count)
@@ -462,7 +482,7 @@ impl DropdownState {
                 v_flex()
                     .id("dropdown-list")
                     .key_context(LIST_CONTEXT)
-                    .role(Role::ListBox)
+                    .role(LIST_ROLE)
                     .aria_label(self.label.clone())
                     .occlude()
                     .min_w(self.width)
