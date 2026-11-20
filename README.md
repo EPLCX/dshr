@@ -139,6 +139,7 @@ crates/
   rpc/ schedule/    占位：JSON-RPC / ACP 服务、计划任务（尚未实现）
 vendor/
   gpui-pre-windows/ 打过补丁的 GPUI Windows 后端（见其中的 PATCHED.md）
+  gpui-pre-macos/   打过补丁的 GPUI macOS 后端（修复 VoiceOver 不跟随焦点，见其中的 PATCHED.md）
 docs/               文档
 site/               静态介绍页面（不参与构建）
 scripts/            macOS 打包、生成第三方声明
