@@ -144,7 +144,8 @@ async fn denied_command_is_reported_to_model() {
         ScriptedProvider::tool_reply("c1", "run_shell", json!({"command": "echo hi > x.txt"})),
         ScriptedProvider::text_reply("好的，不运行了"),
     ]));
-    let agent = h.agent(provider, Arc::new(DenyAll));
+    // 手动确认模式：工作区内修改模式在 macOS 上有 Seatbelt 沙箱，命令会直接放行，不经过审批。
+    let agent = h.agent_with(provider, Arc::new(DenyAll), PermissionMode::Manual);
     let (tx, _rx) = mpsc::unbounded_channel();
 
     agent.run_turn(&mut h.session, "运行命令".into(), &tx, &CancellationToken::new()).await.unwrap();

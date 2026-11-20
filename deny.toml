@@ -8,6 +8,11 @@ all-features = true
 # RustSec 公告：有漏洞（vulnerability）的依赖直接报错；不再维护、被撤回的版本也报出来。
 version = 2
 yanked = "deny"
+ignore = [
+    # chrono 不再维护、没有可升级的版本；它经 GPUI（gpui-pre、gpui-base、gpui-component）进来，换不掉。
+    # 没有漏洞公告，等 GPUI 换成 jiff / time 后再去掉这一条。
+    { id = "RUSTSEC-2026-0543", reason = "chrono 经 GPUI 引入，无可替代版本；仅为不再维护，无已知漏洞" },
+]
 
 [licenses]
 version = 2

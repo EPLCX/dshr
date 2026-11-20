@@ -716,7 +716,9 @@ impl State {
         let work = async move {
             tokio::task::spawn_blocking(move || {
                 let mut matches = Vec::new();
-                'files: for entry in ignore::WalkBuilder::new(&root).build().flatten() {
+                // 按文件名排序遍历：目录项的原始顺序随文件系统而变，结果顺序要稳定。
+                let walker = ignore::WalkBuilder::new(&root).sort_by_file_name(|a, b| a.cmp(b)).build();
+                'files: for entry in walker.flatten() {
                     if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                         continue;
                     }

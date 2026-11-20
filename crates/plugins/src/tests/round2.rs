@@ -329,7 +329,8 @@ async fn streaming_fetch_sse_and_websocket() {
     let f = Fixture::new();
     f.plugin(
         "streams",
-        "capabilities = [\"net:127.0.0.1\"]\ntimeout_ms = 10000\n",
+        // 调试构建里 3 MB 正文要分几百块经 QuickJS 读完，较慢的 CI 机器（Windows）上会超过 10 秒。
+        "capabilities = [\"net:127.0.0.1\"]\ntimeout_ms = 60000\n",
         r#"export const tools = [{ name: "stream", async execute({ base, ws }, host) {
             const events = [];
             const sse = await host.fetch(`${base}/sse`, { stream: true });
