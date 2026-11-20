@@ -107,9 +107,12 @@ opt-level = 3
 [profile.release.package.dshr-core]
 opt-level = 3
 
-# 打过补丁的 GPUI Windows 后端：修复调整窗口大小时内存膨胀，见 vendor/gpui-pre-windows/PATCHED.md。
+# 打过补丁的 GPUI 平台后端：
+# - Windows：修复调整窗口大小时内存膨胀，见 vendor/gpui-pre-windows/PATCHED.md；
+# - macOS：修复 VoiceOver 不跟随键盘焦点，见 vendor/gpui-pre-macos/PATCHED.md。
 [patch.crates-io]
 gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 
 # 界面每一帧都要跑的 CPU 代码：元素树与样式（gpui）、布局（taffy）、虚拟列表和 Markdown 的块布局（gpui-base、
 # gpui-component）、文本换行（unicode-*）、场景编码（Windows 的 DirectX、macOS 的 Metal 后端），以及本项目的视图。
