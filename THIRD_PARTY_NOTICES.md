@@ -568,7 +568,7 @@ dev / build 依赖不进最终程序，不列入。
 | [zerotrie](https://github.com/unicode-org/icu4x) | 0.2.5 | Unicode-3.0 |
 | [zerovec](https://github.com/unicode-org/icu4x) | 0.11.9 | Unicode-3.0 |
 | [zerovec-derive](https://github.com/unicode-org/icu4x) | 0.11.7 | Unicode-3.0 |
-| [zip](https://github.com/zip-rs/zip2.git) | 2.6.1 | MIT |
+| [zip](https://github.com/zip-rs/zip2.git) | 9.8.1 | MIT |
 | [zmij](https://github.com/dtolnay/zmij) | 1.0.23 | MIT |
 | [zopfli](https://github.com/zopfli-rs/zopfli) | 0.8.4 | Apache-2.0 |
 | [zstd](https://github.com/gyscos/zstd-rs) | 0.14.4 | BSD-3-Clause |
@@ -16576,9 +16576,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 277. zip 2.6.1
+### 277. zip 9.8.1
 
-使用者：zip 2.6.1（LICENSE）
+使用者：zip 9.8.1（LICENSE）
 
 ```text
 The MIT License (MIT)
@@ -16602,9 +16602,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Some files in the "tests/data" subdirectory of this repository are under other
-licences; see files named LICENSE.*.txt for details.
 ```
 
 ### 278. zopfli 0.8.4
