@@ -199,7 +199,7 @@ pub trait Tool: Send + Sync {
   慢操作（`fetch`、`exec`、`llm`）交给 IO 运行时，完成后经 `settle` 交回脚本，不占插件线程。
 - **授权**（`grants.rs`）、**清单**（`manifest.rs`）、**插件包**（`bundle.rs`）、**安装**（`install.rs`）、**打包签名**（`pack.rs`）、**索引**（`index.rs`）、
   **来源与回滚**（`sources.rs`）、**链接**（`links.rs`）、**密钥**（`secrets.rs`）。
-- **`CreatorPlugin`**：创造模式的五个工具和写法指南（`js/creator.md` 编进程序，作为系统提示词追加）。
+- **`CreatorPlugin`**：创造模式的六个工具、写法指南（`js/creator.md` 编进程序，作为系统提示词追加）、编进程序的插件文档（`plugin_docs` 检索 `docs/` 里的相关文件），以及让 agent 不跑偏的把关和调查次数上限。
 - **主程序服务**（`app.rs`）：插件替用户发消息、写输入框、发通知、安装前确认、打开浏览器等需要主程序配合的能力，由桌面版或命令行版在启动时
   `set_app_services` 填一次；没填的项在插件里调用时报“这个程序不支持”。
 

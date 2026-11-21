@@ -169,6 +169,17 @@ impl JsPlugin {
         if !ui.hide.is_empty() {
             lines.push(format!("hides built-in entries: {}", ui.hide.join(", ")));
         }
+        for theme in &exports.themes {
+            let keys = |colors: &std::collections::BTreeMap<String, String>| colors.keys().cloned().collect::<Vec<_>>().join(", ");
+            lines.push(format!(
+                "color scheme `{}/{}` (\"{}\"): light [{}], dark [{}]",
+                self.inner.id,
+                theme.id,
+                theme.name,
+                keys(&theme.light),
+                keys(&theme.dark)
+            ));
+        }
         let surface = surface::JsSurface::new(self.inner.id, manifest, manifest.timeout, instance.clone());
         for page in &ui.pages {
             lines.push(match surface.render(page, None) {
