@@ -1198,6 +1198,72 @@ async fn creation_mode_builds_loads_and_grants_a_plugin() {
     assert!(denied.unwrap().contains("only available in creation mode"));
     assert!(!f.plugins_dir().join("other").exists());
 }
+/// 创造模式不让模型跑偏：逆向程序、翻安装目录、往工作区写临时脚本都被拒绝；调查太多次还没写插件时，
+/// 请求里只留 `plugin_*` 工具；`plugin_docs` 能查到配色方案的写法；重载报告列出导出的配色方案。
+#[tokio::test]
+async fn creation_mode_keeps_the_model_on_task() {
+    use dshr_agent::Preset;
+
+    let f = Fixture::new();
+    let scripts = JsPlugins::discover(&f.plugins_dir());
+    let plugins = Context::new();
+    plugins.add_group(dshr_tools::BuiltinTools).unwrap();
+    plugins.add_group(AgentPlugins).unwrap();
+    plugins.add(crate::CreatorPlugin::new(scripts.clone())).unwrap();
+    plugins.add_group(scripts.clone()).unwrap();
+
+    let theme = "export const themes = [{ id: 'pink', name: 'Pink', light: { accent: '#D63384' }, dark: { accent: '#F08CBF' } }];";
+    let mut replies = vec![
+        ScriptedProvider::tool_reply("a1", "read_file", json!({"path": "dshr/dshr.exe"})),
+        ScriptedProvider::tool_reply("a2", "run_shell", json!({"command": "strings dshr/dshr | findstr theme"})),
+        ScriptedProvider::tool_reply("a3", "write_file", json!({"path": "tmp_theme_scan.ps1", "content": "x"})),
+        ScriptedProvider::tool_reply("a4", "plugin_docs", json!({"topic": "themes"})),
+    ];
+    for i in 0..11 {
+        replies.push(ScriptedProvider::tool_reply(&format!("g{i}"), "list_dir", json!({"path": "."})));
+    }
+    replies.push(ScriptedProvider::tool_reply("w1", "plugin_write", json!({"id": "pink", "path": "index.js", "content": theme})));
+    replies.push(ScriptedProvider::tool_reply("w2", "plugin_reload", json!({"id": "pink"})));
+    replies.push(ScriptedProvider::text_reply("做好了"));
+    let provider = Arc::new(ScriptedProvider::new(replies));
+    let agent = Agent::new(
+        provider.clone(),
+        plugins,
+        Arc::new(Recorder::default()),
+        f.tool_context(),
+        AgentConfig::default().with(PermissionMode::FullAccess).with(Preset::Create),
+    );
+    let mut session = Session::create("s1", f.home.path().join("log").join("session.v1.jsonl")).unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    agent.run_turn(&mut session, "制作一个粉色主题插件".into(), &tx, &CancellationToken::new()).await.unwrap();
+
+    let results: Vec<(String, bool)> = session
+        .events()
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::ToolResult { output, is_error, .. } => Some((output.to_string(), *is_error)),
+            _ => None,
+        })
+        .collect();
+    assert!(results[0].1 && results[0].0.contains("program binary"), "{:?}", results[0]);
+    assert!(results[1].1 && results[1].0.contains("off-task"), "{:?}", results[1]);
+    assert!(results[2].1 && results[2].0.contains("plugin_write"), "{:?}", results[2]);
+    assert!(!f.workspace.path().join("tmp_theme_scan.ps1").exists());
+    assert!(!results[3].1 && results[3].0.contains("accent_soft"), "{:?}", &results[3].0[..200.min(results[3].0.len())]);
+    let reload = &results.last().unwrap().0;
+    assert!(reload.contains("color scheme `pink/pink`"), "{reload}");
+
+    // 每次请求里的工具：调查到第 14 次之后只剩 plugin_*，写出插件文件后恢复。
+    let requests = provider.requests();
+    let only_plugin = |index: usize| requests[index].tools.iter().all(|tool| tool.name.starts_with("plugin_"));
+    let nudged = |index: usize| requests[index].system.as_deref().unwrap().contains("no plugin file yet");
+    // 请求 n 之前已经有 n 次调用；其中 plugin_docs 不算调查。
+    assert!(!nudged(6) && nudged(7), "soft limit after 6 look-around calls");
+    assert!(!only_plugin(14) && only_plugin(15), "hard limit after 14 look-around calls");
+    assert!(requests[15].tools.iter().any(|tool| tool.name == "plugin_docs"));
+    assert!(!only_plugin(16) && !nudged(16), "a plugin file lifts the limit");
+}
+
 /// `ui` 导出：入口、藏起来的内置入口、页面的渲染与动作；创造模式的重载报告里有每一页实际画一次的结果。
 #[tokio::test]
 async fn ui_export_adds_entries_and_pages() {

@@ -112,9 +112,7 @@ impl Callback {
     pub async fn wait_for_code(&self, state: &str) -> Result<String, String> {
         loop {
             let (mut stream, _) = self.listener.accept().await.map_err(|error| error.to_string())?;
-            let mut buffer = vec![0u8; 8192];
-            let read = stream.read(&mut buffer).await.map_err(|error| error.to_string())?;
-            let head = String::from_utf8_lossy(&buffer[..read]).into_owned();
+            let head = read_head(&mut stream).await.map_err(|error| error.to_string())?;
             let target = head.lines().next().and_then(|line| line.split(' ').nth(1)).unwrap_or_default().to_owned();
             let url = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).ok();
             let param = |key: &str| {
@@ -140,6 +138,23 @@ impl Callback {
             return Ok(code);
         }
     }
+}
+
+/// 读请求头，直到空行（`\r\n\r\n`）、连接关闭或 8 KB 为止。浏览器的请求不一定一次到齐，
+/// 只读一次可能只拿到 `GET `，把真正的回调当成别的请求丢掉，登录就一直等下去。
+async fn read_head(stream: &mut tokio::net::TcpStream) -> std::io::Result<String> {
+    let mut buffer = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    while buffer.len() < 8192 && !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+        let read = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut chunk))
+            .await
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "the callback request did not finish"))??;
+        if read == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+    Ok(String::from_utf8_lossy(&buffer).into_owned())
 }
 
 /// 回一页简单的 HTML。
@@ -279,5 +294,26 @@ mod tests {
         let (verifier, challenge) = pkce().unwrap();
         assert_eq!((verifier.len(), challenge), (43, pkce_challenge(&verifier)));
         assert_ne!(random_token().unwrap(), random_token().unwrap());
+    }
+
+    /// 回调请求分几次到达（中间还隔了一会儿）时也要认出来。
+    #[tokio::test]
+    async fn callback_waits_for_the_whole_request() {
+        let callback = Callback::bind().await.unwrap();
+        let address = callback.redirect_uri.trim_start_matches("http://").trim_end_matches("/callback").to_owned();
+        let browser = tokio::spawn(async move {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            for part in ["GET ", "/callback?code=abc&state=s1", " HTTP/1.1\r\nHost: x\r\n", "\r\n"] {
+                stream.write_all(part.as_bytes()).await.unwrap();
+                stream.flush().await.unwrap();
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).await.unwrap();
+            reply
+        });
+        let code = tokio::time::timeout(Duration::from_secs(5), callback.wait_for_code("s1")).await.expect("waited forever");
+        assert_eq!(code.unwrap(), "abc");
+        assert!(browser.await.unwrap().contains("Signed in"));
     }
 }

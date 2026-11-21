@@ -1337,10 +1337,9 @@ async fn read_only_tool_calls_in_one_step_run_concurrently() {
     let config = AgentConfig::default().with(PermissionMode::FullAccess);
     let agent = Agent::new(provider.clone(), plugins, Arc::new(AutoApprove), ToolContext::new(h.dir.path().to_owned()), config);
     let (tx, _rx) = mpsc::unbounded_channel();
-    let start = std::time::Instant::now();
     agent.run_turn(&mut h.session, "并行".into(), &tx, &CancellationToken::new()).await.unwrap();
-    // 串行要 5 × 200 ms；r1–r3 一起跑，w1、r4 各自一批：约 3 × 200 ms。
-    assert!(start.elapsed() < std::time::Duration::from_millis(900), "用了 {:?}", start.elapsed());
+    // 不看总耗时：CI 机器忙的时候墙钟会被拉长（曾经 916 ms 超过 900 ms 的上限）。
+    // 下面直接比较每个调用的起止时间，重叠就说明是同时执行的。
 
     let log = log.lock().unwrap();
     let span = |tag: &str| log.iter().find(|(name, ..)| name == tag).map(|(_, start, end)| (*start, *end)).unwrap();

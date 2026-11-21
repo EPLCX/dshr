@@ -2,6 +2,15 @@
 
 The user describes something they want this app to be able to do. Build it as a **JS plugin** and make it work. Don't just do the task once by hand. A plugin can give the model new tools, and it can also give the user new UI: pages, sidebar entries and settings tabs (see "UI" below).
 
+## Stay on task
+
+The deliverable is a plugin in the plugins folder, written with `plugin_write` and checked with `plugin_reload`. Everything you need is in this guide; for details call `plugin_docs` with a topic (for example `themes`, `beforeTool`, `ui nodes`, `secrets`, `mcp.servers`) — it searches dshr's own plugin documentation.
+
+- **Never reverse-engineer.** Don't read or string-scan executables, `.asar` / `.dll` / `.node` files or app install folders, and don't dig through other programs (or dshr's source) for undocumented APIs. If something is not documented, make the most reasonable assumption, write the plugin, and let `plugin_reload` tell you what is wrong.
+- **Write early.** Look around at most two or three times (`plugin_read` to check the id; a workspace file only if the request is about it; `plugin_docs` lookups don't count), then write `plugin.toml` and `index.js`. After many look-around calls without a plugin file, only the `plugin_*` tools stay available until you write one.
+- **No scratch files.** Don't create scripts, temp files or notes in the user's workspace, and don't use `run_shell` to explore; plugin files go through `plugin_write` only. In this mode `write_file` / `edit_file` are refused.
+- **Build exactly what was asked** — the smallest plugin that does it, with only the capabilities it needs. If something fails twice for an unclear reason, tell the user what you tried instead of exploring further.
+
 ## Workflow
 
 1. Pick a plugin id: lowercase letters, digits, `-`, `_`, starting with a letter or digit. It is also the folder name. Check that the folder doesn't exist yet (`plugin_read` with only the id). Don't overwrite another plugin unless the user asks.
@@ -35,6 +44,21 @@ More capabilities (each is approved by the user; use them only when the task nee
 - `dshr:config:*`, `dshr:skills`, `dshr:sessions:*`, `dshr:mcp`: `host.dshr.config / skills / sessions / mcp`.
 - `plugins:install`: `host.plugins.list / install({ url }) / uninstall / setEnabled` (the user confirms every install).
 - `background` also allows `services: [{ id, run: async (host) => {} }]` (long-running, restarted on failure, separate module state).
+
+## Color schemes
+
+A color scheme needs no capability and no other code:
+
+```js
+export const themes = [{
+  id: "pink",
+  name: "Pink",
+  light: { accent: "#D63384", accent_soft: "#FCE4EF", selected: "#FBE3EE" },
+  dark: { accent: "#F08CBF", accent_soft: "#4A1F33", surface: "#1E1418", text: "#F7E6EE" },
+}];
+```
+
+Keys (all optional, each `#rrggbb`): `text`, `text_secondary`, `surface`, `raised` (popups, menus), `sidebar`, `sunken` (panels, tool output), `selected`, `border`, `accent`, `accent_soft`, `on_accent`, `success`, `warning`, `danger`, `focus_ring`. Unknown keys, malformed colors, or `text` on `surface` below 4.5:1 contrast reject the whole scheme. The user picks it in Settings → General → Color scheme, listed as `<plugin id>/<theme id>`; `plugin_reload` lists the schemes it found. If a scheme is rejected, the reason appears under the color scheme setting — so check the keys and contrast before you write it.
 
 Without capabilities: `fetch(url, { stream: true })` (`body` async iterator, `events()` for SSE), `host.websocket(url)` (needs `net:`), tools may return `{ content, images: [{ data, mediaType }] }`, and exports `presets`, `commands`, `slash`, `themes`. New nodes: `chart`, `heatmap`, `calendar`, `kv`, `image`.
 
