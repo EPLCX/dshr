@@ -34,6 +34,11 @@ const MAX_GLOB_RESULTS: usize = 5000;
 const MAX_GREP_RESULTS: usize = 1000;
 /// `exec` 的 stdout、stderr 各自最多留这么多字节。
 const MAX_EXEC_OUTPUT: usize = 1024 * 1024;
+
+/// `CREATE_NO_WINDOW`：子进程不创建控制台窗口（`exec` 和 `spawn` 共用）。
+#[cfg(windows)]
+pub(super) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// 一次调用里最多发几次模型请求。
 const MAX_LLM_REQUESTS: u32 = 8;
 /// `host.session.events` 最多返回多少条、合计多大。
@@ -938,6 +943,9 @@ impl State {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            // 桌面版没有控制台：不加这个标志，插件每启动一次程序（如 powershell）都会弹出一个控制台窗口。
+            #[cfg(windows)]
+            process.creation_flags(CREATE_NO_WINDOW);
             let mut child = process.spawn().map_err(|error| format!("cannot start {}: {error}", command.script))?;
             if let (Some(input), Some(mut stdin)) = (options.stdin, child.stdin.take()) {
                 stdin.write_all(input.as_bytes()).await.map_err(|error| format!("cannot write to stdin: {error}"))?;

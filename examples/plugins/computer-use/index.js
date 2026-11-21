@@ -200,16 +200,23 @@ async function perform(input, host) {
     }
   }
 
-  await backend(platform).run(host, ops);
-
+  const impl = backend(platform);
   const wantShot = input.screenshot ?? settings.autoScreenshot;
+  if (wantShot && impl.runThenScreenshot) {
+    // Windows：动作、等待、截图在同一个 PowerShell 进程里做完，每次操作只启动一次 PowerShell。
+    return recordShot(await impl.runThenScreenshot(host, ops, settings), platform, summary);
+  }
+  await impl.run(host, ops);
   if (!wantShot) return summary;
   await sleep(settings.settleMs);
   return await screenshotResult(host, platform, settings, summary);
 }
 
 async function screenshotResult(host, platform, settings, summary) {
-  const shot = await backend(platform).screenshot(host, settings);
+  return recordShot(await backend(platform).screenshot(host, settings), platform, summary);
+}
+
+function recordShot(shot, platform, summary) {
   geometry = {
     imageWidth: shot.imageWidth,
     imageHeight: shot.imageHeight,
@@ -450,7 +457,6 @@ foreach ($o in $P.ops) {
     'sleep' { Start-Sleep -Milliseconds ([int]$o.ms) }
   }
 }
-Emit @{ ok = $true }
 `;
 
 const WIN_CURSOR = `
@@ -469,13 +475,25 @@ async function powershell(host, body, params) {
   return parseJsonTail(out);
 }
 
+function winOps(ops) {
+  return ops.map((op) => (op.op === "keydown" || op.op === "keyup") ? { op: op.op, vk: winVk(op.key) } : op);
+}
+
 const windows = {
   async screenshot(host, settings) {
     return await powershell(host, WIN_SCREENSHOT, { maxWidth: settings.maxWidth, quality: settings.quality });
   },
   async run(host, ops) {
-    const mapped = ops.map((op) => (op.op === "keydown" || op.op === "keyup") ? { op: op.op, vk: winVk(op.key) } : op);
-    await powershell(host, WIN_RUN, { ops: mapped });
+    const mapped = winOps(ops);
+    await powershell(host, WIN_RUN + "Emit @{ ok = $true }\n", { ops: mapped });
+  },
+  async runThenScreenshot(host, ops, settings) {
+    return await powershell(host, `${WIN_RUN}Start-Sleep -Milliseconds ([int]$P.settleMs)\n${WIN_SCREENSHOT}`, {
+      ops: winOps(ops),
+      settleMs: settings.settleMs,
+      maxWidth: settings.maxWidth,
+      quality: settings.quality,
+    });
   },
   async cursor(host) {
     const { x, y } = await powershell(host, WIN_CURSOR, {});
