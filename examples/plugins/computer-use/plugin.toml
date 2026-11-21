@@ -1,0 +1,56 @@
+id = "computer-use"
+name = "电脑操作"
+version = "0.1.0"
+description = "让 agent 看屏幕、动鼠标、敲键盘：截屏、点击、拖动、滚动、输入文字、按快捷键"
+
+# 只启动下面这些系统自带（或常见）的程序，不联网、不读写工作区。
+#   Windows：powershell（截屏用 System.Drawing，鼠标键盘用 user32 的 SendInput）
+#   macOS：  screencapture、sips、base64、osascript（JXA 调 CoreGraphics 发鼠标键盘事件）
+#   Linux：  xdotool、import（ImageMagick）、base64，只支持 X11
+#   uname：  判断当前系统
+capabilities = [
+  "exec:powershell",
+  "exec:screencapture",
+  "exec:sips",
+  "exec:osascript",
+  "exec:xdotool",
+  "exec:import",
+  "exec:base64",
+  "exec:uname",
+]
+timeout_ms = 60000
+
+[engines]
+dshr = ">=0.1"
+
+[config.properties.max_width]
+type = "integer"
+default = 1280
+minimum = 640
+maximum = 1920
+description = "截图缩放到的最大宽度（像素）。越大越清楚，也越费 token"
+
+[config.properties.quality]
+type = "integer"
+default = 70
+minimum = 30
+maximum = 95
+description = "截图的 JPEG 质量"
+
+[config.properties.auto_screenshot]
+type = "boolean"
+default = true
+description = "每次操作后自动截一张图交给模型，方便它确认结果"
+
+[config.properties.settle_ms]
+type = "integer"
+default = 600
+minimum = 0
+maximum = 5000
+description = "操作后等多少毫秒再自动截图（等界面动画、页面加载）"
+
+[config.properties.platform]
+type = "string"
+default = "auto"
+enum = ["auto", "windows", "macos", "linux"]
+description = "当前系统；auto 时自动判断"
