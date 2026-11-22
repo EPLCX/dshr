@@ -534,8 +534,13 @@ impl Backend {
 
     /// 默认模型（新会话用的那个）：插件在页面动作、命令里调用 `host.llm` 时用。连不上（没有 Key）时是 `None`。
     pub fn default_llm(&self) -> Option<dshr_agent::LlmAccess> {
+        let model = self.config().default_model()?;
+        self.llm_for(&model)
+    }
+
+    /// 连上 `provider/model`（插件的 `host.llm.complete` 指定别的模型时用）。提供商没配置、没有 Key 时是 `None`。
+    pub fn llm_for(&self, model: &dshr_config::ModelRef) -> Option<dshr_agent::LlmAccess> {
         let config = self.config();
-        let model = config.default_model()?;
         let mut resolved = config.provider(&model.provider)?;
         // 账号登录的令牌是推理凭据，放在 x-dsh-auth-token 头里（原版行为）；没有账号时退回 API Key。
         let key = self
@@ -545,7 +550,7 @@ impl Backend {
             })
             .or_else(|| self.api_key(&resolved));
         let provider = dshr_llm::connect(&self.plugins.snapshot(), &self.http, &resolved, key).ok()?;
-        Some(dshr_agent::LlmAccess { provider, model: model.model })
+        Some(dshr_agent::LlmAccess { provider, model: model.model.clone() })
     }
 
     /// 能选的配色方案：内置的高对比度、数据目录 `themes/` 里的（`<id>.toml`：`name`、`[light]`、`[dark]`），加上插件带的。

@@ -138,6 +138,8 @@ impl InstallAnswer {
 }
 
 pub type LlmSource = Arc<dyn Fn() -> Option<LlmAccess> + Send + Sync>;
+/// 按 `provider/model` 连上一个模型（`host.llm.complete` 的 `model` 选项）；提供商没配置、没有 Key 时是 `None`。
+pub type ModelResolver = Arc<dyn Fn(&str) -> Option<LlmAccess> + Send + Sync>;
 pub type Notifier = Arc<dyn Fn(&Notification) + Send + Sync>;
 /// 问用户要不要装：阻塞地等用户回答。
 pub type InstallPrompt = Arc<dyn Fn(&InstallRequest) -> InstallAnswer + Send + Sync>;
@@ -148,6 +150,8 @@ pub type UrlOpener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 pub struct AppServices {
     /// 当前的模型（默认模型）：没有会话的地方（页面动作、命令）调 `host.llm` 时用。
     pub llm: Option<LlmSource>,
+    /// 按名字连上任意已配置的模型：插件指定别的提供商的模型时用。
+    pub models: Option<ModelResolver>,
     pub session: Option<Arc<dyn SessionControl>>,
     pub composer: Option<Arc<dyn ComposerAccess>>,
     pub notifier: Option<Notifier>,

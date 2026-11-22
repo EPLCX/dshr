@@ -566,7 +566,8 @@ async fn headless(paths: &Paths, prompt: String, options: RunOptions) -> anyhow:
     let api_key = resolve_api_key(&provider).map(|(key, _)| key);
     let plugins = plugins(&config, paths)?;
     let http = dshr_llm::HttpClient::default();
-    let llm = dshr_llm::connect(&plugins.snapshot(), &http, &provider, api_key).with_context(|| match provider.env_key {
+    let plugins_snapshot = plugins.snapshot();
+    let llm = dshr_llm::connect(&plugins_snapshot, &http, &provider, api_key).with_context(|| match provider.env_key {
         Some(env) => format!("{} 未配置 API Key：在桌面版设置里保存，或设置环境变量 {env}", provider.name),
         None => format!("无法连接 {}", provider.name),
     })?;
@@ -632,6 +633,15 @@ async fn headless(paths: &Paths, prompt: String, options: RunOptions) -> anyhow:
         services.open_url = Some(Arc::new(|url: &str| {
             eprintln!("\n[请在浏览器里打开] {url}");
             Ok(())
+        }));
+        // 插件的 `host.llm.complete` 指定别的模型时：按配置连上那个提供商。
+        let (config, snapshot, http) = (config.clone(), plugins_snapshot.clone(), http.clone());
+        services.models = Some(Arc::new(move |spec: &str| {
+            let reference = ModelRef::parse(spec)?;
+            let provider = config.provider(&reference.provider)?;
+            let api_key = resolve_api_key(&provider).map(|(key, _)| key);
+            let llm = dshr_llm::connect(&snapshot, &http, &provider, api_key).ok()?;
+            Some(dshr_agent::LlmAccess { provider: llm, model: reference.model })
         }));
     });
 

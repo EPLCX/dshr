@@ -119,6 +119,8 @@ description = "最多统计多少个字符"
 **执行模型**
 
 - 同一个插件的调用**一次只执行一个**；模块级变量在两次调用之间保留，直到插件重新加载。
+- 工具、所有钩子（同步的 `beforeTool` / `beforeWrite` / `beforeRequest` 和异步的 `afterTool` 等）、页面、命令都跑在**同一个运行时**里，
+  模块变量彼此共享：同步钩子里攒的东西，异步钩子里直接读得到。只有常驻服务在单独的运行时里。
 - 一次调用里，等待宿主的操作（`fetch`、`exec`、`llm.complete`……）可以用 `Promise.all` 并发。
 - 定时器、没完成的 `fetch` / `exec` / `llm` 随发起它们的那次调用一起结束。
 - 限额：64 MB 内存、512 KB 栈，顶层代码 2 秒内执行完；每次工具调用有自己的时限。连续 3 次失控（超时或内存耗尽），
@@ -157,7 +159,7 @@ export const tools = [{
 | `fs:workspace:write` | 写工作区的文件 |
 | `net:<主机>` | `host.fetch` / `host.websocket` 访问这个主机；`*.example.com` 是子域，`*` 是任何主机（都不含 localhost 和 IP） |
 | `exec:<程序>` | `host.exec` / `host.spawn` 启动这个程序（`git`、`npm`），`*` 是任何程序 |
-| `llm` | `host.llm.complete` 用当前会话的模型发一次性请求（花的是用户的 token） |
+| `llm` | `host.llm.complete` 发一次性请求：默认用当前会话的模型，也可以指定别的已配置模型和思考等级（花的是用户的 token） |
 | `session:read` | 读当前会话的事件 |
 | `hooks:gate` / `hooks:review` / `hooks:tool-output` / `hooks:write` | 钩子里放行工具调用 / 在询问用户前审查 / 改写工具结果 / 改写要写入的内容 |
 | `context:compact` / `context:rewrite` | 压缩上下文 / 改写发给模型的消息 |
@@ -166,7 +168,8 @@ export const tools = [{
 | `session:control`、`agent:run`、`notify`、`oauth`、`provider` | 代发消息、启动子代理、桌面通知、浏览器登录第三方账号、提供模型服务商 |
 | `dshr:config:read/write`、`dshr:skills`、`dshr:sessions:read/write`、`dshr:mcp`、`plugins:install` | 读写 dshr 自己的设置、Skills、会话、MCP 服务器，安装插件 |
 
-不需要任何能力的：纯计算、读写自己的数据目录（`host.readData` / `writeData`）、写会话事件、渲染页面、提示词、预设、命令、配色。
+不需要任何能力的：纯计算、读写自己的数据目录（`host.readData` / `writeData` / `appendData`）和数据库（`host.db`）、zip 打包解包、
+写会话事件、结束本轮、渲染页面、提示词、预设、命令、配色。
 完整说明见 [插件 API 参考 · 能力](plugin-api.md#能力)。
 
 ### 配置与密钥
@@ -210,7 +213,17 @@ items.push(item);
 await host.writeData("items.json", JSON.stringify(items));
 ```
 
-单个文件不超过 2 MB，总共不超过 64 MB。`readFile` / `writeFile`（以及 `fs:` 能力）只用来处理工作区里**用户的项目文件**。
+单个文件不超过 16 MB，总共不超过 512 MB。日志、记录这类只往后加的数据用 `host.appendData(path, text)`，不用先读出整个文件。
+要查询、更新、按条裁剪的记录，用数据目录里的 SQLite 数据库 `host.db`：
+
+```js
+await host.db.exec("CREATE TABLE IF NOT EXISTS changes (id INTEGER PRIMARY KEY, path TEXT, at INTEGER)");
+await host.db.exec("INSERT INTO changes (path, at) VALUES (?, ?)", [path, Date.now()]);
+const latest = await host.db.query("SELECT path FROM changes ORDER BY id DESC LIMIT 50");
+```
+
+数据目录和数据库在任何场合都能用，包括同步钩子。`readFile` / `writeFile`（以及 `fs:` 能力）只用来处理工作区里**用户的项目文件**。
+要生成 docx、xlsx、epub 这类 zip 容器的文档，用 `host.zip` / `host.unzip`（见 [插件 API 参考 · zip](plugin-api.md#zip)）。
 
 ### 系统提示词与会话事件
 
@@ -239,6 +252,7 @@ export const events = {
 ### 钩子
 
 `hooks` 导出把函数挂在 agent 循环上。返回 `undefined` 表示“没有意见”；超时、抛异常也都当作没有意见，记进插件日志，对话照常进行。
+每个钩子的第二个参数都是 `host`；参数里都有 `session`（顶层会话 id）和 `agent`（`"main"` 或子代理名），按会话、按代理区分状态时用它们做键。
 
 ```js
 export const hooks = {
@@ -265,12 +279,17 @@ export const hooks = {
 | `beforeWrite` | `write_file` / `edit_file` 写盘前 | 同步，1 秒 | 拒绝；改写内容（`hooks:write`） |
 | `turnStarted` | 用户消息写进日志前 | 5 秒 | 拦下这条消息、补事件 |
 | `beforeStep` | 每一步请求模型前 | 异步 | 写事件；压缩上下文（`context:compact`） |
-| `beforeRequest` | 构造请求时 | 同步，300 ms | 往系统提示词后追加文字；换模型和思考等级（`model:route`） |
+| `beforeRequest` | 构造请求时 | 同步，300 ms | 往系统提示词后追加文字、往消息末尾补一段 user 文本；换模型和思考等级（`model:route`） |
 | `transformRequest` | 发出请求前 | 5 秒 | 改写系统提示词和消息（`context:rewrite`） |
 | `turnEnded` | 一轮结束后 | 异步 | 写事件、写数据、联网、调模型 |
 
+“同步”是说 agent 循环在原地等它（最多等表里的时间），钩子本身照样可以 `async`、`await` 读写数据目录和 `host.db`。
+
 钩子**不能写工作区、不能启动程序**——这些操作要经过权限把关，而钩子不在把关的范围里。各钩子的参数和返回值见
 [插件 API 参考 · hooks](plugin-api.md#hooks)。
+
+**结束本轮**：工具或 `afterTool` 钩子里调用 `host.session.endTurn()`，这一步的工具调用执行完后本轮就结束，不再请求模型——
+适合“工具已经给出最终结果、模型不必再说话”的场合。
 
 ### 订阅会话事件
 
@@ -536,7 +555,8 @@ env = { TOKEN = "${secret:SEARCH_TOKEN}", CACHE_DIR = "${data}/cache" }
 | 工具调用 | 默认 30 秒（`timeout_ms`） |
 | `prompt` | 1 秒，结果最多 32 KB |
 | 同步钩子（`beforeTool`、`beforeRequest`） | 300 ms |
-| 读写工作区文件、数据文件 | 单个 2 MB；数据目录共 64 MB |
+| 读写工作区文件 | 单个 2 MB |
+| 数据目录 | 单个文件 16 MB，共 512 MB（含数据库；单个数据库 256 MB） |
 | `fetch` 请求 / 响应体 | 各 2 MB（`stream: true` 时逐块读取）；WebSocket 单条消息 4 MB |
 | `llm.complete` | 每次调用最多 8 次 |
 | 页面节点 | 最多 1000 个，嵌套 16 层 |

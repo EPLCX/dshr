@@ -3,7 +3,7 @@
 dshr 本身以 MIT 许可发布，见 [LICENSE](LICENSE)。dshr 的桌面版与命令行版包含下列第三方组件，
 它们各自的版权归原作者所有，按各自的许可证使用。可选双许可（如 `MIT OR Apache-2.0`）的组件，本项目按其中任一许可使用。
 
-统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 555 个 crate；
+统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 559 个 crate；
 dev / build 依赖不进最终程序，不列入。
 
 ## 参照项目
@@ -18,6 +18,7 @@ dev / build 依赖不进最终程序，不列入。
 | 组件 | 随 crate | 许可证 | 用途 |
 |---|---|---|---|
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | `rquickjs-sys` 0.14.0 | MIT | JS 插件引擎，C 源码随 crate 编译进程序 |
+| [SQLite](https://sqlite.org/copyright.html) | `libsqlite3-sys` 0.40.0 | Public Domain | 插件的数据库（`host.db`），C 源码随 crate 编译进程序 |
 | [Zstandard](https://github.com/facebook/zstd) | `zstd-sys` 2.1.3+zstd.1.5.7 | BSD-3-Clause | 会话日志的 zstd 压缩，C 源码编译进程序；上游为 BSD / GPLv2 双许可，本项目按 BSD 使用 |
 | [AWS-LC](https://github.com/aws/aws-lc) | `aws-lc-sys` 0.47.0 | ISC、Apache-2.0、OpenSSL 等 | TLS 加密库（经 rustls），C 源码编译进程序；含源自 BoringSSL / OpenSSL 的代码，各部分的许可见下文全文 |
 | [Lucide 图标](https://lucide.dev) | `gpui-kit-assets` 0.9.1 | ISC | 界面图标（SVG）嵌入程序 |
@@ -143,6 +144,8 @@ dev / build 依赖不进最终程序，不列入。
 | [event-listener-strategy](https://github.com/smol-rs/event-listener-strategy) | 0.5.4 | Apache-2.0 OR MIT |
 | [eventsource-stream](https://github.com/jpopesculian/eventsource-stream) | 0.2.3 | MIT OR Apache-2.0 |
 | [exr](https://github.com/johannesvollmer/exrs) | 1.74.3 | BSD-3-Clause |
+| [fallible-iterator](https://github.com/sfackler/rust-fallible-iterator) | 0.3.0 | MIT/Apache-2.0 |
+| [fallible-streaming-iterator](https://github.com/sfackler/fallible-streaming-iterator) | 0.1.9 | MIT/Apache-2.0 |
 | [fastrand](https://github.com/smol-rs/fastrand) | 2.5.0 | Apache-2.0 OR MIT |
 | [fax](https://github.com/pdf-rs/fax) | 0.2.7 | MIT |
 | [fdeflate](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 |
@@ -256,6 +259,7 @@ dev / build 依赖不进最终程序，不列入。
 | [lebe](https://github.com/johannesvollmer/lebe) | 0.5.3 | BSD-3-Clause |
 | [libc](https://github.com/rust-lang/libc) | 0.2.191 | MIT OR Apache-2.0 |
 | [libm](https://github.com/rust-lang/compiler-builtins) | 0.2.16 | MIT |
+| [libsqlite3-sys](https://github.com/rusqlite/rusqlite) | 0.40.0 | MIT |
 | [link-section](https://github.com/mmastrac/linktime) | 0.19.3 | Apache-2.0 OR MIT |
 | [linktime-proc-macro](https://github.com/mmastrac/linktime) | 0.2.3 | Apache-2.0 OR MIT |
 | [litemap](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 |
@@ -380,6 +384,7 @@ dev / build 依赖不进最终程序，不列入。
 | [rust-embed](https://pyrossh.dev/repos/rust-embed) | 8.14.0 | MIT |
 | [rust-embed-impl](https://pyrossh.dev/repos/rust-embed) | 8.14.0 | MIT |
 | [rust-embed-utils](https://pyrossh.dev/repos/rust-embed) | 8.14.0 | MIT |
+| [rusqlite](https://github.com/rusqlite/rusqlite) | 0.43.0 | MIT |
 | [rust-i18n](https://github.com/longbridge/rust-i18n) | 4.2.4 | MIT |
 | [rust-i18n-macro](https://github.com/longbridge/rust-i18n) | 4.2.4 | MIT |
 | [rust-i18n-support](https://github.com/longbridge/rust-i18n) | 4.2.4 | MIT |

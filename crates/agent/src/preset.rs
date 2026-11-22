@@ -155,7 +155,7 @@ impl Plugin for PresetsPlugin {
     fn apply(&self, cx: &mut Scope) -> anyhow::Result<()> {
         cx.hook::<BeforeRequest>(
             0,
-            Arc::new(|request: &mut ChatRequest, config: &AgentConfig| {
+            Arc::new(|request: &mut ChatRequest, config: &AgentConfig, _: &dshr_tools::ToolContext| {
                 if let Some(extra) = instructions(&config.options) {
                     request.system = Some(match request.system.take() {
                         Some(system) => format!("{system}\n\n{extra}"),

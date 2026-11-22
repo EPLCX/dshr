@@ -25,8 +25,10 @@ use super::net::Net;
 use super::ops::Ops;
 use crate::manifest::Capabilities;
 
-/// 一次能读、能写的文件大小上限。
+/// 一次能读、能写的工作区文件大小上限。
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// 插件数据目录里单个文件的上限（`readData` / `writeData` / `appendData`）。
+pub(super) const MAX_DATA_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// 一次最多列出的目录项。
 const MAX_DIR_ENTRIES: usize = 2000;
 /// `glob` 最多返回的路径数、`grep` 最多返回的匹配行数。
@@ -116,7 +118,9 @@ pub(crate) struct State {
     /// 这次运行里交给过脚本的密钥值：日志里出现时换成 `***`。
     revealed: RefCell<Vec<String>>,
     /// 插件自己的数据目录（`<数据目录>/plugin-data/<id>/`）：`host.readData` / `writeData` 读写这里，不需要能力。
-    data_dir: PathBuf,
+    pub(super) data_dir: PathBuf,
+    /// 打开着的 SQLite 数据库（`host.db`），按文件名。
+    pub(super) databases: RefCell<std::collections::HashMap<String, rusqlite::Connection>>,
     call: RefCell<Option<Call>>,
     /// 当前这段执行的最后期限；到了就打断脚本。
     deadline: Cell<Option<Instant>>,
@@ -167,6 +171,7 @@ impl State {
         Self {
             plugin,
             data_dir,
+            databases: RefCell::new(std::collections::HashMap::new()),
             logs: LogBuffer::of(plugin),
             capabilities,
             secrets,
@@ -508,6 +513,11 @@ impl State {
         *self.cancelled.borrow_mut() = None;
     }
 
+    /// 这段执行的最后期限和取消标记：SQLite 这类在宿主里跑的长操作据此自己停下。
+    pub(super) fn interrupt_handle(&self) -> (Option<Instant>, Option<Arc<AtomicBool>>) {
+        (self.deadline.get(), self.cancelled.borrow().clone())
+    }
+
     /// 这段执行还剩多久。
     pub fn remaining(&self) -> Duration {
         self.deadline.get().map_or(Duration::ZERO, |deadline| deadline.saturating_duration_since(Instant::now()))
@@ -521,6 +531,8 @@ impl State {
     }
 
     pub fn end_call(&self) {
+        // 这次调用开了事务却没提交（忘了、抛异常、超时）：回滚，不留给下一次调用。
+        self.rollback_open_transactions();
         *self.call.borrow_mut() = None;
         self.pending_streams.borrow_mut().clear();
         self.pending_sockets.borrow_mut().clear();
@@ -767,6 +779,20 @@ impl State {
         })
     }
 
+    /// 接在工作区文件末尾（没有时新建）。
+    fn append_file(&self, path: &str, text: &str) -> Result<(), String> {
+        self.with_write(|call| {
+            if text.len() as u64 > MAX_FILE_BYTES {
+                return Err(format!("the content is too large to append ({} bytes, the limit is {MAX_FILE_BYTES})", text.len()));
+            }
+            let resolved = confine(&call.ctx, path)?;
+            if let Some(parent) = resolved.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| format!("cannot write {path}: {error}"))?;
+            }
+            append_to(&resolved, text.as_bytes()).map_err(|error| format!("cannot write {path}: {error}"))
+        })
+    }
+
     fn write_file_bytes(&self, path: &str, encoded: &str) -> Result<(), String> {
         let bytes = decode_base64(encoded)?;
         self.write_bytes(path, &bytes)
@@ -817,8 +843,8 @@ impl State {
         match std::fs::metadata(&resolved) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(format!("cannot read data {path}: {error}")),
-            Ok(metadata) if metadata.len() > MAX_FILE_BYTES => {
-                return Err(format!("data {path} is too large to read ({} bytes, the limit is {MAX_FILE_BYTES})", metadata.len()));
+            Ok(metadata) if metadata.len() > MAX_DATA_FILE_BYTES => {
+                return Err(format!("data {path} is too large to read ({} bytes, the limit is {MAX_DATA_FILE_BYTES})", metadata.len()));
             }
             Ok(_) => {}
         }
@@ -826,8 +852,8 @@ impl State {
     }
 
     fn write_data(&self, path: &str, text: &str) -> Result<(), String> {
-        if text.len() as u64 > MAX_FILE_BYTES {
-            return Err(format!("the data is too large to write ({} bytes, the limit is {MAX_FILE_BYTES})", text.len()));
+        if text.len() as u64 > MAX_DATA_FILE_BYTES {
+            return Err(format!("the data is too large to write ({} bytes, the limit is {MAX_DATA_FILE_BYTES})", text.len()));
         }
         let resolved = confine_data(&self.data_dir, path)?;
         let existing = std::fs::metadata(&resolved).map(|metadata| metadata.len()).unwrap_or(0);
@@ -839,6 +865,24 @@ impl State {
             std::fs::create_dir_all(parent).map_err(|error| format!("cannot write data {path}: {error}"))?;
         }
         std::fs::write(&resolved, text).map_err(|error| format!("cannot write data {path}: {error}"))
+    }
+
+    /// 接在数据文件末尾（没有时新建）：日志、JSONL 记录不用先读出整个文件。
+    fn append_data(&self, path: &str, text: &str) -> Result<(), String> {
+        let resolved = confine_data(&self.data_dir, path)?;
+        let existing = std::fs::metadata(&resolved).map(|metadata| metadata.len()).unwrap_or(0);
+        if existing + text.len() as u64 > MAX_DATA_FILE_BYTES {
+            return Err(format!(
+                "data {path} would grow past {MAX_DATA_FILE_BYTES} bytes; start a new file, trim it with writeData, or use host.db"
+            ));
+        }
+        if folder_size(&self.data_dir) + text.len() as u64 > MAX_DATA_BYTES {
+            return Err(format!("the plugin's data folder would exceed {} MB", MAX_DATA_BYTES / 1024 / 1024));
+        }
+        if let Some(parent) = resolved.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| format!("cannot write data {path}: {error}"))?;
+        }
+        append_to(&resolved, text.as_bytes()).map_err(|error| format!("cannot write data {path}: {error}"))
     }
 
     /// 删除数据目录里的一个文件；不存在时什么也不做。
@@ -938,6 +982,7 @@ impl State {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            hide_window(&mut process);
             let mut child = process.spawn().map_err(|error| format!("cannot start {}: {error}", command.script))?;
             if let (Some(input), Some(mut stdin)) = (options.stdin, child.stdin.take()) {
                 stdin.write_all(input.as_bytes()).await.map_err(|error| format!("cannot write to stdin: {error}"))?;
@@ -956,7 +1001,8 @@ impl State {
         self.ops.start(work, remaining)
     }
 
-    /// 用当前会话的模型发一次不带工具的请求，返回文本。
+    /// 发一次不带工具的请求，返回文本。默认用当前会话的模型；`model` 换模型（`provider/model` 换提供商，
+    /// 只写模型名时沿用当前提供商），`effort` 指定思考等级。
     fn llm(&self, request: &str) -> Result<u64, String> {
         #[derive(Deserialize)]
         struct Turn {
@@ -970,6 +1016,8 @@ impl State {
             prompt: Option<String>,
             messages: Vec<Turn>,
             max_tokens: Option<u32>,
+            model: Option<String>,
+            effort: Option<String>,
         }
         if !self.capabilities.llm {
             return Err("this plugin does not declare the `llm` capability in plugin.toml".into());
@@ -984,6 +1032,27 @@ impl State {
         if self.llm_requests.get() >= MAX_LLM_REQUESTS {
             return Err(format!("at most {MAX_LLM_REQUESTS} model requests per call"));
         }
+        let access = match request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()) {
+            None => access,
+            // 只写模型名：同一个提供商。
+            Some(model) if !model.contains('/') => LlmAccess { provider: access.provider, model: model.to_owned() },
+            Some(spec) => {
+                let resolve = crate::app::app_services()
+                    .models
+                    .ok_or_else(|| format!("this program cannot switch to another provider's model ({spec})"))?;
+                resolve(spec)
+                    .ok_or_else(|| format!("the model {spec} is not available: the provider is not configured, or it has no API key"))?
+            }
+        };
+        let effort = match request.effort.as_deref() {
+            None => None,
+            Some(effort) => Some(
+                dshr_llm::ReasoningEffort::ALL
+                    .into_iter()
+                    .find(|known| known.as_str() == effort)
+                    .ok_or_else(|| format!("unknown effort {effort} (use off, low, high or max)"))?,
+            ),
+        };
         let mut messages = Vec::new();
         for turn in request.messages {
             let role = match turn.role.as_str() {
@@ -1006,7 +1075,7 @@ impl State {
             messages,
             tools: Vec::new(),
             max_tokens: Some(request.max_tokens.unwrap_or(4096).min(32_000)),
-            effort: None,
+            effort,
         };
         let work = async move {
             use futures::StreamExt as _;
@@ -1320,11 +1389,25 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// 一个插件的数据目录最多这么大。
-const MAX_DATA_BYTES: u64 = 64 * 1024 * 1024;
+/// 一个插件的数据目录最多这么大（含 `host.db` 的数据库文件）。
+pub(super) const MAX_DATA_BYTES: u64 = 512 * 1024 * 1024;
+
+fn append_to(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    std::fs::OpenOptions::new().create(true).append(true).open(path)?.write_all(bytes)
+}
+
+/// 子进程不创建控制台窗口（Windows 的 `CREATE_NO_WINDOW`）。桌面版没有控制台，不加这个标志
+/// 插件每启动一个命令行程序（git、ssh……）都会弹出一个黑色的控制台窗口。
+pub(super) fn hide_window(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    #[cfg(not(windows))]
+    let _ = command;
+}
 
 /// 数据目录里的相对路径；`..`、绝对路径一律拒绝。数据目录是宿主建的，里面没有指到外面的链接。
-fn confine_data(dir: &Path, path: &str) -> Result<PathBuf, String> {
+pub(super) fn confine_data(dir: &Path, path: &str) -> Result<PathBuf, String> {
     let relative = Path::new(path);
     let plain = !path.is_empty() && relative.components().all(|part| matches!(part, std::path::Component::Normal(_)));
     if !plain {
@@ -1333,7 +1416,7 @@ fn confine_data(dir: &Path, path: &str) -> Result<PathBuf, String> {
     Ok(dir.join(relative))
 }
 
-fn folder_size(dir: &Path) -> u64 {
+pub(super) fn folder_size(dir: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     entries
         .flatten()
@@ -1457,7 +1540,16 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
     native!("rename", |host, from: String, to: String| host.rename(&from, &to));
     native!("readData", |host, path: String| host.read_data(&path));
     native!("writeData", |host, path: String, text: String| host.write_data(&path, &text));
+    native!("appendData", |host, path: String, text: String| host.append_data(&path, &text));
+    native!("appendFile", |host, path: String, text: String| host.append_file(&path, &text));
     native!("removeData", |host, path: String| host.remove_data(&path));
+    native!("dbExec", |host, name: String, sql: String, params: String| host.db_exec(&name, &sql, &params));
+    native!("dbQuery", |host, name: String, sql: String, params: String| host.db_query(&name, &sql, &params));
+    native!("dbClose", |host, name: String| host.db_close(&name));
+    native!("zip", |_host, entries: String| super::storage::zip(&entries));
+    native!("unzip", |_host, encoded: String| super::storage::unzip(&encoded));
+    native!("endTurn", |host| host.end_turn());
+    native!("identity", |host| plain host.identity());
     native!("listData", |host| plain host.list_data());
     // 慢操作：返回操作编号（JS 的 number 能精确表示）。
     native!("fetch", |host, url: String, options: String| host.fetch(&url, &options).map(|id| id as f64));

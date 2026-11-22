@@ -18,6 +18,8 @@ $targets = 'x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwi
 $bundled = [ordered]@{
     'rquickjs-sys'        = @('QuickJS-ng', 'https://github.com/quickjs-ng/quickjs', 'MIT',
                               'JS 插件引擎，C 源码随 crate 编译进程序')
+    'libsqlite3-sys'      = @('SQLite', 'https://sqlite.org/copyright.html', 'Public Domain',
+                              '插件的数据库（`host.db`），C 源码随 crate 编译进程序')
     'zstd-sys'            = @('Zstandard', 'https://github.com/facebook/zstd', 'BSD-3-Clause',
                               '会话日志的 zstd 压缩，C 源码编译进程序；上游为 BSD / GPLv2 双许可，本项目按 BSD 使用')
     'aws-lc-sys'          = @('AWS-LC', 'https://github.com/aws/aws-lc', 'ISC、Apache-2.0、OpenSSL 等',

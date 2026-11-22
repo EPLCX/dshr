@@ -20,12 +20,12 @@ The deliverable is a plugin in the plugins folder, written with `plugin_write` a
 5. If the manifest declares capabilities, first tell the user in plain words what each one allows and why the plugin needs it. Then call `plugin_grant`. The user approves or refuses in the app; you cannot approve it yourself. A plugin with unapproved capabilities doesn't start at all. Exactly the capabilities you list are granted; if you change the manifest afterwards, new capabilities need another `plugin_grant`. Editing a plugin that already has approved capabilities asks the user every time (the changed code runs with them), so create new plugins under a new id instead of rewriting installed ones.
 6. Finish with a short summary: what the plugin does, its tools, its capabilities, and where it lives. It stays installed and hot-reloads when its files change.
 
-**Where to keep state**: the plugin's own data (todo items, notes, settings it remembers) goes in `host.readData` / `host.writeData`. These need no capability and point at the same folder for tools, pages, previews and settings tabs. Use `readFile` / `writeFile` (and the `fs:` capabilities) only for the user's project files in the open workspace.
+**Where to keep state**: the plugin's own data (todo items, notes, settings it remembers) goes in `host.readData` / `host.writeData` / `host.appendData`, or in a SQLite database with `host.db` for records you query, update or trim. These need no capability, work everywhere (sync hooks included) and point at the same folder for tools, pages, previews and settings tabs. Use `readFile` / `writeFile` (and the `fs:` capabilities) only for the user's project files in the open workspace.
 
 Ask for as few capabilities as possible. Prefer pure computation. Ask for `fs:workspace:read` only to read files, `fs:workspace:write` only to write files, and `net:<host>` only for the exact hosts you need. Avoid `net:*` and `exec:*`. The other capabilities:
 
 - `exec:<program>` (e.g. `exec:git`): run that program with `host.exec`. Name each program; tools that can run programs are gated like `run_shell`.
-- `llm`: one-off requests to the session's model with `host.llm.complete` (it spends the user's tokens; use it only when the task needs language understanding).
+- `llm`: one-off requests with `host.llm.complete` — the session's model by default, or `{ model: "provider/model", effort }` (it spends the user's tokens; use it only when the task needs language understanding).
 - `session:read`: read the current session's events with `host.session.events`.
 - `hooks:gate`: let `hooks.beforeTool` *allow* a tool call outright. Denying or asking needs nothing.
 - `hooks:tool-output`: let `hooks.afterTool` rewrite a tool's result.
@@ -37,7 +37,7 @@ More capabilities (each is approved by the user; use them only when the task nee
 - `agent:run`: `host.agent.run({ task, preset })` → the sub-agent's report.
 - `hooks:review`: `hooks.reviewTool({ tool, input, access }, host)` → `"allow"` / `"deny"` before the user would be asked.
 - `context:compact` / `context:rewrite`: `beforeStep` returns `{ compact: { summary, uptoSeq } }`; `hooks.transformRequest({ system, messages })` returns replacements.
-- `model:route`: `beforeRequest` returns `{ append, model, effort }`.
+- `model:route`: `beforeRequest` returns `{ append, user, model, effort }` (`append` and `user` need no capability, only `model` / `effort` do).
 - `provider`: export `providers: [{ id, name, protocol: "openai" | "messages", baseUrl, models, auth: async (host) => ({ apiKey, headers }) }]`.
 - `oauth`: `host.oauth.authorize({ authorizeUrl, tokenUrl, clientId, scopes, secret })`, then `host.oauth.token(secret)`.
 - `notify`: `host.notify({ title, body })`.
@@ -116,11 +116,14 @@ export const tools = [{
 //                                           // access = { type: "read" | "write" | "execute" | "external", path? }; ≤ 300 ms
 //   afterTool: ({ tool, input, output, isError }, host) => { /* emitEvent, writeData; return { output } needs hooks:tool-output */ },
 //   beforeStep: ({ turn, step }, host) => { /* host.emitEvent(...) */ },
-//   beforeRequest: ({ model, messages, tools }) => "text appended to this request's system prompt",   // ≤ 300 ms
+//   beforeRequest: async ({ model, messages, tools, session, agent }, host) => "text appended to this request's system prompt"
+//                  | { append, user: "text added after the last user message, this request only" },   // ≤ 300 ms
 //   turnEnded: ({ reason, finalText, error }, host) => { /* record, notify via fetch, ... */ },
 //   turnStarted: ({ turn, text, attachments }, host) => { /* host.emitEvent adds context */ return { block: "reason" } /* to stop it */ },
 //   beforeWrite: ({ tool, path, before, after }) => { decision: "deny", reason } | { content } (needs hooks:write),   // ≤ 1 s
 // };
+// Every hook payload has `session` (top-level session id) and `agent` ("main" or the sub-agent's name): key per-session state on them.
+// All hooks and tools share one runtime, so module variables are shared too; sync hooks may be async and await readData/writeData/db.
 // Optional. Session events as they are written (async; can't write files, run programs or call the model):
 // export const on = { "tool/result": async ({ type, session, seq, data }, host) => {}, "my-plugin/*": () => {} };
 // Events outside the plugin's own namespace need the dshr:sessions:read capability.
@@ -153,9 +156,11 @@ export const tools = [{
 | `log(...)`, `console.log/warn/error` | — | goes to the plugin log (shown by `plugin_reload`) |
 | `output(text)` | — | live output while the tool runs |
 | `emitEvent(kind, data)` | — | `kind` must start with `<id>/` |
-| `readData(path)`, `writeData(path, text)` | — | the plugin's **own** data folder, always the same place; `readData` gives `null` for a missing file; ≤ 2 MB per file, 64 MB in all |
+| `readData(path)`, `writeData(path, text)`, `appendData(path, text)` | — | the plugin's **own** data folder, always the same place, everywhere (sync hooks too); `readData` gives `null` for a missing file; ≤ 16 MB per file, 512 MB in all |
+| `db.exec(sql, params)`, `db.query(sql, params)`, `db.get(sql, params)`, `db.transaction(async () => …)`; `database(name)` | — | SQLite in the data folder (`db.sqlite`); params are an array (`?`) or an object (`:name`); `exec` → `{ changes, lastInsertRowid }`, `query` → row objects; `Uint8Array` ↔ BLOB; open transactions roll back when the call ends |
+| `zip([{ path, data, method, dir }])`, `unzip(bytes)` | — | in-memory zip (docx/xlsx/epub…): `data` is text or `Uint8Array`, `method: "store"` for uncompressed entries; `unzip` → `[{ path, data, text() }]` |
 | `readFile(path)`, `listDir(path)` | `fs:workspace:read` | workspace only, ≤ 2 MB per file, returns a Promise |
-| `writeFile(path, text)` | `fs:workspace:write` | workspace only, creates parent folders |
+| `writeFile(path, text)`, `appendFile(path, text)` | `fs:workspace:write` | workspace only, creates parent folders |
 | `readFileBytes(path)`, `stat(path)`, `exists(path)`, `glob(pattern)`, `grep(regex, { glob, ignoreCase, maxResults })` | `fs:workspace:read` | `readFileBytes` → `Uint8Array`; `stat` → `{ type, size, modified }` or `null`; `glob` respects `.gitignore`; `grep` → `[{ path, line, text }]` |
 | `writeFileBytes(path, bytes)`, `mkdir(path)`, `remove(path, { recursive })`, `rename(from, to)` | `fs:workspace:write` | workspace only; the workspace itself can't be removed |
 | `removeData(path)`, `listData()` | — | the plugin's data folder |
@@ -164,8 +169,9 @@ export const tools = [{
 | `tools.set([{ name, description, inputSchema, readOnly, execute }])`, `tools.list()` | — | replace the plugin's dynamic tools (OpenAPI → tools, …); the model can call them from the next step |
 | `plugins.call(id, method, args)` | `uses = ["<id>"]` in plugin.toml | call another plugin's `api`; it can only do what this call could do itself |
 | `spawn(program, args, { cwd, env })` | `exec:<program>` | streaming process: `for await (const line of proc.lines())`, `next()`, `write(text)`, `closeStdin()`, `kill()`, `wait()`; ends with the call |
-| `llm.complete(prompt \| { system, prompt, messages, maxTokens })` | `llm` | the session's model, no tools, ≤ 8 per call; resolves to the text; tools and async hooks |
+| `llm.complete(prompt \| { system, prompt, messages, maxTokens }, { model, effort })` | `llm` | the session's model unless `model` (`"provider/model"`, or a model name of the same provider) is given; `effort`: off/low/high/max; no tools, ≤ 8 per call; resolves to the text; tools and async hooks |
 | `session.events({ kinds, last })`, `session.id()` | `session:read` | events of the current session, newest last |
+| `session.current()`, `session.endTurn()` | — | `{ session, agent }` of this call; `endTurn()` (in a tool or `afterTool`) ends the turn after this step's tool calls finish, without asking the model again |
 | `secrets.get(name)`, `secrets.has(name)` | declared in `secrets` | the value the user set, or `null` |
 | `ui.refresh(page)` | — | re-render an open page after data changed |
 

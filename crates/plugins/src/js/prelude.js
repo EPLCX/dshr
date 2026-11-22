@@ -198,6 +198,52 @@
     throw new TypeError("expected a Uint8Array or an ArrayBuffer");
   };
 
+  // SQLite：参数是数组（? 占位）或对象（:name 占位）；Uint8Array 存成 BLOB，读出来也是 Uint8Array。
+  const sqlParams = (params) => {
+    if (params === undefined || params === null) return "null";
+    const convert = (value) => {
+      if (value === undefined) return null;
+      if (value instanceof Uint8Array || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+        return { $blob: native.bytesToBase64(bytesOf(value)) };
+      }
+      if (value instanceof Date) return value.toISOString();
+      if (typeof value === "bigint") return Number(value);
+      return value;
+    };
+    if (Array.isArray(params)) return JSON.stringify(params.map(convert));
+    if (typeof params === "object") return JSON.stringify(Object.fromEntries(Object.entries(params).map(([key, value]) => [key, convert(value)])));
+    throw new TypeError("query parameters must be an array or an object");
+  };
+  const sqlRows = (json) =>
+    JSON.parse(json).map((row) => {
+      for (const [key, value] of Object.entries(row)) {
+        if (value !== null && typeof value === "object" && typeof value.$blob === "string") row[key] = native.base64ToBytes(value.$blob);
+      }
+      return row;
+    });
+  function database(name) {
+    const exec = async (sql, params) => JSON.parse(native.dbExec(name, String(sql), sqlParams(params)));
+    const query = async (sql, params) => sqlRows(native.dbQuery(name, String(sql), sqlParams(params)));
+    return Object.freeze({
+      exec,
+      query,
+      get: async (sql, params) => (await query(sql, params))[0] ?? null,
+      // 在一个事务里执行 fn：正常返回时提交，抛异常时回滚。调用结束时还没提交的事务也会回滚。
+      transaction: async (fn) => {
+        native.dbExec(name, "BEGIN IMMEDIATE", "null");
+        try {
+          const result = await fn();
+          native.dbExec(name, "COMMIT", "null");
+          return result;
+        } catch (error) {
+          try { native.dbExec(name, "ROLLBACK", "null"); } catch {}
+          throw error;
+        }
+      },
+      close: async () => native.dbClose(name),
+    });
+  }
+
   // 文件函数在宿主那边是同步执行的，这里包成 async：以后换成真正的异步实现时插件不用改。
   const host = Object.freeze({
     get workspace() {
@@ -220,6 +266,7 @@
     grep: async (pattern, options = {}) => JSON.parse(await operation(native.grep(String(pattern), JSON.stringify(options ?? {})))),
     writeFile: async (path, text) => native.writeFile(String(path), String(text)),
     writeFileBytes: async (path, data) => native.writeFileBytes(String(path), native.bytesToBase64(bytesOf(data))),
+    appendFile: async (path, text) => native.appendFile(String(path), String(text)),
     mkdir: async (path) => native.mkdir(String(path)),
     remove: async (path, options = {}) => native.remove(String(path), options?.recursive === true),
     rename: async (from, to) => native.rename(String(from), String(to)),
@@ -227,8 +274,35 @@
     // 插件自己的数据目录：不需要能力，工具、页面、提示词里都能用；没有这个文件时得到 null。
     readData: async (path) => native.readData(String(path)) ?? null,
     writeData: async (path, text) => native.writeData(String(path), String(text)),
+    appendData: async (path, text) => native.appendData(String(path), String(text)),
     removeData: async (path) => native.removeData(String(path)),
     listData: async () => native.listData(),
+
+    // SQLite 数据库，文件在数据目录里（不需要能力）：host.db 是 db.sqlite，host.database(name) 是别的文件。
+    db: database("db.sqlite"),
+    database: (name) => database(String(name ?? "db.sqlite")),
+
+    // zip 打包、解包（纯计算，不需要能力）。
+    zip: async (entries) => {
+      if (!Array.isArray(entries)) throw new TypeError("host.zip takes an array of { path, data } entries");
+      const list = entries.map((entry) => {
+        if (entry === null || typeof entry !== "object") throw new TypeError("each zip entry must be an object");
+        const item = { path: String(entry.path ?? "") };
+        if (entry.method !== undefined) item.method = String(entry.method);
+        if (entry.dir === true) return item;
+        const data = entry.data ?? "";
+        item.data = typeof data === "string" ? native.bytesToBase64(new TextEncoder().encode(data)) : native.bytesToBase64(bytesOf(data));
+        return item;
+      });
+      return native.base64ToBytes(native.zip(JSON.stringify(list)));
+    },
+    unzip: async (data) =>
+      JSON.parse(native.unzip(native.bytesToBase64(bytesOf(data)))).map((entry) =>
+        entry.dir ? Object.freeze(entry) : Object.freeze({
+          path: entry.path,
+          data: native.base64ToBytes(entry.data),
+          text() { return new TextDecoder().decode(this.data); },
+        })),
 
     // 不是完整的 Fetch API：响应是一个普通对象，正文最多 2 MB。
     fetch: async (url, options = {}) => {
@@ -334,11 +408,14 @@
       });
     },
 
-    // 用当前会话的模型发一次请求（llm）。
+    // 发一次请求（llm）：默认用当前会话的模型；options.model（"provider/model" 或模型名）、options.effort 可以换。
     llm: Object.freeze({
       complete: async (request, options = {}) => {
-        const body = typeof request === "string" ? { prompt: request } : request;
-        const id = native.llm(JSON.stringify(body ?? {}));
+        const body = { ...(typeof request === "string" ? { prompt: request } : request ?? {}) };
+        for (const key of ["model", "effort", "maxTokens"]) {
+          if (options?.[key] !== undefined && options[key] !== null) body[key] = options[key];
+        }
+        const id = native.llm(JSON.stringify(body));
         return JSON.parse(await operation(id, options?.signal).catch(rethrowAbort(options?.signal))).text;
       },
     }),
@@ -351,6 +428,10 @@
       continue: async (options = {}) => native.sessionSend(JSON.stringify({ ...(options ?? {}), text: "continue" })),
       stop: async (session) => native.sessionStop(session === undefined || session === null ? undefined : String(session)),
       list: async () => JSON.parse(native.sessionList()),
+      // 这一步的工具调用执行完后结束本轮（工具、afterTool 里可用）。
+      endTurn: async () => native.endTurn(),
+      // 当前的会话和代理：{ session, agent }（agent 是 "main" 或子代理名）；不在会话里时都是 null。
+      current: async () => JSON.parse(native.identity()),
     }),
 
     // 子代理（agent:run）：得到子代理的报告。

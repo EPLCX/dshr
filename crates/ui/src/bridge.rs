@@ -145,6 +145,8 @@ pub fn install(backend: Arc<Backend>) {
         }));
         let reload = backend.clone();
         services.config_changed = Some(Arc::new(move || reload.reload_config()));
+        let resolver = backend.clone();
+        services.models = Some(Arc::new(move |spec: &str| resolver.llm_for(&dshr_config::ModelRef::parse(spec)?)));
         let backend = backend.clone();
         services.llm = Some(Arc::new(move || backend.default_llm()));
     });
