@@ -50,6 +50,8 @@ semver = "1"
 flate2 = "1"
 tar = { version = "0.4", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# 插件的 SQLite 数据库（`host.db`）：SQLite 源码随 crate 编译进程序，不依赖系统的 libsqlite3。
+rusqlite = { version = "0.43", default-features = false, features = ["bundled", "hooks"] }
 reqwest = { workspace = true, optional = true }
 tokio-tungstenite = { version = "0.28", optional = true, default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rquickjs = { workspace = true, optional = true }

@@ -5,10 +5,14 @@
 //! | `beforeTool` | `GateTool` | 同步，最多 300 ms | 拒绝、要求询问；放行要 `hooks:gate` |
 //! | `afterTool` | `AfterTool` | 异步 | 看结果、写事件；改写结果要 `hooks:tool-output` |
 //! | `beforeStep` | `BeforeStep` | 异步 | 写事件 |
-//! | `beforeRequest` | `BeforeRequest` | 同步，最多 300 ms | 往系统提示词后面追加文本 |
+//! | `beforeRequest` | `BeforeRequest` | 同步，最多 300 ms | 往系统提示词后面追加文本、往消息末尾补一段 user 文本 |
 //! | `turnEnded` | `TurnEnded` | 异步 | 写事件、写数据、联网、调模型 |
 //! | `turnStarted` | `TurnStarted` | 异步，最多 5 秒 | 拦下这条消息、补事件 |
 //! | `beforeWrite` | `WriteIntent` | 同步，最多 1 秒 | 拒绝写入；改写内容要 `hooks:write` |
+//!
+//! “同步”指 agent 循环在原地等结果：钩子本身照样可以是 async 函数、`await` 宿主操作（读写数据目录、`host.db`），
+//! 只要在时限内落定。所有钩子和工具跑在插件的同一个运行时里，模块变量彼此共享。
+//! 每个钩子的参数里都有 `session`（顶层会话 id）和 `agent`（`main` 或子代理名），插件据此按会话、按代理区分状态。
 //!
 //! 钩子都不能写工作区、不能启动程序：这些要经过权限把关，而钩子不在把关的范围里。
 //! 超时、抛异常都只当作“没有结论”，记进插件日志，对话照常进行。
@@ -18,9 +22,9 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use dshr_agent::{
-    AfterTool, AfterToolCall, AfterToolHook, AgentConfig, AgentError, BeforeRequest, BeforeStep, BeforeStepHook, Gate, GateRequest,
-    GateTool, ModelChoices, PermissionMode, ReviewTool, ReviewToolHook, TransformRequest, TransformRequestHook, TurnContext, TurnEnded,
-    TurnEndedHook, TurnInput, TurnOutcome, TurnStart, TurnStarted, TurnStartedHook,
+    AfterTool, AfterToolCall, AfterToolHook, AgentConfig, AgentError, AgentIdentity, BeforeRequest, BeforeStep, BeforeStepHook, Gate,
+    GateRequest, GateTool, ModelChoices, PermissionMode, ReviewTool, ReviewToolHook, TransformRequest, TransformRequestHook, TurnContext,
+    TurnEnded, TurnEndedHook, TurnInput, TurnOutcome, TurnStart, TurnStarted, TurnStartedHook,
 };
 use dshr_context::{ExtensionPoint, Scope};
 use dshr_llm::ChatRequest;
@@ -35,7 +39,7 @@ use crate::manifest::PluginManifest;
 const SYNC_WAIT: Duration = Duration::from_millis(300);
 /// 钩子里交给脚本的工具输入、输出最多这么多字符。
 const MAX_PAYLOAD_CHARS: usize = 16 * 1024;
-/// `beforeRequest` 追加的文本最多这么多字节。
+/// `beforeRequest` 追加的文本（系统提示词、user 消息）各自最多这么多字节。
 const MAX_APPEND_BYTES: usize = 8 * 1024;
 /// 排在预设（-100）之后、权限（0）之前：脚本能在内置权限放行之前拒绝，但预设的只读规则先生效。
 const GATE_PRIORITY: i32 = -50;
@@ -106,7 +110,9 @@ pub(super) fn register(cx: &mut Scope, plugin: &'static str, manifest: &PluginMa
                 let js = js.clone();
                 cx.hook::<BeforeRequest>(
                     HOOK_PRIORITY,
-                    Arc::new(move |request: &mut ChatRequest, config: &AgentConfig| js.before_request(request, config)),
+                    Arc::new(move |request: &mut ChatRequest, config: &AgentConfig, ctx: &ToolContext| {
+                        js.before_request(request, config, ctx)
+                    }),
                 );
             }
             "afterTool" => cx.hook::<AfterTool>(HOOK_PRIORITY, js.clone()),
@@ -162,6 +168,33 @@ fn clip_value(value: &Value) -> Value {
     if text.chars().count() <= MAX_PAYLOAD_CHARS { value.clone() } else { Value::String(clip(&text)) }
 }
 
+/// 给钩子的参数补上 `session`（顶层会话 id）和 `agent`（`main` 或子代理名）。
+fn with_identity(mut payload: Value, options: &dshr_context::Options, session: Option<&str>) -> Value {
+    let identity = AgentIdentity::of(options, session);
+    if let Value::Object(object) = &mut payload {
+        object.insert("session".into(), Value::String(identity.session));
+        object.insert("agent".into(), Value::String(identity.agent));
+    }
+    payload
+}
+
+/// 同步钩子的工具环境：工作区（按能力只读）、选项（会话、身份）和插件快照，不带实时输出和事件通道。
+fn sync_context(ctx: &ToolContext) -> ToolContext {
+    let mut sync = ToolContext::new(ctx.workspace.clone());
+    sync.options = ctx.options.clone();
+    sync.plugins = ctx.plugins.clone();
+    sync
+}
+
+/// 截到 `limit` 字节以内（落在字符边界上）。
+fn clip_bytes(text: &str, limit: usize) -> String {
+    let mut text = text.to_owned();
+    if let Some((cut, _)) = text.char_indices().find(|(index, _)| *index >= limit) {
+        text.truncate(cut);
+    }
+    text
+}
+
 fn access_json(access: &Access) -> Value {
     match access {
         Access::Read => json!({ "type": "read" }),
@@ -211,9 +244,9 @@ impl JsHooks {
     /// `beforeTool`：返回 `"deny"`、`"ask"`、`"allow"`，或 `{ decision, reason }`；其余（含没有返回）是没有结论。
     fn gate(&self, request: &GateRequest<'_>) -> Option<Gate> {
         let payload = json!({ "tool": request.tool, "input": clip_value(request.input), "access": access_json(request.access) });
-        // 只读：能读工作区（按能力），不能写、不能联网。
-        let mut ctx = ToolContext::new(request.ctx.workspace.clone());
-        ctx.options = request.ctx.options.clone();
+        let payload = with_identity(payload, &request.ctx.options, None);
+        // 只读：能读工作区（按能力）、读写数据目录，不能写工作区、不能联网。
+        let ctx = sync_context(request.ctx);
         let answer = self.answer("beforeTool", self.instance.ask(Self::hook("beforeTool", payload), Some(ctx), SYNC_WAIT));
         let (decision, reason) = decision(&answer)?;
         match decision {
@@ -232,28 +265,38 @@ impl JsHooks {
         }
     }
 
-    /// `beforeRequest`：返回的文本追加到这次请求的系统提示词后面（不进日志）；返回 `{ append, model, effort }` 时
-    /// 还可以换模型和思考等级（要 `model:route`，模型只能是主程序放进 [`ModelChoices`] 的那些）。
-    fn before_request(&self, request: &mut ChatRequest, config: &AgentConfig) {
+    /// `beforeRequest`：返回的文本追加到这次请求的系统提示词后面（不进日志）；返回 `{ append, user, model, effort }` 时
+    /// `user` 作为一段 user 文本接在消息末尾（同样只在这次请求里），还可以换模型和思考等级（要 `model:route`，
+    /// 模型只能是主程序放进 [`ModelChoices`] 的那些）。
+    fn before_request(&self, request: &mut ChatRequest, config: &AgentConfig, ctx: &ToolContext) {
         let effort = request.effort.map(|effort| effort.as_str());
-        let payload = json!({ "model": request.model, "effort": effort, "messages": request.messages.len(), "tools": request.tools.len() });
-        let answer = self.answer("beforeRequest", self.instance.ask(Self::hook("beforeRequest", payload), None, SYNC_WAIT));
-        let append = match &answer {
+        let payload = json!({
+            "model": request.model,
+            "effort": effort,
+            "messages": request.messages.len(),
+            "tools": request.tools.len(),
+            "workspace": ctx.workspace.display().to_string(),
+        });
+        let payload = with_identity(payload, &ctx.options, None);
+        let answer =
+            self.answer("beforeRequest", self.instance.ask(Self::hook("beforeRequest", payload), Some(sync_context(ctx)), SYNC_WAIT));
+        let (append, user) = match &answer {
             Value::Object(object) => {
                 self.route(request, config, object);
-                object.get("append").and_then(Value::as_str)
+                (object.get("append").and_then(Value::as_str), object.get("user").and_then(Value::as_str))
             }
-            other => other.as_str(),
+            other => (other.as_str(), None),
         };
-        let Some(text) = append.map(str::trim).filter(|text| !text.is_empty()) else { return };
-        let mut text = text.to_owned();
-        if let Some((cut, _)) = text.char_indices().find(|(index, _)| *index >= MAX_APPEND_BYTES) {
-            text.truncate(cut);
+        if let Some(text) = append.map(str::trim).filter(|text| !text.is_empty()) {
+            let text = clip_bytes(text, MAX_APPEND_BYTES);
+            request.system = Some(match request.system.take() {
+                Some(system) => format!("{system}\n\n{text}"),
+                None => text,
+            });
         }
-        request.system = Some(match request.system.take() {
-            Some(system) => format!("{system}\n\n{text}"),
-            None => text,
-        });
+        if let Some(text) = user.map(str::trim).filter(|text| !text.is_empty()) {
+            append_user_text(&mut request.messages, clip_bytes(text, MAX_APPEND_BYTES));
+        }
     }
 
     fn route(&self, request: &mut ChatRequest, config: &AgentConfig, answer: &serde_json::Map<String, Value>) {
@@ -285,9 +328,9 @@ impl JsHooks {
     /// `beforeWrite`：`{ decision: "deny", reason }`（或 `"deny"`）拒绝；`{ content }` 改写（要 `hooks:write`）。
     fn before_write(&self, request: &WriteRequest<'_>) -> WriteDecision {
         let payload = json!({ "tool": request.tool, "path": request.path, "before": request.before, "after": request.after });
-        // 只读：能读工作区（按能力），不能写、不能联网。
-        let mut ctx = ToolContext::new(request.ctx.workspace.clone());
-        ctx.options = request.ctx.options.clone();
+        let payload = with_identity(payload, &request.ctx.options, None);
+        // 只读：能读工作区（按能力）、读写数据目录，不能写工作区、不能联网。
+        let ctx = sync_context(request.ctx);
         let answer = self.answer("beforeWrite", self.instance.ask(Self::hook("beforeWrite", payload), Some(ctx), WRITE_WAIT));
         if let Some(("deny", reason)) = decision(&answer) {
             return WriteDecision::Deny(reason.unwrap_or_else(|| format!("Blocked by the {} plugin.", self.plugin)));
@@ -317,6 +360,7 @@ impl ReviewToolHook for JsHooks {
     /// `reviewTool`：本来要询问用户时先问插件。超时、出错、没有结论都照常询问；放行要 `hooks:review`。
     async fn review(&self, request: &GateRequest<'_>) -> Option<Gate> {
         let payload = json!({ "tool": request.tool, "input": clip_value(request.input), "access": access_json(request.access) });
+        let payload = with_identity(payload, &request.ctx.options, None);
         let job = Self::hook("reviewTool", payload);
         let answer = self.answer("reviewTool", self.instance.call(job, Some(request.ctx.clone()), REVIEW_WAIT, self.permits).await);
         let (decision, reason) = decision(&answer)?;
@@ -345,6 +389,7 @@ impl TransformRequestHook for JsHooks {
             return;
         }
         let payload = json!({ "model": request.model, "system": request.system, "messages": request.messages });
+        let payload = with_identity(payload, &ctx.options, None);
         let job = Self::hook("transformRequest", payload);
         let answer = self.answer("transformRequest", self.instance.call(job, Some(ctx.clone()), TRANSFORM_WAIT, self.permits).await);
         if let Some(system) = answer.get("system") {
@@ -357,6 +402,15 @@ impl TransformRequestHook for JsHooks {
                 Err(error) => tracing::warn!(plugin = self.plugin, %error, "transformRequest 返回的消息格式不对，忽略"),
             }
         }
+    }
+}
+
+/// 把一段 user 文本接在消息末尾：最后一条是 user 消息（用户的话、工具结果）时并进去，否则新起一条。
+/// 两条 user 消息相邻时有的接口会拒绝请求，所以优先并进去。
+fn append_user_text(messages: &mut Vec<dshr_core::Message>, text: String) {
+    match messages.last_mut() {
+        Some(last) if last.role == dshr_core::Role::User => last.content.push(dshr_core::ContentBlock::text(text)),
+        _ => messages.push(dshr_core::Message { role: dshr_core::Role::User, content: vec![dshr_core::ContentBlock::text(text)] }),
     }
 }
 
@@ -375,6 +429,7 @@ impl AfterToolHook for JsHooks {
             "output": clip(&output.content),
             "isError": output.is_error,
         });
+        let payload = with_identity(payload, &call.ctx.options, None);
         // 写的事件直接走这次调用的通道，排在 `tool/result` 之后。
         let answer = self.run("afterTool", payload, call.ctx.clone()).await;
         let replacement = match &answer {
@@ -418,6 +473,7 @@ impl BeforeStepHook for JsHooks {
             "contextWindow": turn.config.context_window,
             "estimatedTokens": estimated,
         });
+        let payload = with_identity(payload, &turn.config.options, Some(turn.session().id()));
         let collected = Collected::default();
         let mut ctx = turn.tool_context();
         ctx.events = Some(collected.sink());
@@ -455,6 +511,7 @@ impl TurnStartedHook for JsHooks {
             "text": clip(input.text),
             "attachments": input.attachments,
         });
+        let payload = with_identity(payload, &turn.config.options, Some(turn.session().id()));
         let collected = Collected::default();
         let mut ctx = turn.tool_context();
         ctx.events = Some(collected.sink());
@@ -482,6 +539,7 @@ impl TurnEndedHook for JsHooks {
             "finalText": clip(&outcome.final_text),
             "error": outcome.error,
         });
+        let payload = with_identity(payload, &turn.config.options, Some(turn.session().id()));
         let collected = Collected::default();
         let mut ctx = turn.tool_context();
         ctx.events = Some(collected.sink());

@@ -59,16 +59,17 @@ impl State {
         })?;
         let runtime = super::ops::io()?;
         let _entered = runtime.enter();
-        let mut child = tokio::process::Command::new(&command.program)
+        let mut process = tokio::process::Command::new(&command.program);
+        process
             .args(&command.args)
             .current_dir(&cwd)
             .envs(&options.env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|error| format!("cannot start {}: {error}", command.script))?;
+            .kill_on_drop(true);
+        super::host::hide_window(&mut process);
+        let mut child = process.spawn().map_err(|error| format!("cannot start {}: {error}", command.script))?;
         let (sender, receiver) = tokio::sync::mpsc::channel(MAX_BUFFERED_LINES);
         for (name, pipe) in [
             ("stdout", child.stdout.take().map(|pipe| Box::new(pipe) as Box<dyn tokio::io::AsyncRead + Send + Unpin>)),

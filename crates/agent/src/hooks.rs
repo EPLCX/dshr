@@ -111,11 +111,12 @@ pub trait BeforeStepHook: Send + Sync {
     async fn before_step(&self, turn: &mut TurnContext<'_>) -> Result<(), AgentError>;
 }
 
-/// 请求发出之前改写它（如预设往系统提示词后追加说明）。改动不进日志。
+/// 请求发出之前改写它（如预设往系统提示词后追加说明）。改动不进日志。`ToolContext` 是这一轮的工具环境
+/// （工作区、选项、会话 [`SessionInfo`]、模型 [`LlmAccess`]、[`AgentIdentity`]）。
 pub struct BeforeRequest;
 
 impl Hook for BeforeRequest {
-    type Handler = dyn Fn(&mut ChatRequest, &AgentConfig) + Send + Sync;
+    type Handler = dyn Fn(&mut ChatRequest, &AgentConfig, &ToolContext) + Send + Sync;
 }
 
 /// 工具调用执行之前的把关。按顺序问，第一个给出结论的生效；都没有结论时询问用户。
@@ -191,6 +192,45 @@ pub struct SessionInfo {
     pub id: String,
     /// 会话日志文件。
     pub log_path: PathBuf,
+}
+
+/// 这个 agent 是谁，放在 [`AgentConfig::options`] 里：子代理由 `delegate` 放进去，主代理没有（按
+/// [`AgentIdentity::of`] 的规则补成“当前会话 + `main`”）。插件的钩子据此按会话、按代理区分状态。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentIdentity {
+    /// 顶层会话（用户看到的那个会话）的 id；子代理里也是父会话的 id。
+    pub session: String,
+    /// 代理：主代理是 `main`，子代理是它的日志名（发起它的那次调用的 id）。
+    pub agent: String,
+}
+
+impl AgentIdentity {
+    /// 主代理的代理名。
+    pub const MAIN: &'static str = "main";
+
+    /// `options` 里登记的身份；没有时是主代理，会话取 `session`（没有会话时为空字符串）。
+    pub fn of(options: &dshr_context::Options, session: Option<&str>) -> Self {
+        options.get::<Self>().cloned().unwrap_or_else(|| Self {
+            session: session.or_else(|| options.get::<SessionInfo>().map(|info| info.id.as_str())).unwrap_or_default().to_owned(),
+            agent: Self::MAIN.to_owned(),
+        })
+    }
+}
+
+/// 让插件在当前这一步结束后结束本轮，放在一次工具调用、钩子的 [`ToolContext::options`] 里。
+/// 这一步里的工具调用照常执行完、结果照常写入，然后不再请求模型，本轮以“完成”结束。
+#[derive(Debug, Clone, Default)]
+pub struct TurnControl(Arc<std::sync::atomic::AtomicBool>);
+
+impl TurnControl {
+    /// 要求这一步之后结束本轮。
+    pub fn end_turn(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn end_requested(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// 当前会话用的模型，放在 [`ToolContext::options`] 里：插件借它发一次性的请求（JS 插件的 `host.llm`）。
@@ -315,6 +355,8 @@ impl TurnState {
 #[derive(Clone)]
 pub struct CallEnv {
     pub call_id: String,
+    /// 发起这次调用的 agent（子代理据此知道自己属于哪个会话）。
+    pub identity: AgentIdentity,
     pub provider: Arc<dyn Provider>,
     pub approver: Arc<dyn Approver>,
     pub config: Arc<AgentConfig>,

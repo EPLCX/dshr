@@ -104,7 +104,7 @@ impl Plugin for CreatorPlugin {
     fn apply(&self, cx: &mut Scope) -> anyhow::Result<()> {
         cx.hook::<BeforeRequest>(
             0,
-            Arc::new(|request: &mut ChatRequest, config: &AgentConfig| {
+            Arc::new(|request: &mut ChatRequest, config: &AgentConfig, _: &ToolContext| {
                 if !creating(&config.options) {
                     request.tools.retain(|tool| !TOOLS.contains(&tool.name.as_str()));
                     return;

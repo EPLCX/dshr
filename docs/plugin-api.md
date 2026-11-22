@@ -85,10 +85,18 @@ export const events = {
 所有钩子都可以是同步或异步函数；返回 `undefined` 表示没有意见。超时、抛异常都按没有意见处理并记进插件日志。
 钩子都**不能写工作区、不能启动程序**。
 
+- **每个钩子都拿得到 `host`**（第二个参数）。下文标“同步”的钩子是说 agent 循环在原地等它，最多等标出的时间；
+  钩子本身照样可以是 `async`、`await` 宿主操作。读写数据目录（`readData`、`writeData`、`appendData`）和 `host.db`
+  在同步钩子里也能用。
+- **钩子和工具共用一个运行时**：同一个插件的工具、所有钩子（同步的、异步的）、页面、命令跑在同一条线程、同一个 JS
+  运行时里，一次执行一个，模块变量彼此看得见（常驻服务除外，见 [services](#services)）。
+- **每个钩子的参数里都有 `session` 和 `agent`**：`session` 是顶层会话的 id（子代理里也是父会话的 id），`agent` 是
+  `"main"` 或子代理名（发起它的那次调用的 id）。按会话、按代理区分的状态用它们做键。
+
 #### beforeTool
 
 ```js
-beforeTool: ({ tool, input, access }) => "deny" | "ask" | { decision: "deny", reason } | "allow"
+beforeTool: ({ tool, input, access, session, agent }, host) => "deny" | "ask" | { decision: "deny", reason } | "allow"
 ```
 
 - `access`：`{ type: "read" | "write" | "execute" | "external", path?, outside? }`。读工作区外的文件时是 `{ type: "read", path, outside: true }`（除完全访问模式外会询问用户）。
@@ -114,11 +122,12 @@ afterTool: async ({ tool, input, output, isError }, host) => { output } | undefi
 #### beforeWrite
 
 ```js
-beforeWrite: ({ tool, path, before, after }) => "deny" | { decision: "deny", reason } | { content } | undefined
+beforeWrite: ({ tool, path, before, after, session, agent }, host) => "deny" | { decision: "deny", reason } | { content } | undefined
 ```
 
 `write_file`、`edit_file` 写盘前同步调用，最多 1 秒。`before` 是原内容（新文件为 `null`），`after` 是要写的内容（前一个插件可能已经改过）。
-返回 `{ content }` 改写需要 `hooks:write`，拒绝不需要。前后内容超过 256 KB 时不调用。可以读工作区（有读能力时），不能写、不能联网。
+返回 `{ content }` 改写需要 `hooks:write`，拒绝不需要。前后内容超过 256 KB 时不调用。可以读工作区（有读能力时）、读写数据目录和
+`host.db`，不能写工作区、不能联网。要把记录交给之后的异步钩子落盘，放模块变量或直接 `appendData` 都可以。
 
 #### turnStarted
 
@@ -141,11 +150,17 @@ beforeStep: async ({ session, turn, step, events, lastSeq, contextWindow, estima
 #### beforeRequest
 
 ```js
-beforeRequest: ({ model, effort, messages, tools }) => "追加的文本" | { append, model, effort } | undefined
+beforeRequest: ({ model, effort, messages, tools, workspace, session, agent }, host) =>
+  "追加的文本" | { append, user, model, effort } | undefined
 ```
 
-构造请求时同步调用，最多 300 ms。`messages`、`tools` 是数量。返回的文本（最多 8 KB）只追加到这一次请求的系统提示词后面，不进日志。
-返回 `model` / `effort` 换模型和思考等级需要 `model:route`；模型只能是当前提供商模型目录里的，等级是 `off` / `low` / `high` / `max`。
+构造请求时同步调用，最多 300 ms。`messages`、`tools` 是数量。
+
+- `append`（或直接返回字符串）：追加到这一次请求的系统提示词后面。
+- `user`：作为一段 user 文本接在消息末尾——最后一条是 user 消息（用户的话、工具结果）时并进去，否则新起一条。适合把
+  “建议”“提醒”放在模型最先读到的位置。
+- 两者各最多 8 KB，只在这一次请求里，不进日志，不需要能力。
+- 返回 `model` / `effort` 换模型和思考等级需要 `model:route`；模型只能是当前提供商模型目录里的，等级是 `off` / `low` / `high` / `max`。
 
 #### transformRequest（需要 `context:rewrite`）
 
@@ -349,9 +364,47 @@ export const state = {
 | 成员 | 说明 |
 |---|---|
 | `readData(path)` | 文本内容；文件不存在时是 `null` |
-| `writeData(path, text)` | 写入，自动建父目录；单个文件 ≤ 2 MB，总共 ≤ 64 MB |
+| `writeData(path, text)` | 写入，自动建父目录；单个文件 ≤ 16 MB，总共 ≤ 512 MB |
+| `appendData(path, text)` | 接在文件末尾（没有时新建），不用先读出整个文件；追加后的文件也不能超过 16 MB |
 | `removeData(path)` | 删除 |
 | `listData()` | 列出数据目录里的文件 |
+
+数据目录在任何场合都能读写（同步钩子、`prompt`、`render` 也可以）。
+
+### 数据库
+
+`host.db` 是数据目录里的 SQLite 数据库（`db.sqlite`），`host.database(name)` 打开数据目录里的另一个数据库文件。不需要能力，
+在任何场合都能用。
+
+| 成员 | 说明 |
+|---|---|
+| `db.exec(sql, params)` | 执行语句，返回 `{ changes, lastInsertRowid }`；不带参数时可以是用 `;` 隔开的多条语句（建表、迁移） |
+| `db.query(sql, params)` | 查询，返回 `[{ 列名: 值 }]`；最多 10000 行、16 MB |
+| `db.get(sql, params)` | 第一行，没有时是 `null` |
+| `db.transaction(async () => { … })` | 在事务里执行：正常返回时提交，抛异常时回滚 |
+| `db.close()` | 关掉连接（再用时重新打开） |
+
+```js
+await host.db.exec("CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, text TEXT, at INTEGER)");
+await host.db.exec("INSERT INTO memories (text, at) VALUES (?, ?)", [text, Date.now()]);
+const recent = await host.db.query("SELECT text FROM memories WHERE text LIKE :q ORDER BY at DESC LIMIT 20", { q: `%${query}%` });
+```
+
+- 参数是数组（按位置，`?`）或对象（按名字，`:name` / `@name` / `$name`，键可以不写前缀）。数字、字符串、布尔（存成 0/1）、
+  `null` 原样；`Uint8Array` 存成 BLOB，读出来也是 `Uint8Array`；数组和对象存成 JSON 文本（可以用 SQLite 的 `json_*` 函数）。
+- 每个数据库文件最多 256 MB，计入数据目录的总量。用 WAL 模式，常驻服务和工具可以同时用一个库（写冲突时最多等 2 秒）。
+- 查询受这次调用的时限约束，超时会被打断。一次调用结束时还没提交的事务（忘了 `COMMIT`、中途抛异常、超时）自动回滚。
+
+### zip
+
+纯计算，不需要能力，在内存里打包、解包。生成 docx / xlsx / pptx / epub 这类以 zip 为容器的文档时用。
+
+| 成员 | 说明 |
+|---|---|
+| `zip([{ path, data, method, dir }])` | 按给的顺序打包，返回 `Uint8Array`。`data` 是字符串（按 UTF-8）或 `Uint8Array`；`method` 是 `"deflate"`（默认）或 `"store"`（不压缩，epub / ODF 的 `mimetype` 要这样）；`dir: true` 是文件夹 |
+| `unzip(bytes)` | `[{ path, data, text() }]`（`data` 是 `Uint8Array`），文件夹是 `{ path, dir: true }` |
+
+路径必须是相对路径、不能含 `..`。打包的内容、压缩包本身各 ≤ 32 MB，解压后合计 ≤ 64 MB，最多 10000 个条目。
 
 ### 工作区文件
 
@@ -366,6 +419,7 @@ export const state = {
 | `grep(regex, { glob, ignoreCase, maxResults })` | `fs:workspace:read` | `[{ path, line, text }]`，最多 1000 条 |
 | `writeFile(path, text)` | `fs:workspace:write` | 自动建父目录 |
 | `writeFileBytes(path, bytes)` | `fs:workspace:write` | 写二进制 |
+| `appendFile(path, text)` | `fs:workspace:write` | 接在文件末尾（没有时新建），一次 ≤ 2 MB |
 | `mkdir(path)` | `fs:workspace:write` | 建目录 |
 | `remove(path, { recursive })` | `fs:workspace:write` | 删除；不能删除工作区本身 |
 | `rename(from, to)` | `fs:workspace:write` | 改名 / 移动 |
@@ -400,12 +454,18 @@ export const state = {
 | `spawn(program, args, { cwd, env })` | `exec:<程序>` | 流式进程：`for await (const line of proc.lines())`、`next()`（`{ stream, line }`）、`write(text)`、`closeStdin()`、`kill()`、`wait()` |
 
 只能在没有标 `readOnly` 的工具和页面动作里用。进程随这次调用结束。能启动程序的工具按 `run_shell` 一样的规则把关。
+程序在后台运行：Windows 上不会弹出控制台窗口（和 `run_shell` 一样），也就没有终端可以交互——需要输入密码的程序
+（如 `ssh`）请用密钥、`BatchMode=yes` 之类的非交互方式，或经 `spawn` 的 `write` 写标准输入。
 
 ### 模型
 
 | 成员 | 需要 | 说明 |
 |---|---|---|
-| `llm.complete(prompt \| { system, prompt, messages, maxTokens }, { signal })` | `llm` | 用当前会话的模型发一次性请求（不带工具），返回文本；每次调用最多 8 次 |
+| `llm.complete(prompt \| { system, prompt, messages, maxTokens, model, effort }, { model, effort, maxTokens, signal })` | `llm` | 发一次性请求（不带工具），返回文本；每次调用最多 8 次 |
+
+- 默认用当前会话的模型。`model` 换模型：`"provider/model"` 用另一个已配置的提供商（要有它的 API Key），只写模型名时
+  沿用当前提供商。`effort` 指定思考等级：`off` / `low` / `high` / `max`。两者都可以写在请求里或第二个参数里。
+- 模型不存在、提供商没配置时抛出异常，不会悄悄退回当前模型。
 
 可以在工具和异步钩子里用。花的是用户的 token，只在任务确实需要理解语言时用。
 
@@ -415,6 +475,8 @@ export const state = {
 |---|---|---|
 | `session.events({ kinds, last })` | `session:read` | 当前会话的事件，最新的在后；最多 500 条、1 MB |
 | `session.id()` | `session:read` | 当前会话 id |
+| `session.current()` | — | `{ session, agent }`：顶层会话 id 和代理（`"main"` 或子代理名）；不在会话里时都是 `null` |
+| `session.endTurn()` | — | 这一步的工具调用都执行完后结束本轮，不再请求模型（以“完成”结束）。只能在一轮里的工具和 `afterTool` 钩子里用 |
 | `session.list()` | `session:read` 或 `session:control` | 打开着的会话 `[{ id, title, workspace, running, current }]` |
 | `session.send(text, { session, workspace })` | `session:control` | 替用户发消息；`session` 是 `"current"`（默认）、`"new"` 或会话 id；返回会话 id。每个插件每 5 秒最多一条 |
 | `session.continue(options)` | `session:control` | 等于发送 `continue` |
@@ -479,13 +541,14 @@ API 密钥在钥匙串里，这里碰不到。
 | 工具（`readOnly`） | ✓ | — | — | — | ✓ | — | ✓ |
 | 页面动作、命令、斜杠命令 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | 异步钩子（`afterTool`、`turnEnded` 等） | ✓ | — | ✓ | — | ✓ | ✓ | ✓ |
-| 同步钩子（`beforeTool`、`beforeWrite`；`beforeRequest` 没有工作区） | ✓ | — | — | — | — | — | — |
+| 同步钩子（`beforeTool`、`beforeWrite`、`beforeRequest`） | ✓ | — | — | — | — | — | — |
 | `prompt`、`render`、`project` / `label` | ✓ | — | — | — | — | — | — |
 | `on`、`watch` 的处理函数 | ✓ | — | ✓ | — | — | — | — |
 | 定时任务 | 数据目录 | 数据目录 | ✓ | — | — | — | — |
 | 常驻服务 | 数据目录 | 数据目录 | ✓ | — | — | ✓ | — |
 
-✓ 表示这个场合允许，前提是插件声明并被允许了对应的能力。读写自己的数据目录在任何场合都可以。
+✓ 表示这个场合允许，前提是插件声明并被允许了对应的能力。读写自己的数据目录、`host.db`、`zip` / `unzip`、
+`session.current()` 在任何场合都可以。
 
 ## 界面节点
 
@@ -526,7 +589,7 @@ API 密钥在钥匙串里，这里碰不到。
 | `fs:workspace:write` | 写工作区：`writeFile`、`writeFileBytes`、`mkdir`、`remove`、`rename` |
 | `net:<主机>` | `fetch` / `websocket` 访问该主机。`api.example.com`、`*.example.com`（子域）、`*`（任何主机）；通配不含 localhost 和 IP，本机和内网服务要逐个写明（IPv6 写 `[::1]`） |
 | `exec:<程序>` | `exec` / `spawn` 启动该程序（只比程序名）；`exec:*` 任何程序，也允许带路径的写法 |
-| `llm` | `llm.complete` |
+| `llm` | `llm.complete`（含指定其他已配置的模型） |
 | `session:read` | `session.events`、`session.id`、`session.list` |
 | `session:control` | `session.send`、`continue`、`stop`、`list` |
 | `agent:run` | `agent.run` |
@@ -565,8 +628,12 @@ API 密钥在钥匙串里，这里碰不到。
 | 页面渲染 | 3 秒 |
 | 同时进行的宿主操作（`fetch`、`exec`…） | 每次调用 32 个 |
 | 连续失控 | 3 次（超时或内存耗尽）后停用，直到插件文件变化 |
-| 工作区 / 数据目录的单个文件 | 2 MB |
-| 数据目录总大小 | 64 MB |
+| 工作区的单个文件 | 2 MB |
+| 数据目录的单个文件 | 16 MB |
+| 数据目录总大小（含数据库） | 512 MB |
+| 单个数据库文件 | 256 MB |
+| 一次查询的结果 | 10000 行、16 MB |
+| zip：打包内容 / 压缩包 / 解压后 | 32 MB / 32 MB / 64 MB，10000 个条目 |
 | `fetch` 请求体、响应体 | 各 2 MB |
 | WebSocket 单条消息 | 4 MB |
 | `exec` 输出 | 各 1 MB |

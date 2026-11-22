@@ -3,7 +3,7 @@
 dshr 本身以 MIT 许可发布，见 [LICENSE](LICENSE)。dshr 的桌面版与命令行版包含下列第三方组件，
 它们各自的版权归原作者所有，按各自的许可证使用。可选双许可（如 `MIT OR Apache-2.0`）的组件，本项目按其中任一许可使用。
 
-统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 555 个 crate；
+统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 559 个 crate；
 dev / build 依赖不进最终程序，不列入。
 
 ## 参照项目
@@ -18,6 +18,7 @@ dev / build 依赖不进最终程序，不列入。
 | 组件 | 随 crate | 许可证 | 用途 |
 |---|---|---|---|
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | `rquickjs-sys` 0.14.0 | MIT | JS 插件引擎，C 源码随 crate 编译进程序 |
+| [SQLite](https://sqlite.org/copyright.html) | `libsqlite3-sys` 0.40.0 | Public Domain | 插件的数据库（`host.db`），C 源码随 crate 编译进程序 |
 | [Zstandard](https://github.com/facebook/zstd) | `zstd-sys` 2.1.3+zstd.1.5.7 | BSD-3-Clause | 会话日志的 zstd 压缩，C 源码编译进程序；上游为 BSD / GPLv2 双许可，本项目按 BSD 使用 |
 | [AWS-LC](https://github.com/aws/aws-lc) | `aws-lc-sys` 0.47.0 | ISC、Apache-2.0、OpenSSL 等 | TLS 加密库（经 rustls），C 源码编译进程序；含源自 BoringSSL / OpenSSL 的代码，各部分的许可见下文全文 |
 | [Lucide 图标](https://lucide.dev) | `gpui-kit-assets` 0.9.1 | ISC | 界面图标（SVG）嵌入程序 |
@@ -143,6 +144,8 @@ dev / build 依赖不进最终程序，不列入。
 | [event-listener-strategy](https://github.com/smol-rs/event-listener-strategy) | 0.5.4 | Apache-2.0 OR MIT |
 | [eventsource-stream](https://github.com/jpopesculian/eventsource-stream) | 0.2.3 | MIT OR Apache-2.0 |
 | [exr](https://github.com/johannesvollmer/exrs) | 1.74.3 | BSD-3-Clause |
+| [fallible-iterator](https://github.com/sfackler/rust-fallible-iterator) | 0.3.0 | MIT/Apache-2.0 |
+| [fallible-streaming-iterator](https://github.com/sfackler/fallible-streaming-iterator) | 0.1.9 | MIT/Apache-2.0 |
 | [fastrand](https://github.com/smol-rs/fastrand) | 2.5.0 | Apache-2.0 OR MIT |
 | [fax](https://github.com/pdf-rs/fax) | 0.2.7 | MIT |
 | [fdeflate](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 |
@@ -159,7 +162,7 @@ dev / build 依赖不进最终程序，不列入。
 | [foreign-types](https://github.com/sfackler/foreign-types) | 0.5.0 | MIT/Apache-2.0 |
 | [foreign-types-macros](https://github.com/sfackler/foreign-types) | 0.2.4 | MIT/Apache-2.0 |
 | [foreign-types-shared](https://github.com/sfackler/foreign-types) | 0.3.1 | MIT/Apache-2.0 |
-| [form_urlencoded](https://github.com/servo/rust-url) | 1.2.2 | MIT OR Apache-2.0 |
+| [form_urlencoded](https://github.com/servo/rust-url) | 1.2.3 | MIT OR Apache-2.0 |
 | [futf](https://github.com/servo/futf) | 0.1.5 | MIT / Apache-2.0 |
 | [futures](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 |
 | [futures-channel](https://github.com/rust-lang/futures-rs) | 0.3.34 | MIT OR Apache-2.0 |
@@ -256,6 +259,7 @@ dev / build 依赖不进最终程序，不列入。
 | [lebe](https://github.com/johannesvollmer/lebe) | 0.5.3 | BSD-3-Clause |
 | [libc](https://github.com/rust-lang/libc) | 0.2.191 | MIT OR Apache-2.0 |
 | [libm](https://github.com/rust-lang/compiler-builtins) | 0.2.16 | MIT |
+| [libsqlite3-sys](https://github.com/rusqlite/rusqlite) | 0.40.0 | MIT |
 | [link-section](https://github.com/mmastrac/linktime) | 0.19.3 | Apache-2.0 OR MIT |
 | [linktime-proc-macro](https://github.com/mmastrac/linktime) | 0.2.3 | Apache-2.0 OR MIT |
 | [litemap](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 |
@@ -377,6 +381,7 @@ dev / build 依赖不进最终程序，不列入。
 | [rquickjs](https://github.com/DelSkayn/rquickjs.git) | 0.14.0 | MIT |
 | [rquickjs-core](https://github.com/DelSkayn/rquickjs.git) | 0.14.0 | MIT |
 | [rquickjs-sys](https://github.com/DelSkayn/rquickjs.git) | 0.14.0 | MIT |
+| [rusqlite](https://github.com/rusqlite/rusqlite) | 0.43.0 | MIT |
 | [rust-embed](https://pyrossh.dev/repos/rust-embed) | 8.14.0 | MIT |
 | [rust-embed-impl](https://pyrossh.dev/repos/rust-embed) | 8.14.0 | MIT |
 | [rust-embed-utils](https://pyrossh.dev/repos/rust-embed) | 8.14.0 | MIT |
@@ -514,7 +519,7 @@ dev / build 依赖不进最终程序，不列入。
 | [untrusted](https://github.com/briansmith/untrusted) | 0.9.0 | ISC |
 | [ureq](https://github.com/algesten/ureq) | 3.5.2 | MIT OR Apache-2.0 |
 | [ureq-proto](https://github.com/algesten/ureq-proto) | 0.7.1 | MIT OR Apache-2.0 |
-| [url](https://github.com/servo/rust-url) | 2.5.8 | MIT OR Apache-2.0 |
+| [url](https://github.com/servo/rust-url) | 2.5.9 | MIT OR Apache-2.0 |
 | [usvg](https://github.com/linebender/resvg) | 0.45.1 | Apache-2.0 OR MIT |
 | [usvg](https://github.com/linebender/resvg) | 0.46.0 | Apache-2.0 OR MIT |
 | [utf-8](https://github.com/SimonSapin/rust-utf8) | 0.7.6 | MIT OR Apache-2.0 |
@@ -606,7 +611,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### 2. accesskit 0.24.1 等 218 项
 
-使用者：accesskit 0.24.1（Apache-2.0 标准文本（spdx.org））、accesskit_consumer 0.38.0（Apache-2.0 标准文本（spdx.org））、accesskit_macos 0.26.3（Apache-2.0 标准文本（spdx.org））、accesskit_windows 0.34.0（Apache-2.0 标准文本（spdx.org））、addr2line 0.27.1（LICENSE-APACHE）、arc-swap 1.9.5（LICENSE-APACHE）、arrayvec 0.7.8（LICENSE-APACHE）、async-channel 2.5.0（LICENSE-APACHE）、async-executor 1.14.1（LICENSE-APACHE）、async-fs 2.2.0（LICENSE-APACHE）、async-io 2.6.0（LICENSE-APACHE）、async-lock 3.5.0（LICENSE-APACHE）、async-net 2.0.0（LICENSE-APACHE）、async-process 2.5.0（LICENSE-APACHE）、async-signal 0.2.14（LICENSE-APACHE）、async-task 4.7.1（LICENSE-APACHE）、atomic-waker 1.1.2（LICENSE-APACHE）、backtrace 0.3.77（LICENSE-APACHE）、base64 0.22.1（LICENSE-APACHE）、base64 0.23.1（LICENSE-APACHE）、bitflags 1.3.2（LICENSE-APACHE）、bitflags 2.13.2（LICENSE-APACHE）、block-buffer 0.10.4（LICENSE-APACHE）、block-buffer 0.12.1（LICENSE-APACHE）、blocking 1.7.0（LICENSE-APACHE）、bstr 1.13.1（LICENSE-APACHE）、bumpalo 3.20.3（LICENSE-APACHE）、bytemuck 1.25.2（LICENSE-APACHE）、cfg-if 1.0.5（LICENSE-APACHE）、concurrent-queue 2.5.0（LICENSE-APACHE）、const-oid 0.10.3（LICENSE-APACHE）、core-foundation 0.10.1（LICENSE-APACHE）、core-foundation 0.9.4（LICENSE-APACHE）、core-foundation-sys 0.8.7（LICENSE-APACHE）、core-graphics 0.24.0（LICENSE-APACHE）、core-graphics-types 0.2.0（LICENSE-APACHE）、core-text 21.0.0（LICENSE-APACHE）、core_detect 1.0.0（LICENSE-APACHE）、cpufeatures 0.2.17（LICENSE-APACHE）、cpufeatures 0.3.1（LICENSE-APACHE）、crossbeam-channel 0.5.17（LICENSE-APACHE）、crossbeam-deque 0.8.8（LICENSE-APACHE）、crossbeam-epoch 0.9.21（LICENSE-APACHE）、crossbeam-utils 0.8.23（LICENSE-APACHE）、crypto-common 0.1.7（LICENSE-APACHE）、crypto-common 0.2.2（LICENSE-APACHE）、curve25519-dalek-derive 0.1.1（LICENSE-APACHE）、data-url 0.3.2（LICENSE-APACHE）、digest 0.10.7（LICENSE-APACHE）、digest 0.11.3（LICENSE-APACHE）、dispatch2 0.3.1（Apache-2.0 标准文本（spdx.org））、displaydoc 0.2.7（LICENSE-APACHE）、either 1.19.0（LICENSE-APACHE）、encoding_rs 0.8.44（LICENSE-APACHE）、encoding_rs_io 0.1.8（LICENSE-APACHE）、equivalent 1.0.3（LICENSE-APACHE）、errno 0.3.15（LICENSE-APACHE）、euclid 0.22.14（LICENSE-APACHE）、event-listener 5.4.2（LICENSE-APACHE）、event-listener-strategy 0.5.4（LICENSE-APACHE）、eventsource-stream 0.2.3（Apache-2.0 标准文本（spdx.org））、fastrand 2.5.0（LICENSE-APACHE）、filetime 0.2.29（LICENSE-APACHE）、flate2 1.1.11（LICENSE-APACHE）、flume 0.12.0（LICENSE-APACHE）、fnv 1.0.7（LICENSE-APACHE）、form_urlencoded 1.2.2（LICENSE-APACHE）、futf 0.1.5（LICENSE-APACHE）、futures-lite 2.6.1（LICENSE-APACHE）、gif 0.13.3（LICENSE-APACHE）、gif 0.14.2（LICENSE-APACHE）、gimli 0.34.0（LICENSE-APACHE）、glob 0.3.4（LICENSE-APACHE）、gpui-kit 0.9.1（Apache-2.0 标准文本（spdx.org））、hash32 0.3.1（LICENSE-APACHE）、hashbrown 0.16.1（LICENSE-APACHE）、hashbrown 0.17.1（LICENSE-APACHE）、heapless 0.9.3（LICENSE-APACHE）、heck 0.5.0（LICENSE-APACHE）、html5ever 0.27.0（LICENSE-APACHE）、httparse 1.10.1（LICENSE-APACHE）、hybrid-array 0.4.15（LICENSE-APACHE）、hyper-rustls 0.27.10（LICENSE-APACHE）、idna 1.1.0（LICENSE-APACHE）、idna_adapter 1.2.2（LICENSE-APACHE）、indexmap 2.14.2（LICENSE-APACHE）、itertools 0.11.0（LICENSE-APACHE）、itertools 0.13.0（LICENSE-APACHE）、itertools 0.14.0（LICENSE-APACHE）、keyboard-types 0.8.3（LICENSE-APACHE）、kurbo 0.11.3（LICENSE-APACHE）、kurbo 0.13.1（LICENSE-APACHE）、lazy_static 1.5.1（LICENSE-APACHE）、lock_api 0.4.14（LICENSE-APACHE）、log 0.4.35（LICENSE-APACHE）、lyon 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_algorithms 1.0.22（Apache-2.0 标准文本（spdx.org））、lyon_geom 1.0.20（Apache-2.0 标准文本（spdx.org））、lyon_path 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_tessellation 1.0.23（Apache-2.0 标准文本（spdx.org））、mac 0.1.1（Apache-2.0 标准文本（spdx.org））、mac-notification-sys 0.6.15（Apache-2.0 标准文本（spdx.org））、markup5ever 0.12.1（LICENSE-APACHE）、markup5ever_rcdom 0.3.0（LICENSE-APACHE）、mime 0.3.18（LICENSE-APACHE）、minimal-lexical 0.2.1（LICENSE-APACHE）、muda 0.21.2（LICENSE-APACHE）、multiversion 0.8.1（LICENSE-APACHE）、multiversion-macros 0.8.1（LICENSE-APACHE）、multiversion_no_op 1.0.0（LICENSE-APACHE）、nohash-hasher 0.2.0（LICENSE-APACHE）、num-traits 0.2.19（LICENSE-APACHE）、num_cpus 1.17.0（LICENSE-APACHE）、objc2-app-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-data 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-foundation 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-graphics 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-image 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-services 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-text 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-video 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-metal 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-quartz-core 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-security 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-user-notifications 0.3.2（Apache-2.0 标准文本（spdx.org））、object 0.40.0（LICENSE-APACHE）、once_cell 1.21.4（LICENSE-APACHE）、parking 2.2.1（LICENSE-APACHE）、parking_lot 0.12.5（LICENSE-APACHE）、parking_lot_core 0.9.12（LICENSE-APACHE）、pathfinder_geometry 0.5.1（Apache-2.0 标准文本（spdx.org））、pathfinder_simd 0.5.6（Apache-2.0 标准文本（spdx.org））、percent-encoding 2.3.2（LICENSE-APACHE）、piper 0.2.5（LICENSE-APACHE）、png 0.17.16（LICENSE-APACHE）、png 0.18.1（LICENSE-APACHE）、polling 3.11.0（LICENSE-APACHE）、pollster 0.4.0（LICENSE-APACHE）、polycool 0.4.0（LICENSE-APACHE）、profiling 1.0.18（Apache-2.0 标准文本（spdx.org））、profiling-procmacros 1.0.18（Apache-2.0 标准文本（spdx.org））、qoi 0.4.1（LICENSE-APACHE）、rayon 1.12.0（LICENSE-APACHE）、rayon-core 1.13.0（LICENSE-APACHE）、regex 1.13.1（LICENSE-APACHE）、regex-automata 0.4.18（LICENSE-APACHE）、regex-syntax 0.8.11（LICENSE-APACHE）、relative-path 2.0.3（LICENSE-APACHE）、roxmltree 0.20.0（LICENSE-APACHE）、roxmltree 0.21.2（LICENSE-APACHE）、rustc-demangle 0.1.28（LICENSE-APACHE）、rustix 1.1.6（LICENSE-APACHE）、rustls 0.23.46（LICENSE-APACHE）、rustls-native-certs 0.8.5（LICENSE-APACHE）、rustls-platform-verifier 0.7.1（LICENSE-APACHE）、scopeguard 1.2.0（LICENSE-APACHE）、security-framework 3.7.0（LICENSE-APACHE）、security-framework-sys 2.17.0（LICENSE-APACHE）、sha1 0.10.7（LICENSE-APACHE）、sha2 0.10.9（LICENSE-APACHE）、sha2 0.11.1（LICENSE-APACHE）、shellexpand 3.1.2（LICENSE-APACHE）、signal-hook-registry 1.4.8（LICENSE-APACHE）、signature 2.2.0（LICENSE-APACHE）、similar 2.7.0（LICENSE）、similar 3.2.1（LICENSE）、simplecss 0.2.2（LICENSE-APACHE）、siphasher 1.0.4（LICENSE-APACHE）、smallvec 1.16.5（LICENSE-APACHE）、smol 2.0.2（LICENSE-APACHE）、smol_str 0.3.7（LICENSE-APACHE）、socket2 0.6.5（LICENSE-APACHE）、stable_deref_trait 1.2.1（LICENSE-APACHE）、static_assertions 1.1.0（LICENSE-APACHE）、string_cache 0.8.9（LICENSE-APACHE）、svg_fmt 0.4.5（Apache-2.0 标准文本（spdx.org））、svgtypes 0.15.3（LICENSE-APACHE）、svgtypes 0.16.2（LICENSE-APACHE）、system-configuration 0.7.0（LICENSE-APACHE）、system-configuration-sys 0.6.0（LICENSE-APACHE）、tar 0.4.46（LICENSE-APACHE）、target-features 0.1.6（LICENSE-APACHE）、tendril 0.4.3（LICENSE-APACHE）、thread_local 1.1.10（LICENSE-APACHE）、tinyvec 1.13.3（LICENSE-APACHE.md）、tray-icon 0.26.1（LICENSE-APACHE）、triomphe 0.1.17（LICENSE-APACHE）、ttf-parser 0.25.1（LICENSE-APACHE）、tungstenite 0.28.0（LICENSE-APACHE）、unicase 2.10.0（LICENSE-APACHE）、unicode-bidi 0.3.18（LICENSE-APACHE）、unicode-bidi-mirroring 0.4.0（LICENSE-APACHE）、unicode-ccc 0.4.0（LICENSE-APACHE）、unicode-id 0.3.7（LICENSE-APACHE）、unicode-linebreak 0.1.5（LICENSE）、unicode-properties 0.1.5（LICENSE-APACHE）、unicode-segmentation 1.13.3（LICENSE-APACHE）、unicode-vo 0.1.0（LICENSE-APACHE）、unicode-width 0.2.3（LICENSE-APACHE）、ureq 3.5.2（LICENSE-APACHE）、ureq-proto 0.7.1（LICENSE-APACHE.txt）、url 2.5.8（LICENSE-APACHE）、utf8_iter 1.1.0（LICENSE-APACHE）、utf_types 1.0.0（LICENSE-APACHE）、uuid 1.29.2（LICENSE-APACHE）、waker-fn 1.2.0（LICENSE-APACHE）、weezl 0.1.12（LICENSE-APACHE）、xml5ever 0.18.1（LICENSE-APACHE）、zed-font-kit 0.14.1-zed（LICENSE-APACHE）、zeroize 1.9.1（LICENSE-APACHE）、zeroize_derive 1.5.0（LICENSE-APACHE）、zune-core 0.4.12（Apache-2.0 标准文本（spdx.org））、zune-core 0.5.3（LICENSE-APACHE）、zune-inflate 0.2.54（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.4.21（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.5.15（LICENSE-APACHE）
+使用者：accesskit 0.24.1（Apache-2.0 标准文本（spdx.org））、accesskit_consumer 0.38.0（Apache-2.0 标准文本（spdx.org））、accesskit_macos 0.26.3（Apache-2.0 标准文本（spdx.org））、accesskit_windows 0.34.0（Apache-2.0 标准文本（spdx.org））、addr2line 0.27.1（LICENSE-APACHE）、arc-swap 1.9.5（LICENSE-APACHE）、arrayvec 0.7.8（LICENSE-APACHE）、async-channel 2.5.0（LICENSE-APACHE）、async-executor 1.14.1（LICENSE-APACHE）、async-fs 2.2.0（LICENSE-APACHE）、async-io 2.6.0（LICENSE-APACHE）、async-lock 3.5.0（LICENSE-APACHE）、async-net 2.0.0（LICENSE-APACHE）、async-process 2.5.0（LICENSE-APACHE）、async-signal 0.2.14（LICENSE-APACHE）、async-task 4.7.1（LICENSE-APACHE）、atomic-waker 1.1.2（LICENSE-APACHE）、backtrace 0.3.77（LICENSE-APACHE）、base64 0.22.1（LICENSE-APACHE）、base64 0.23.1（LICENSE-APACHE）、bitflags 1.3.2（LICENSE-APACHE）、bitflags 2.13.2（LICENSE-APACHE）、block-buffer 0.10.4（LICENSE-APACHE）、block-buffer 0.12.1（LICENSE-APACHE）、blocking 1.7.0（LICENSE-APACHE）、bstr 1.13.1（LICENSE-APACHE）、bumpalo 3.20.3（LICENSE-APACHE）、bytemuck 1.25.2（LICENSE-APACHE）、cfg-if 1.0.5（LICENSE-APACHE）、concurrent-queue 2.5.0（LICENSE-APACHE）、const-oid 0.10.3（LICENSE-APACHE）、core-foundation 0.10.1（LICENSE-APACHE）、core-foundation 0.9.4（LICENSE-APACHE）、core-foundation-sys 0.8.7（LICENSE-APACHE）、core-graphics 0.24.0（LICENSE-APACHE）、core-graphics-types 0.2.0（LICENSE-APACHE）、core-text 21.0.0（LICENSE-APACHE）、core_detect 1.0.0（LICENSE-APACHE）、cpufeatures 0.2.17（LICENSE-APACHE）、cpufeatures 0.3.1（LICENSE-APACHE）、crossbeam-channel 0.5.17（LICENSE-APACHE）、crossbeam-deque 0.8.8（LICENSE-APACHE）、crossbeam-epoch 0.9.21（LICENSE-APACHE）、crossbeam-utils 0.8.23（LICENSE-APACHE）、crypto-common 0.1.7（LICENSE-APACHE）、crypto-common 0.2.2（LICENSE-APACHE）、curve25519-dalek-derive 0.1.1（LICENSE-APACHE）、data-url 0.3.2（LICENSE-APACHE）、digest 0.10.7（LICENSE-APACHE）、digest 0.11.3（LICENSE-APACHE）、dispatch2 0.3.1（Apache-2.0 标准文本（spdx.org））、displaydoc 0.2.7（LICENSE-APACHE）、either 1.19.0（LICENSE-APACHE）、encoding_rs 0.8.44（LICENSE-APACHE）、encoding_rs_io 0.1.8（LICENSE-APACHE）、equivalent 1.0.3（LICENSE-APACHE）、errno 0.3.15（LICENSE-APACHE）、euclid 0.22.14（LICENSE-APACHE）、event-listener 5.4.2（LICENSE-APACHE）、event-listener-strategy 0.5.4（LICENSE-APACHE）、eventsource-stream 0.2.3（Apache-2.0 标准文本（spdx.org））、fastrand 2.5.0（LICENSE-APACHE）、filetime 0.2.29（LICENSE-APACHE）、flate2 1.1.11（LICENSE-APACHE）、flume 0.12.0（LICENSE-APACHE）、fnv 1.0.7（LICENSE-APACHE）、form_urlencoded 1.2.3（LICENSE-APACHE）、futf 0.1.5（LICENSE-APACHE）、futures-lite 2.6.1（LICENSE-APACHE）、gif 0.13.3（LICENSE-APACHE）、gif 0.14.2（LICENSE-APACHE）、gimli 0.34.0（LICENSE-APACHE）、glob 0.3.4（LICENSE-APACHE）、gpui-kit 0.9.1（Apache-2.0 标准文本（spdx.org））、hash32 0.3.1（LICENSE-APACHE）、hashbrown 0.16.1（LICENSE-APACHE）、hashbrown 0.17.1（LICENSE-APACHE）、heapless 0.9.3（LICENSE-APACHE）、heck 0.5.0（LICENSE-APACHE）、html5ever 0.27.0（LICENSE-APACHE）、httparse 1.10.1（LICENSE-APACHE）、hybrid-array 0.4.15（LICENSE-APACHE）、hyper-rustls 0.27.10（LICENSE-APACHE）、idna 1.1.0（LICENSE-APACHE）、idna_adapter 1.2.2（LICENSE-APACHE）、indexmap 2.14.2（LICENSE-APACHE）、itertools 0.11.0（LICENSE-APACHE）、itertools 0.13.0（LICENSE-APACHE）、itertools 0.14.0（LICENSE-APACHE）、keyboard-types 0.8.3（LICENSE-APACHE）、kurbo 0.11.3（LICENSE-APACHE）、kurbo 0.13.1（LICENSE-APACHE）、lazy_static 1.5.1（LICENSE-APACHE）、lock_api 0.4.14（LICENSE-APACHE）、log 0.4.35（LICENSE-APACHE）、lyon 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_algorithms 1.0.22（Apache-2.0 标准文本（spdx.org））、lyon_geom 1.0.20（Apache-2.0 标准文本（spdx.org））、lyon_path 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_tessellation 1.0.23（Apache-2.0 标准文本（spdx.org））、mac 0.1.1（Apache-2.0 标准文本（spdx.org））、mac-notification-sys 0.6.15（Apache-2.0 标准文本（spdx.org））、markup5ever 0.12.1（LICENSE-APACHE）、markup5ever_rcdom 0.3.0（LICENSE-APACHE）、mime 0.3.18（LICENSE-APACHE）、minimal-lexical 0.2.1（LICENSE-APACHE）、muda 0.21.2（LICENSE-APACHE）、multiversion 0.8.1（LICENSE-APACHE）、multiversion-macros 0.8.1（LICENSE-APACHE）、multiversion_no_op 1.0.0（LICENSE-APACHE）、nohash-hasher 0.2.0（LICENSE-APACHE）、num-traits 0.2.19（LICENSE-APACHE）、num_cpus 1.17.0（LICENSE-APACHE）、objc2-app-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-data 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-foundation 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-graphics 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-image 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-services 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-text 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-video 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-metal 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-quartz-core 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-security 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-user-notifications 0.3.2（Apache-2.0 标准文本（spdx.org））、object 0.40.0（LICENSE-APACHE）、once_cell 1.21.4（LICENSE-APACHE）、parking 2.2.1（LICENSE-APACHE）、parking_lot 0.12.5（LICENSE-APACHE）、parking_lot_core 0.9.12（LICENSE-APACHE）、pathfinder_geometry 0.5.1（Apache-2.0 标准文本（spdx.org））、pathfinder_simd 0.5.6（Apache-2.0 标准文本（spdx.org））、percent-encoding 2.3.2（LICENSE-APACHE）、piper 0.2.5（LICENSE-APACHE）、png 0.17.16（LICENSE-APACHE）、png 0.18.1（LICENSE-APACHE）、polling 3.11.0（LICENSE-APACHE）、pollster 0.4.0（LICENSE-APACHE）、polycool 0.4.0（LICENSE-APACHE）、profiling 1.0.18（Apache-2.0 标准文本（spdx.org））、profiling-procmacros 1.0.18（Apache-2.0 标准文本（spdx.org））、qoi 0.4.1（LICENSE-APACHE）、rayon 1.12.0（LICENSE-APACHE）、rayon-core 1.13.0（LICENSE-APACHE）、regex 1.13.1（LICENSE-APACHE）、regex-automata 0.4.18（LICENSE-APACHE）、regex-syntax 0.8.11（LICENSE-APACHE）、relative-path 2.0.3（LICENSE-APACHE）、roxmltree 0.20.0（LICENSE-APACHE）、roxmltree 0.21.2（LICENSE-APACHE）、rustc-demangle 0.1.28（LICENSE-APACHE）、rustix 1.1.6（LICENSE-APACHE）、rustls 0.23.46（LICENSE-APACHE）、rustls-native-certs 0.8.5（LICENSE-APACHE）、rustls-platform-verifier 0.7.1（LICENSE-APACHE）、scopeguard 1.2.0（LICENSE-APACHE）、security-framework 3.7.0（LICENSE-APACHE）、security-framework-sys 2.17.0（LICENSE-APACHE）、sha1 0.10.7（LICENSE-APACHE）、sha2 0.10.9（LICENSE-APACHE）、sha2 0.11.1（LICENSE-APACHE）、shellexpand 3.1.2（LICENSE-APACHE）、signal-hook-registry 1.4.8（LICENSE-APACHE）、signature 2.2.0（LICENSE-APACHE）、similar 2.7.0（LICENSE）、similar 3.2.1（LICENSE）、simplecss 0.2.2（LICENSE-APACHE）、siphasher 1.0.4（LICENSE-APACHE）、smallvec 1.16.5（LICENSE-APACHE）、smol 2.0.2（LICENSE-APACHE）、smol_str 0.3.7（LICENSE-APACHE）、socket2 0.6.5（LICENSE-APACHE）、stable_deref_trait 1.2.1（LICENSE-APACHE）、static_assertions 1.1.0（LICENSE-APACHE）、string_cache 0.8.9（LICENSE-APACHE）、svg_fmt 0.4.5（Apache-2.0 标准文本（spdx.org））、svgtypes 0.15.3（LICENSE-APACHE）、svgtypes 0.16.2（LICENSE-APACHE）、system-configuration 0.7.0（LICENSE-APACHE）、system-configuration-sys 0.6.0（LICENSE-APACHE）、tar 0.4.46（LICENSE-APACHE）、target-features 0.1.6（LICENSE-APACHE）、tendril 0.4.3（LICENSE-APACHE）、thread_local 1.1.10（LICENSE-APACHE）、tinyvec 1.13.3（LICENSE-APACHE.md）、tray-icon 0.26.1（LICENSE-APACHE）、triomphe 0.1.17（LICENSE-APACHE）、ttf-parser 0.25.1（LICENSE-APACHE）、tungstenite 0.28.0（LICENSE-APACHE）、unicase 2.10.0（LICENSE-APACHE）、unicode-bidi 0.3.18（LICENSE-APACHE）、unicode-bidi-mirroring 0.4.0（LICENSE-APACHE）、unicode-ccc 0.4.0（LICENSE-APACHE）、unicode-id 0.3.7（LICENSE-APACHE）、unicode-linebreak 0.1.5（LICENSE）、unicode-properties 0.1.5（LICENSE-APACHE）、unicode-segmentation 1.13.3（LICENSE-APACHE）、unicode-vo 0.1.0（LICENSE-APACHE）、unicode-width 0.2.3（LICENSE-APACHE）、ureq 3.5.2（LICENSE-APACHE）、ureq-proto 0.7.1（LICENSE-APACHE.txt）、url 2.5.9（LICENSE-APACHE）、utf8_iter 1.1.0（LICENSE-APACHE）、utf_types 1.0.0（LICENSE-APACHE）、uuid 1.29.2（LICENSE-APACHE）、waker-fn 1.2.0（LICENSE-APACHE）、weezl 0.1.12（LICENSE-APACHE）、xml5ever 0.18.1（LICENSE-APACHE）、zed-font-kit 0.14.1-zed（LICENSE-APACHE）、zeroize 1.9.1（LICENSE-APACHE）、zeroize_derive 1.5.0（LICENSE-APACHE）、zune-core 0.4.12（Apache-2.0 标准文本（spdx.org））、zune-core 0.5.3（LICENSE-APACHE）、zune-inflate 0.2.54（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.4.21（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.5.15（LICENSE-APACHE）
 
 ```text
 Apache License
@@ -1459,9 +1464,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 13. anstream 1.0.0 等 27 项
+### 13. anstream 1.0.0 等 29 项
 
-使用者：anstream 1.0.0（LICENSE-APACHE）、anstyle 1.0.14（LICENSE-APACHE）、anstyle-parse 1.0.0（LICENSE-APACHE）、anstyle-query 1.1.5（LICENSE-APACHE）、anstyle-wincon 3.0.11（LICENSE-APACHE）、bit_field 0.10.4（LICENSE-APACHE）、colorchoice 1.0.5（LICENSE-APACHE）、crc32fast 1.5.5（LICENSE-APACHE）、ctor 1.0.13（LICENSE-APACHE）、dpi 0.1.2（LICENSE）、float-ord 0.3.2（LICENSE-APACHE）、foreign-types 0.5.0（LICENSE-APACHE）、foreign-types-macros 0.2.4（LICENSE-APACHE）、foreign-types-shared 0.3.1（LICENSE-APACHE）、is_terminal_polyfill 1.70.2（LICENSE-APACHE）、link-section 0.19.3（LICENSE-APACHE）、linktime-proc-macro 0.2.3（LICENSE-APACHE）、notify-rust 4.19.0（LICENSE-Apache）、once_cell_polyfill 1.70.2（LICENSE-APACHE）、quick-error 2.0.1（LICENSE-APACHE）、serde_spanned 0.6.9（LICENSE-APACHE）、toml 0.8.23（LICENSE-APACHE）、toml 0.9.12+spec-1.1.0（LICENSE-APACHE）、toml_datetime 0.6.11（LICENSE-APACHE）、toml_datetime 0.7.5+spec-1.1.0（LICENSE-APACHE）、toml_edit 0.22.27（LICENSE-APACHE）、toml_write 0.1.2（LICENSE-APACHE）
+使用者：anstream 1.0.0（LICENSE-APACHE）、anstyle 1.0.14（LICENSE-APACHE）、anstyle-parse 1.0.0（LICENSE-APACHE）、anstyle-query 1.1.5（LICENSE-APACHE）、anstyle-wincon 3.0.11（LICENSE-APACHE）、bit_field 0.10.4（LICENSE-APACHE）、colorchoice 1.0.5（LICENSE-APACHE）、crc32fast 1.5.5（LICENSE-APACHE）、ctor 1.0.13（LICENSE-APACHE）、dpi 0.1.2（LICENSE）、fallible-iterator 0.3.0（LICENSE-APACHE）、fallible-streaming-iterator 0.1.9（LICENSE-APACHE）、float-ord 0.3.2（LICENSE-APACHE）、foreign-types 0.5.0（LICENSE-APACHE）、foreign-types-macros 0.2.4（LICENSE-APACHE）、foreign-types-shared 0.3.1（LICENSE-APACHE）、is_terminal_polyfill 1.70.2（LICENSE-APACHE）、link-section 0.19.3（LICENSE-APACHE）、linktime-proc-macro 0.2.3（LICENSE-APACHE）、notify-rust 4.19.0（LICENSE-Apache）、once_cell_polyfill 1.70.2（LICENSE-APACHE）、quick-error 2.0.1（LICENSE-APACHE）、serde_spanned 0.6.9（LICENSE-APACHE）、toml 0.8.23（LICENSE-APACHE）、toml 0.9.12+spec-1.1.0（LICENSE-APACHE）、toml_datetime 0.6.11（LICENSE-APACHE）、toml_datetime 0.7.5+spec-1.1.0（LICENSE-APACHE）、toml_edit 0.22.27（LICENSE-APACHE）、toml_write 0.1.2（LICENSE-APACHE）
 
 ```text
 Apache License
@@ -4443,7 +4448,7 @@ SOFTWARE.
 
 ### 55. data-url 0.3.2 等 4 项
 
-使用者：data-url 0.3.2（LICENSE-MIT）、idna 1.1.0（LICENSE-MIT）、percent-encoding 2.3.2（LICENSE-MIT）、url 2.5.8（LICENSE-MIT）
+使用者：data-url 0.3.2（LICENSE-MIT）、idna 1.1.0（LICENSE-MIT）、percent-encoding 2.3.2（LICENSE-MIT）、url 2.5.9（LICENSE-MIT）
 
 ```text
 Copyright (c) 2013-2025 The rust-url developers
@@ -5666,7 +5671,59 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 79. fax 0.2.7
+### 79. fallible-iterator 0.3.0
+
+使用者：fallible-iterator 0.3.0（LICENSE-MIT）
+
+```text
+Copyright (c) 2015 The rust-openssl-verify Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### 80. fallible-streaming-iterator 0.1.9
+
+使用者：fallible-streaming-iterator 0.1.9（LICENSE-MIT）
+
+```text
+Copyright (c) 2016 The fallible-streaming-iterator Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### 81. fax 0.2.7
 
 使用者：fax 0.2.7（LICENSE）
 
@@ -5680,7 +5737,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 80. fdeflate 0.3.7 等 6 项
+### 82. fdeflate 0.3.7 等 6 项
 
 使用者：fdeflate 0.3.7（LICENSE-MIT）、half 2.7.1（LICENSE-MIT）、image 0.25.10（LICENSE-MIT）、image-webp 0.2.4（LICENSE-MIT）、simdutf8 0.1.5（LICENSE-MIT）、str_indices 0.4.4（LICENSE-MIT）
 
@@ -5712,7 +5769,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 81. flate2 1.1.11
+### 83. flate2 1.1.11
 
 使用者：flate2 1.1.11（LICENSE-MIT）
 
@@ -5744,7 +5801,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 82. float-cmp 0.9.0
+### 84. float-cmp 0.9.0
 
 使用者：float-cmp 0.9.0（LICENSE）
 
@@ -5770,7 +5827,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 IN THE SOFTWARE.
 ```
 
-### 83. float-ord 0.3.2
+### 85. float-ord 0.3.2
 
 使用者：float-ord 0.3.2（LICENSE-MIT）
 
@@ -5796,7 +5853,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 84. float_next_after 1.0.0
+### 86. float_next_after 1.0.0
 
 使用者：float_next_after 1.0.0（LICENSE）
 
@@ -5826,7 +5883,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 85. fluent-uri 0.1.4
+### 87. fluent-uri 0.1.4
 
 使用者：fluent-uri 0.1.4（LICENSE）
 
@@ -5854,7 +5911,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 86. fnv 1.0.7
+### 88. fnv 1.0.7
 
 使用者：fnv 1.0.7（LICENSE-MIT）
 
@@ -5886,7 +5943,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 87. foldhash 0.2.0
+### 89. foldhash 0.2.0
 
 使用者：foldhash 0.2.0（LICENSE）
 
@@ -5912,7 +5969,7 @@ the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### 88. fontdb 0.23.0 等 3 项
+### 90. fontdb 0.23.0 等 3 项
 
 使用者：fontdb 0.23.0（LICENSE）、unicode-bidi-mirroring 0.4.0（LICENSE-MIT）、unicode-ccc 0.4.0（LICENSE-MIT）
 
@@ -5940,7 +5997,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 89. foreign-types 0.5.0 等 3 项
+### 91. foreign-types 0.5.0 等 3 项
 
 使用者：foreign-types 0.5.0（LICENSE-MIT）、foreign-types-macros 0.2.4（LICENSE-MIT）、foreign-types-shared 0.3.1（LICENSE-MIT）
 
@@ -5966,9 +6023,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 90. form_urlencoded 1.2.2
+### 92. form_urlencoded 1.2.3
 
-使用者：form_urlencoded 1.2.2（LICENSE-MIT）
+使用者：form_urlencoded 1.2.3（LICENSE-MIT）
 
 ```text
 Copyright (c) 2013-2016 The rust-url developers
@@ -5998,7 +6055,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 91. futf 0.1.5 等 2 项
+### 93. futf 0.1.5 等 2 项
 
 使用者：futf 0.1.5（LICENSE-MIT）、tendril 0.4.3（LICENSE-MIT）
 
@@ -6030,7 +6087,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 92. futures 0.3.34 等 9 项
+### 94. futures 0.3.34 等 9 项
 
 使用者：futures 0.3.34（LICENSE-APACHE）、futures-channel 0.3.34（LICENSE-APACHE）、futures-core 0.3.34（LICENSE-APACHE）、futures-executor 0.3.34（LICENSE-APACHE）、futures-io 0.3.34（LICENSE-APACHE）、futures-macro 0.3.34（LICENSE-APACHE）、futures-sink 0.3.34（LICENSE-APACHE）、futures-task 0.3.34（LICENSE-APACHE）、futures-util 0.3.34（LICENSE-APACHE）
 
@@ -6239,7 +6296,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 93. futures 0.3.34 等 9 项
+### 95. futures 0.3.34 等 9 项
 
 使用者：futures 0.3.34（LICENSE-MIT）、futures-channel 0.3.34（LICENSE-MIT）、futures-core 0.3.34（LICENSE-MIT）、futures-executor 0.3.34（LICENSE-MIT）、futures-io 0.3.34（LICENSE-MIT）、futures-macro 0.3.34（LICENSE-MIT）、futures-sink 0.3.34（LICENSE-MIT）、futures-task 0.3.34（LICENSE-MIT）、futures-util 0.3.34（LICENSE-MIT）
 
@@ -6272,7 +6329,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 94. generic-array 0.14.7
+### 96. generic-array 0.14.7
 
 使用者：generic-array 0.14.7（LICENSE）
 
@@ -6300,7 +6357,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 95. getrandom 0.3.4 等 4 项
+### 97. getrandom 0.3.4 等 4 项
 
 使用者：getrandom 0.3.4（LICENSE-APACHE）、getrandom 0.4.3（LICENSE-APACHE）、ropey 2.0.0-beta.1（LICENSE-APACHE）、str_indices 0.4.4（LICENSE-APACHE）
 
@@ -6508,7 +6565,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 96. getrandom 0.3.4
+### 98. getrandom 0.3.4
 
 使用者：getrandom 0.3.4（LICENSE-MIT）
 
@@ -6541,7 +6598,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 97. getrandom 0.4.3
+### 99. getrandom 0.4.3
 
 使用者：getrandom 0.4.3（LICENSE-MIT）
 
@@ -6574,7 +6631,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 98. gif 0.13.3 等 2 项
+### 100. gif 0.13.3 等 2 项
 
 使用者：gif 0.13.3（LICENSE-MIT）、gif 0.14.2（LICENSE-MIT）
 
@@ -6602,7 +6659,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 99. gimli 0.34.0 等 7 项
+### 101. gimli 0.34.0 等 7 项
 
 使用者：gimli 0.34.0（LICENSE-MIT）、heck 0.5.0（LICENSE-MIT）、unicode-bidi 0.3.18（LICENSE-MIT）、unicode-id 0.3.7（LICENSE-MIT）、unicode-properties 0.1.5（LICENSE-MIT）、unicode-segmentation 1.13.3（LICENSE-MIT）、unicode-width 0.2.3（LICENSE-MIT）
 
@@ -6634,7 +6691,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 100. globwalk 0.8.1
+### 102. globwalk 0.8.1
 
 使用者：globwalk 0.8.1（LICENSE）
 
@@ -6660,7 +6717,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 101. gpui-base 0.9.1 等 3 项
+### 103. gpui-base 0.9.1 等 3 项
 
 使用者：gpui-base 0.9.1（LICENSE-APACHE）、gpui-component 0.9.1（LICENSE-APACHE）、gpui-component-macros 0.9.1（LICENSE-APACHE）
 
@@ -6858,7 +6915,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 END OF TERMS AND CONDITIONS
 ```
 
-### 102. gpui-kit-assets 0.9.1
+### 104. gpui-kit-assets 0.9.1
 
 使用者：gpui-kit-assets 0.9.1（LICENSE-LUCIDE）
 
@@ -6908,7 +6965,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 103. gpui-pre 0.3.12 等 14 项
+### 105. gpui-pre 0.3.12 等 14 项
 
 使用者：gpui-pre 0.3.12（LICENSE-APACHE）、gpui-pre-apple 0.3.12（LICENSE-APACHE）、gpui-pre-collections 0.3.12（LICENSE-APACHE）、gpui-pre-derive-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-http-client 0.3.12（LICENSE-APACHE）、gpui-pre-macros 0.3.12（LICENSE-APACHE）、gpui-pre-platform 0.3.12（LICENSE-APACHE）、gpui-pre-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-scheduler 0.3.12（LICENSE-APACHE）、gpui-pre-shared-string 0.3.12（LICENSE-APACHE）、gpui-pre-sum-tree 0.3.12（LICENSE-APACHE）、gpui-pre-util 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing-macro 0.3.12（LICENSE-APACHE）
 
@@ -7137,7 +7194,7 @@ Apache License
    END OF TERMS AND CONDITIONS
 ```
 
-### 104. granit-parser 1.3.0
+### 106. granit-parser 1.3.0
 
 使用者：granit-parser 1.3.0（LICENSE）
 
@@ -7159,7 +7216,7 @@ Modifications after commit `825edf857426d034954523fed19599635cbb5043` are Copyri
 Redistributions of this Work must include all inherited and new license notices, including the notices for Chen Yuheng, Ethiraric, and Bourumir Wyngs.
 ```
 
-### 105. h2 0.4.20
+### 107. h2 0.4.20
 
 使用者：h2 0.4.20（LICENSE）
 
@@ -7191,7 +7248,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 106. hash32 0.3.1
+### 108. hash32 0.3.1
 
 使用者：hash32 0.3.1（LICENSE-MIT）
 
@@ -7223,7 +7280,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 107. hashbrown 0.16.1 等 2 项
+### 109. hashbrown 0.16.1 等 2 项
 
 使用者：hashbrown 0.16.1（LICENSE-MIT）、hashbrown 0.17.1（LICENSE-MIT）
 
@@ -7255,7 +7312,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 108. heapless 0.9.3
+### 110. heapless 0.9.3
 
 使用者：heapless 0.9.3（LICENSE-MIT）
 
@@ -7287,7 +7344,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 109. html5ever 0.27.0 等 4 项
+### 111. html5ever 0.27.0 等 4 项
 
 使用者：html5ever 0.27.0（LICENSE-MIT）、markup5ever 0.12.1（LICENSE-MIT）、markup5ever_rcdom 0.3.0（LICENSE-MIT）、xml5ever 0.18.1（LICENSE-MIT）
 
@@ -7319,7 +7376,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 110. http 1.5.0
+### 112. http 1.5.0
 
 使用者：http 1.5.0（LICENSE-APACHE）
 
@@ -7527,7 +7584,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 111. http 1.5.0
+### 113. http 1.5.0
 
 使用者：http 1.5.0（LICENSE-MIT）
 
@@ -7559,7 +7616,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 112. http-body 1.1.0 等 2 项
+### 114. http-body 1.1.0 等 2 项
 
 使用者：http-body 1.1.0（LICENSE）、http-body-util 0.1.5（LICENSE）
 
@@ -7591,7 +7648,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 113. httparse 1.10.1 等 2 项
+### 115. httparse 1.10.1 等 2 项
 
 使用者：httparse 1.10.1（LICENSE-MIT）、num_cpus 1.17.0（LICENSE-MIT）
 
@@ -7617,7 +7674,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 114. hybrid-array 0.4.15
+### 116. hybrid-array 0.4.15
 
 使用者：hybrid-array 0.4.15（LICENSE-MIT）
 
@@ -7649,7 +7706,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 115. hyper 1.12.0 等 2 项
+### 117. hyper 1.12.0 等 2 项
 
 使用者：hyper 1.12.0（LICENSE）、unicase 2.10.0（LICENSE-MIT）
 
@@ -7675,7 +7732,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 116. hyper-rustls 0.27.10 等 3 项
+### 118. hyper-rustls 0.27.10 等 3 项
 
 使用者：hyper-rustls 0.27.10（LICENSE-ISC）、rustls 0.23.46（LICENSE-ISC）、rustls-native-certs 0.8.5（LICENSE-ISC）
 
@@ -7697,7 +7754,7 @@ ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 ```
 
-### 117. hyper-rustls 0.27.10 等 3 项
+### 119. hyper-rustls 0.27.10 等 3 项
 
 使用者：hyper-rustls 0.27.10（LICENSE-MIT）、rustls 0.23.46（LICENSE-MIT）、rustls-native-certs 0.8.5（LICENSE-MIT）
 
@@ -7729,7 +7786,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 118. hyper-util 0.1.21
+### 120. hyper-util 0.1.21
 
 使用者：hyper-util 0.1.21（LICENSE）
 
@@ -7755,7 +7812,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 119. iana-time-zone 0.1.65
+### 121. iana-time-zone 0.1.65
 
 使用者：iana-time-zone 0.1.65（LICENSE-APACHE）
 
@@ -7963,7 +8020,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 120. iana-time-zone 0.1.65
+### 122. iana-time-zone 0.1.65
 
 使用者：iana-time-zone 0.1.65（LICENSE-MIT）
 
@@ -7995,7 +8052,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 121. icu_collections 2.4.0 等 22 项
+### 123. icu_collections 2.4.0 等 22 项
 
 使用者：icu_collections 2.4.0（LICENSE）、icu_locale_core 2.4.0（LICENSE）、icu_locale_fallback 2.4.0（LICENSE）、icu_locale_fallback_data 2.4.0（LICENSE）、icu_normalizer 2.4.0（LICENSE）、icu_normalizer_data 2.4.0（LICENSE）、icu_properties 2.4.0（LICENSE）、icu_properties_data 2.4.0（LICENSE）、icu_provider 2.4.0（LICENSE）、icu_segmenter 2.4.0（LICENSE）、icu_segmenter_data 2.4.0（LICENSE）、litemap 0.8.3（LICENSE）、potential_utf 0.1.6（LICENSE）、tinystr 0.8.5（LICENSE）、writeable 0.6.4（LICENSE）、yoke 0.8.4（LICENSE）、yoke-derive 0.8.4（LICENSE）、zerofrom 0.1.8（LICENSE）、zerofrom-derive 0.1.8（LICENSE）、zerotrie 0.2.5（LICENSE）、zerovec 0.11.9（LICENSE）、zerovec-derive 0.11.7（LICENSE）
 
@@ -8048,7 +8105,7 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 ```
 
-### 122. idna_adapter 1.2.2
+### 124. idna_adapter 1.2.2
 
 使用者：idna_adapter 1.2.2（LICENSE-MIT）
 
@@ -8080,7 +8137,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 123. imagesize 0.13.0 等 2 项
+### 125. imagesize 0.13.0 等 2 项
 
 使用者：imagesize 0.13.0（LICENSE）、imagesize 0.14.0（LICENSE）
 
@@ -8108,7 +8165,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 124. indexmap 2.14.2
+### 126. indexmap 2.14.2
 
 使用者：indexmap 2.14.2（LICENSE-MIT）
 
@@ -8140,7 +8197,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 125. instant 0.1.13
+### 127. instant 0.1.13
 
 使用者：instant 0.1.13（LICENSE）
 
@@ -8174,7 +8231,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 126. ipnet 2.12.2
+### 128. ipnet 2.12.2
 
 使用者：ipnet 2.12.2（LICENSE-APACHE）
 
@@ -8382,7 +8439,7 @@ Apache License
    limitations under the License.
 ```
 
-### 127. ipnet 2.12.2
+### 129. ipnet 2.12.2
 
 使用者：ipnet 2.12.2（LICENSE-MIT）
 
@@ -8396,7 +8453,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 128. keyboard-types 0.8.3
+### 130. keyboard-types 0.8.3
 
 使用者：keyboard-types 0.8.3（LICENSE-MIT）
 
@@ -8422,7 +8479,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 129. kurbo 0.11.3 等 3 项
+### 131. kurbo 0.11.3 等 3 项
 
 使用者：kurbo 0.11.3（LICENSE-MIT）、kurbo 0.13.1（LICENSE-MIT）、polycool 0.4.0（LICENSE-MIT）
 
@@ -8454,7 +8511,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 130. lebe 0.5.3
+### 132. lebe 0.5.3
 
 使用者：lebe 0.5.3（LICENSE-BSD-3-Clause）
 
@@ -8487,7 +8544,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 131. libc 0.2.191
+### 133. libc 0.2.191
 
 使用者：libc 0.2.191（LICENSE-MIT）
 
@@ -8519,7 +8576,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 132. libm 0.2.16
+### 134. libm 0.2.16
 
 使用者：libm 0.2.16（LICENSE.txt）
 
@@ -8784,7 +8841,33 @@ have been licensed under extremely permissive terms.
 Copyright notices are retained in src/* files where relevant.
 ```
 
-### 133. lock_api 0.4.14 等 4 项
+### 135. libsqlite3-sys 0.40.0 等 2 项
+
+使用者：libsqlite3-sys 0.40.0（LICENSE）、rusqlite 0.43.0（LICENSE）
+
+```text
+Copyright (c) 2014 The rusqlite developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### 136. lock_api 0.4.14 等 4 项
 
 使用者：lock_api 0.4.14（LICENSE-MIT）、parking_lot 0.12.5（LICENSE-MIT）、parking_lot_core 0.9.12（LICENSE-MIT）、thread_local 1.1.10（LICENSE-MIT）
 
@@ -8816,7 +8899,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 134. lsp-types 0.97.0
+### 137. lsp-types 0.97.0
 
 使用者：lsp-types 0.97.0（LICENSE）
 
@@ -8844,7 +8927,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 135. mach2 0.6.0
+### 138. mach2 0.6.0
 
 使用者：mach2 0.6.0（LICENSE-BSD）
 
@@ -8874,7 +8957,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 136. mach2 0.6.0
+### 139. mach2 0.6.0
 
 使用者：mach2 0.6.0（LICENSE-MIT）
 
@@ -8906,7 +8989,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 137. markdown 1.0.0
+### 140. markdown 1.0.0
 
 使用者：markdown 1.0.0（license）
 
@@ -8935,7 +9018,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 138. matchers 0.2.0 等 2 项
+### 141. matchers 0.2.0 等 2 项
 
 使用者：matchers 0.2.0（LICENSE）、sharded-slab 0.1.7（LICENSE）
 
@@ -8961,7 +9044,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 139. memmap2 0.9.12
+### 142. memmap2 0.9.12
 
 使用者：memmap2 0.9.12（LICENSE-APACHE）
 
@@ -9169,7 +9252,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 140. memmap2 0.9.12
+### 143. memmap2 0.9.12
 
 使用者：memmap2 0.9.12（LICENSE-MIT）
 
@@ -9202,7 +9285,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 141. mime 0.3.18
+### 144. mime 0.3.18
 
 使用者：mime 0.3.18（LICENSE-MIT）
 
@@ -9228,7 +9311,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 142. mime_guess 2.0.5
+### 145. mime_guess 2.0.5
 
 使用者：mime_guess 2.0.5（LICENSE）
 
@@ -9256,7 +9339,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 143. minimal-lexical 0.2.1
+### 146. minimal-lexical 0.2.1
 
 使用者：minimal-lexical 0.2.1（LICENSE.md）
 
@@ -9300,7 +9383,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 144. miniz_oxide 0.8.9 等 4 项
+### 147. miniz_oxide 0.8.9 等 4 项
 
 使用者：miniz_oxide 0.8.9（LICENSE）、miniz_oxide 0.8.9（LICENSE-MIT.md）、miniz_oxide 0.9.1（LICENSE）、miniz_oxide 0.9.1（LICENSE-MIT.md）
 
@@ -9332,7 +9415,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 145. miniz_oxide 0.8.9 等 2 项
+### 148. miniz_oxide 0.8.9 等 2 项
 
 使用者：miniz_oxide 0.8.9（LICENSE-ZLIB.md）、miniz_oxide 0.9.1（LICENSE-ZLIB.md）
 
@@ -9353,7 +9436,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### 146. mio 1.2.4
+### 149. mio 1.2.4
 
 使用者：mio 1.2.4（LICENSE）
 
@@ -9379,7 +9462,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 147. moxcms 0.8.1 等 2 项
+### 150. moxcms 0.8.1 等 2 项
 
 使用者：moxcms 0.8.1（LICENSE-APACHE.md）、pxfm 0.1.30（LICENSE-APACHE.md）
 
@@ -9587,7 +9670,7 @@ Apache License
    limitations under the License.
 ```
 
-### 148. moxcms 0.8.1 等 2 项
+### 151. moxcms 0.8.1 等 2 项
 
 使用者：moxcms 0.8.1（LICENSE.md）、pxfm 0.1.30（LICENSE.md）
 
@@ -9620,7 +9703,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 149. muda 0.21.2 等 2 项
+### 152. muda 0.21.2 等 2 项
 
 使用者：muda 0.21.2（LICENSE-MIT）、tray-icon 0.26.1（LICENSE-MIT）
 
@@ -9648,7 +9731,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 150. muda 0.21.2
+### 153. muda 0.21.2
 
 使用者：muda 0.21.2（LICENSE.spdx）
 
@@ -9674,7 +9757,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/muda.git
 Creator: Person: Daniel Thompson-Yvetot
 ```
 
-### 151. multiversion 0.8.1 等 2 项
+### 154. multiversion 0.8.1 等 2 项
 
 使用者：multiversion 0.8.1（LICENSE-MIT）、multiversion-macros 0.8.1（LICENSE-MIT）
 
@@ -9688,7 +9771,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 152. multiversion_no_op 1.0.0
+### 155. multiversion_no_op 1.0.0
 
 使用者：multiversion_no_op 1.0.0（COPYRIGHT）
 
@@ -9710,7 +9793,7 @@ See the Licenses for the specific language governing permissions and
 limitations under the Licenses.
 ```
 
-### 153. new_debug_unreachable 1.0.6
+### 156. new_debug_unreachable 1.0.6
 
 使用者：new_debug_unreachable 1.0.6（LICENSE-MIT）
 
@@ -9742,7 +9825,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 154. nix 0.32.0
+### 157. nix 0.32.0
 
 使用者：nix 0.32.0（LICENSE）
 
@@ -9770,7 +9853,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 155. nohash-hasher 0.2.0
+### 158. nohash-hasher 0.2.0
 
 使用者：nohash-hasher 0.2.0（LICENSE-MIT）
 
@@ -9795,7 +9878,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 156. nom 7.1.3
+### 159. nom 7.1.3
 
 使用者：nom 7.1.3（LICENSE）
 
@@ -9822,7 +9905,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 157. normpath 1.5.2
+### 160. normpath 1.5.2
 
 使用者：normpath 1.5.2（COPYRIGHT）
 
@@ -9836,7 +9919,7 @@ license <LICENSE-MIT>, at your option. All files in this project may not be
 copied, modified, or distributed except according to those terms.
 ```
 
-### 158. normpath 1.5.2
+### 161. normpath 1.5.2
 
 使用者：normpath 1.5.2（LICENSE-MIT）
 
@@ -9864,7 +9947,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 159. normpath 1.5.2
+### 162. normpath 1.5.2
 
 使用者：normpath 1.5.2（LICENSE-THIRD-PARTY）
 
@@ -10315,7 +10398,7 @@ https://github.com/nvzqz/fruity/blob/320efcf715c2c5fbd2f3084f671f2be2e03a6f2b/LI
    limitations under the License.
 ```
 
-### 160. notify 8.2.2
+### 163. notify 8.2.2
 
 使用者：notify 8.2.2（LICENSE-CC0）
 
@@ -10363,7 +10446,7 @@ For these and/or other purposes and motivations, and without any expectation of 
      d. Affirmer understands and acknowledges that Creative Commons is not a party to this document and has no duty or obligation with respect to this CC0 or use of the Work.
 ```
 
-### 161. notify-rust 4.19.0
+### 164. notify-rust 4.19.0
 
 使用者：notify-rust 4.19.0（LICENSE-MIT）
 
@@ -10391,7 +10474,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 162. notify-types 2.3.0
+### 165. notify-types 2.3.0
 
 使用者：notify-types 2.3.0（LICENSE-APACHE）
 
@@ -10599,7 +10682,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 163. notify-types 2.3.0
+### 166. notify-types 2.3.0
 
 使用者：notify-types 2.3.0（LICENSE-MIT）
 
@@ -10631,7 +10714,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 164. nu-ansi-term 0.50.3
+### 167. nu-ansi-term 0.50.3
 
 使用者：nu-ansi-term 0.50.3（LICENSE）
 
@@ -10660,7 +10743,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 165. num-conv 0.2.2
+### 168. num-conv 0.2.2
 
 使用者：num-conv 0.2.2（LICENSE-MIT）
 
@@ -10686,7 +10769,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 166. object 0.40.0
+### 169. object 0.40.0
 
 使用者：object 0.40.0（LICENSE-MIT）
 
@@ -10718,7 +10801,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 167. option-ext 0.2.0
+### 170. option-ext 0.2.0
 
 使用者：option-ext 0.2.0（LICENSE.txt）
 
@@ -11098,7 +11181,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-### 168. parking 2.2.1
+### 171. parking 2.2.1
 
 使用者：parking 2.2.1（LICENSE-THIRD-PARTY）
 
@@ -11114,7 +11197,7 @@ option. All files in the project carrying such notice may not be
 copied, modified, or distributed except according to those terms.
 ```
 
-### 169. phf 0.11.3 等 2 项
+### 172. phf 0.11.3 等 2 项
 
 使用者：phf 0.11.3（LICENSE）、phf_shared 0.11.3（LICENSE）
 
@@ -11141,7 +11224,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 170. pico-args 0.5.0
+### 173. pico-args 0.5.0
 
 使用者：pico-args 0.5.0（LICENSE）
 
@@ -11167,7 +11250,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 171. png 0.17.16 等 2 项
+### 174. png 0.17.16 等 2 项
 
 使用者：png 0.17.16（LICENSE-MIT）、png 0.18.1（LICENSE-MIT）
 
@@ -11199,7 +11282,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 172. pollster 0.4.0
+### 175. pollster 0.4.0
 
 使用者：pollster 0.4.0（LICENSE-MIT）
 
@@ -11231,7 +11314,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 173. powerfmt 0.2.1
+### 176. powerfmt 0.2.1
 
 使用者：powerfmt 0.2.1（LICENSE-Apache）
 
@@ -11439,7 +11522,7 @@ Apache License
    limitations under the License.
 ```
 
-### 174. powerfmt 0.2.1
+### 177. powerfmt 0.2.1
 
 使用者：powerfmt 0.2.1（LICENSE-MIT）
 
@@ -11465,7 +11548,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 175. ppv-lite86 0.2.21
+### 178. ppv-lite86 0.2.21
 
 使用者：ppv-lite86 0.2.21（LICENSE-APACHE）
 
@@ -11673,7 +11756,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 176. ppv-lite86 0.2.21
+### 179. ppv-lite86 0.2.21
 
 使用者：ppv-lite86 0.2.21（LICENSE-MIT）
 
@@ -11705,7 +11788,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 177. precomputed-hash 0.1.1
+### 180. precomputed-hash 0.1.1
 
 使用者：precomputed-hash 0.1.1（LICENSE）
 
@@ -11733,7 +11816,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 178. qoi 0.4.1
+### 181. qoi 0.4.1
 
 使用者：qoi 0.4.1（LICENSE-MIT）
 
@@ -11765,7 +11848,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 179. quick-error 2.0.1
+### 182. quick-error 2.0.1
 
 使用者：quick-error 2.0.1（LICENSE-MIT）
 
@@ -11791,7 +11874,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 180. rand 0.9.5 等 3 项
+### 183. rand 0.9.5 等 3 项
 
 使用者：rand 0.9.5（COPYRIGHT）、rand_chacha 0.9.0（COPYRIGHT）、rand_core 0.9.5（COPYRIGHT）
 
@@ -11810,7 +11893,7 @@ The Rand project includes code from the Rust project
 published under these same licenses.
 ```
 
-### 181. rand 0.9.5 等 2 项
+### 184. rand 0.9.5 等 2 项
 
 使用者：rand 0.9.5（LICENSE-APACHE）、rand_chacha 0.9.0（LICENSE-APACHE）
 
@@ -11993,7 +12076,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 END OF TERMS AND CONDITIONS
 ```
 
-### 182. rand 0.9.5 等 3 项
+### 185. rand 0.9.5 等 3 项
 
 使用者：rand 0.9.5（LICENSE-MIT）、rand_chacha 0.9.0（LICENSE-MIT）、rand_core 0.9.5（LICENSE-MIT）
 
@@ -12026,7 +12109,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 183. rand_core 0.9.5
+### 186. rand_core 0.9.5
 
 使用者：rand_core 0.9.5（LICENSE-APACHE）
 
@@ -12220,7 +12303,7 @@ APPENDIX: How to apply the Apache License to your work.
    identification within third-party archives.
 ```
 
-### 184. raw-window-handle 0.6.2
+### 187. raw-window-handle 0.6.2
 
 使用者：raw-window-handle 0.6.2（LICENSE-MIT.md）
 
@@ -12248,7 +12331,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 185. raw-window-handle 0.6.2
+### 188. raw-window-handle 0.6.2
 
 使用者：raw-window-handle 0.6.2（LICENSE-ZLIB.md）
 
@@ -12266,7 +12349,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### 186. rayon 1.12.0 等 2 项
+### 189. rayon 1.12.0 等 2 项
 
 使用者：rayon 1.12.0（LICENSE-MIT）、rayon-core 1.13.0（LICENSE-MIT）
 
@@ -12298,7 +12381,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 187. reqwest 0.13.5
+### 190. reqwest 0.13.5
 
 使用者：reqwest 0.13.5（LICENSE-APACHE）
 
@@ -12506,7 +12589,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 188. reqwest 0.13.5
+### 191. reqwest 0.13.5
 
 使用者：reqwest 0.13.5（LICENSE-MIT）
 
@@ -12532,7 +12615,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 189. resvg 0.45.1 等 4 项
+### 192. resvg 0.45.1 等 4 项
 
 使用者：resvg 0.45.1（LICENSE-MIT）、resvg 0.46.0（LICENSE-MIT）、usvg 0.45.1（LICENSE-MIT）、usvg 0.46.0（LICENSE-MIT）
 
@@ -12564,7 +12647,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 190. rgb 0.8.53
+### 193. rgb 0.8.53
 
 使用者：rgb 0.8.53（LICENSE）
 
@@ -12592,7 +12675,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 191. ropey 2.0.0-beta.1
+### 194. ropey 2.0.0-beta.1
 
 使用者：ropey 2.0.0-beta.1（LICENSE-MIT）
 
@@ -12620,7 +12703,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 192. roxmltree 0.20.0 等 2 项
+### 195. roxmltree 0.20.0 等 2 项
 
 使用者：roxmltree 0.20.0（LICENSE-MIT）、roxmltree 0.21.2（LICENSE-MIT）
 
@@ -12648,7 +12731,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 193. rquickjs 0.14.0
+### 196. rquickjs 0.14.0
 
 使用者：rquickjs 0.14.0（LICENSE）
 
@@ -12677,7 +12760,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 194. rquickjs-sys 0.14.0
+### 197. rquickjs-sys 0.14.0
 
 使用者：rquickjs-sys 0.14.0（quickjs/LICENSE）
 
@@ -12708,7 +12791,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 195. rust-embed 8.14.0 等 3 项
+### 198. rust-embed 8.14.0 等 3 项
 
 使用者：rust-embed 8.14.0（LICENSE）、rust-embed-impl 8.14.0（LICENSE）、rust-embed-utils 8.14.0（LICENSE）
 
@@ -12736,7 +12819,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 196. rust-i18n 4.2.4
+### 199. rust-i18n 4.2.4
 
 使用者：rust-i18n 4.2.4（LICENSE）
 
@@ -12764,7 +12847,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 197. rustix 1.1.6
+### 200. rustix 1.1.6
 
 使用者：rustix 1.1.6（COPYRIGHT）
 
@@ -12800,7 +12883,7 @@ is licensed under:
 at your option.
 ```
 
-### 198. rustix 1.1.6
+### 201. rustix 1.1.6
 
 使用者：rustix 1.1.6（LICENSE-Apache-2.0_WITH_LLVM-exception）
 
@@ -13025,7 +13108,7 @@ the License, but only in their entirety and only with respect to the Combined
 Software.
 ```
 
-### 199. rustls-native-certs 0.8.5
+### 202. rustls-native-certs 0.8.5
 
 使用者：rustls-native-certs 0.8.5（LICENSE）
 
@@ -13041,7 +13124,7 @@ respectively.  You may use this software under the terms of any
 of these licenses, at your option.
 ```
 
-### 200. rustls-pki-types 1.16.0
+### 203. rustls-pki-types 1.16.0
 
 使用者：rustls-pki-types 1.16.0（LICENSE-APACHE）
 
@@ -13249,7 +13332,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 201. rustls-pki-types 1.16.0
+### 204. rustls-pki-types 1.16.0
 
 使用者：rustls-pki-types 1.16.0（LICENSE-MIT）
 
@@ -13281,7 +13364,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 202. rustls-platform-verifier 0.7.1
+### 205. rustls-platform-verifier 0.7.1
 
 使用者：rustls-platform-verifier 0.7.1（LICENSE-MIT）
 
@@ -13309,7 +13392,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 203. rustls-webpki 0.103.17
+### 206. rustls-webpki 0.103.17
 
 使用者：rustls-webpki 0.103.17（LICENSE）
 
@@ -13335,7 +13418,7 @@ The files under third-party/chromium are licensed as described in
 third-party/chromium/LICENSE.
 ```
 
-### 204. rustybuzz 0.20.1
+### 207. rustybuzz 0.20.1
 
 使用者：rustybuzz 0.20.1（LICENSE）
 
@@ -13364,7 +13447,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 205. ryu 1.0.23
+### 208. ryu 1.0.23
 
 使用者：ryu 1.0.23（LICENSE-BOOST）
 
@@ -13394,7 +13477,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 206. same-file 1.0.6 等 2 项
+### 209. same-file 1.0.6 等 2 项
 
 使用者：same-file 1.0.6（LICENSE-MIT）、winapi-util 0.1.11（LICENSE-MIT）
 
@@ -13422,7 +13505,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 207. schannel 0.1.30
+### 210. schannel 0.1.30
 
 使用者：schannel 0.1.30（LICENSE.md）
 
@@ -13436,7 +13519,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 208. schemars 1.2.3 等 2 项
+### 211. schemars 1.2.3 等 2 项
 
 使用者：schemars 1.2.3（LICENSE）、schemars_derive 1.2.3（LICENSE）
 
@@ -13464,7 +13547,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 209. scopeguard 1.2.0
+### 212. scopeguard 1.2.0
 
 使用者：scopeguard 1.2.0（LICENSE-MIT）
 
@@ -13496,7 +13579,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 210. security-framework 3.7.0 等 2 项
+### 213. security-framework 3.7.0 等 2 项
 
 使用者：security-framework 3.7.0（LICENSE-MIT）、security-framework-sys 2.17.0（LICENSE-MIT）
 
@@ -13523,7 +13606,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 211. serde_urlencoded 0.7.1
+### 214. serde_urlencoded 0.7.1
 
 使用者：serde_urlencoded 0.7.1（LICENSE-MIT）
 
@@ -13555,7 +13638,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 212. sha1 0.10.7 等 2 项
+### 215. sha1 0.10.7 等 2 项
 
 使用者：sha1 0.10.7（LICENSE-MIT）、sha2 0.10.9（LICENSE-MIT）
 
@@ -13589,7 +13672,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 213. sha1_smol 1.0.1
+### 216. sha1_smol 1.0.1
 
 使用者：sha1_smol 1.0.1（LICENSE）
 
@@ -13656,7 +13739,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 214. sha2 0.11.1
+### 217. sha2 0.11.1
 
 使用者：sha2 0.11.1（LICENSE-MIT）
 
@@ -13691,7 +13774,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 215. shellexpand 3.1.2
+### 218. shellexpand 3.1.2
 
 使用者：shellexpand 3.1.2（LICENSE-MIT）
 
@@ -13719,7 +13802,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 216. signal-hook-registry 1.4.8
+### 219. signal-hook-registry 1.4.8
 
 使用者：signal-hook-registry 1.4.8（LICENSE-MIT）
 
@@ -13751,7 +13834,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 217. simd-adler32 0.3.10
+### 220. simd-adler32 0.3.10
 
 使用者：simd-adler32 0.3.10（LICENSE.md）
 
@@ -13779,7 +13862,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 218. simplecss 0.2.2 等 2 项
+### 221. simplecss 0.2.2 等 2 项
 
 使用者：simplecss 0.2.2（LICENSE-MIT）、unicode-vo 0.1.0（LICENSE-MIT）
 
@@ -13807,7 +13890,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 219. siphasher 1.0.4
+### 222. siphasher 1.0.4
 
 使用者：siphasher 1.0.4（COPYING）
 
@@ -13821,7 +13904,7 @@ http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 option.
 ```
 
-### 220. slab 0.4.12
+### 223. slab 0.4.12
 
 使用者：slab 0.4.12（LICENSE）
 
@@ -13853,7 +13936,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 221. slotmap 1.1.1
+### 224. slotmap 1.1.1
 
 使用者：slotmap 1.1.1（LICENSE）
 
@@ -13879,7 +13962,7 @@ the following restrictions:
  3. This notice may not be removed or altered from any source distribution.
 ```
 
-### 222. smallvec 1.16.5
+### 225. smallvec 1.16.5
 
 使用者：smallvec 1.16.5（LICENSE-MIT）
 
@@ -13911,7 +13994,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 223. spin 0.10.1 等 3 项
+### 226. spin 0.10.1 等 3 项
 
 使用者：spin 0.10.1（LICENSE）、spin 0.9.9（LICENSE）、zip 9.8.1（LICENSE）
 
@@ -13939,7 +14022,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 224. stable_deref_trait 1.2.1
+### 227. stable_deref_trait 1.2.1
 
 使用者：stable_deref_trait 1.2.1（LICENSE-MIT）
 
@@ -13971,7 +14054,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 225. static_assertions 1.1.0
+### 228. static_assertions 1.1.0
 
 使用者：static_assertions 1.1.0（LICENSE-MIT）
 
@@ -13999,7 +14082,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 226. strict-num 0.1.1
+### 229. strict-num 0.1.1
 
 使用者：strict-num 0.1.1（LICENSE）
 
@@ -14025,7 +14108,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 227. strsim 0.11.1
+### 230. strsim 0.11.1
 
 使用者：strsim 0.11.1（LICENSE）
 
@@ -14055,7 +14138,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 228. strum 0.28.0 等 2 项
+### 231. strum 0.28.0 等 2 项
 
 使用者：strum 0.28.0（LICENSE）、strum_macros 0.28.0（LICENSE）
 
@@ -14083,7 +14166,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 229. subtle 2.6.1
+### 232. subtle 2.6.1
 
 使用者：subtle 2.6.1（LICENSE）
 
@@ -14119,7 +14202,7 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 230. svgtypes 0.15.3 等 3 项
+### 233. svgtypes 0.15.3 等 3 项
 
 使用者：svgtypes 0.15.3（LICENSE-MIT）、svgtypes 0.16.2（LICENSE-MIT）、ttf-parser 0.25.1（LICENSE-MIT）
 
@@ -14145,7 +14228,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 231. synstructure 0.14.0
+### 234. synstructure 0.14.0
 
 使用者：synstructure 0.14.0（LICENSE）
 
@@ -14159,7 +14242,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 232. system-configuration 0.7.0 等 2 项
+### 235. system-configuration 0.7.0 等 2 项
 
 使用者：system-configuration 0.7.0（LICENSE-MIT）、system-configuration-sys 0.6.0（LICENSE-MIT）
 
@@ -14191,7 +14274,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 233. tar 0.4.46
+### 236. tar 0.4.46
 
 使用者：tar 0.4.46（LICENSE-MIT）
 
@@ -14223,7 +14306,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 234. target-features 0.1.6
+### 237. target-features 0.1.6
 
 使用者：target-features 0.1.6（LICENSE-MIT）
 
@@ -14237,7 +14320,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 235. tauri-winrt-notification 0.8.1
+### 238. tauri-winrt-notification 0.8.1
 
 使用者：tauri-winrt-notification 0.8.1（LICENSE_MIT）
 
@@ -14265,7 +14348,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 236. tauri-winrt-notification 0.8.1
+### 239. tauri-winrt-notification 0.8.1
 
 使用者：tauri-winrt-notification 0.8.1（LICENSE.spdx）
 
@@ -14291,7 +14374,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/winrt-notification.git
 Creator: Person: Daniel Thompson-Yvetot
 ```
 
-### 237. tiff 0.11.3
+### 240. tiff 0.11.3
 
 使用者：tiff 0.11.3（LICENSE）
 
@@ -14319,7 +14402,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 238. time 0.3.55 等 2 项
+### 241. time 0.3.55 等 2 项
 
 使用者：time 0.3.55（LICENSE-MIT）、time-core 0.1.9（LICENSE-MIT）
 
@@ -14345,7 +14428,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 239. tiny-skia 0.11.4 等 2 项
+### 242. tiny-skia 0.11.4 等 2 项
 
 使用者：tiny-skia 0.11.4（LICENSE）、tiny-skia-path 0.11.4（LICENSE）
 
@@ -14382,7 +14465,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 240. tokio 1.54.1 等 2 项
+### 243. tokio 1.54.1 等 2 项
 
 使用者：tokio 1.54.1（LICENSE）、tokio-util 0.7.20（LICENSE）
 
@@ -14410,7 +14493,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 241. tokio-macros 2.7.2
+### 244. tokio-macros 2.7.2
 
 使用者：tokio-macros 2.7.2（LICENSE）
 
@@ -14439,7 +14522,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 242. tokio-rustls 0.26.6
+### 245. tokio-rustls 0.26.6
 
 使用者：tokio-rustls 0.26.6（LICENSE-APACHE）
 
@@ -14647,7 +14730,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 243. tokio-rustls 0.26.6
+### 246. tokio-rustls 0.26.6
 
 使用者：tokio-rustls 0.26.6（LICENSE-MIT）
 
@@ -14679,7 +14762,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 244. tokio-tungstenite 0.28.0
+### 247. tokio-tungstenite 0.28.0
 
 使用者：tokio-tungstenite 0.28.0（LICENSE）
 
@@ -14706,7 +14789,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 245. tower 0.5.3 等 3 项
+### 248. tower 0.5.3 等 3 项
 
 使用者：tower 0.5.3（LICENSE）、tower-layer 0.3.3（LICENSE）、tower-service 0.3.3（LICENSE）
 
@@ -14738,7 +14821,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 246. tower-http 0.6.11
+### 249. tower-http 0.6.11
 
 使用者：tower-http 0.6.11（LICENSE）
 
@@ -14770,7 +14853,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 247. tracing 0.1.44 等 5 项
+### 250. tracing 0.1.44 等 5 项
 
 使用者：tracing 0.1.44（LICENSE）、tracing-attributes 0.1.31（LICENSE）、tracing-core 0.1.36（LICENSE）、tracing-log 0.2.0（LICENSE）、tracing-subscriber 0.3.23（LICENSE）
 
@@ -14802,7 +14885,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 248. tray-icon 0.26.1
+### 251. tray-icon 0.26.1
 
 使用者：tray-icon 0.26.1（LICENSE.spdx）
 
@@ -14828,7 +14911,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tray-icon.git
 Creator: Person: Daniel Thompson-Yvetot
 ```
 
-### 249. triomphe 0.1.17 等 2 项
+### 252. triomphe 0.1.17 等 2 项
 
 使用者：triomphe 0.1.17（LICENSE-MIT）、unicode-script 0.5.9（LICENSE-MIT）
 
@@ -14862,7 +14945,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 250. try-lock 0.2.5
+### 253. try-lock 0.2.5
 
 使用者：try-lock 0.2.5（LICENSE）
 
@@ -14889,7 +14972,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 251. tungstenite 0.28.0
+### 254. tungstenite 0.28.0
 
 使用者：tungstenite 0.28.0（LICENSE-MIT）
 
@@ -14916,7 +14999,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 252. typenum 1.20.1
+### 255. typenum 1.20.1
 
 使用者：typenum 1.20.1（LICENSE）
 
@@ -14924,7 +15007,7 @@ THE SOFTWARE.
 MIT OR Apache-2.0
 ```
 
-### 253. typenum 1.20.1
+### 256. typenum 1.20.1
 
 使用者：typenum 1.20.1（LICENSE-APACHE）
 
@@ -15132,7 +15215,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 254. typenum 1.20.1
+### 257. typenum 1.20.1
 
 使用者：typenum 1.20.1（LICENSE-MIT）
 
@@ -15160,7 +15243,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 255. unicode-bidi 0.3.18
+### 258. unicode-bidi 0.3.18
 
 使用者：unicode-bidi 0.3.18（COPYRIGHT）
 
@@ -15175,7 +15258,7 @@ carrying such notice may not be copied, modified, or distributed except
 according to those terms.
 ```
 
-### 256. unicode-ident 1.0.27
+### 259. unicode-ident 1.0.27
 
 使用者：unicode-ident 1.0.27（LICENSE-UNICODE）
 
@@ -15221,7 +15304,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-### 257. unicode-properties 0.1.5
+### 260. unicode-properties 0.1.5
 
 使用者：unicode-properties 0.1.5（LICENSE-UNICODE）
 
@@ -15267,7 +15350,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-### 258. unicode-script 0.5.9
+### 261. unicode-script 0.5.9
 
 使用者：unicode-script 0.5.9（LICENSE-APACHE）
 
@@ -15475,7 +15558,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### 259. untrusted 0.9.0
+### 262. untrusted 0.9.0
 
 使用者：untrusted 0.9.0（LICENSE.txt）
 
@@ -15495,7 +15578,7 @@ limitations under the License.
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-### 260. ureq 3.5.2
+### 263. ureq 3.5.2
 
 使用者：ureq 3.5.2（LICENSE-MIT）
 
@@ -15523,7 +15606,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 261. ureq-proto 0.7.1
+### 264. ureq-proto 0.7.1
 
 使用者：ureq-proto 0.7.1（LICENSE-MIT.txt）
 
@@ -15537,7 +15620,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 262. utf8_iter 1.1.0
+### 265. utf8_iter 1.1.0
 
 使用者：utf8_iter 1.1.0（COPYRIGHT）
 
@@ -15586,7 +15669,7 @@ licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
 <LICENSE-MIT> or <http://opensource.org/licenses/MIT>, at your option.
 ```
 
-### 263. utf8parse 0.2.2
+### 266. utf8parse 0.2.2
 
 使用者：utf8parse 0.2.2（LICENSE-MIT）
 
@@ -15618,7 +15701,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 264. utf_types 1.0.0
+### 267. utf_types 1.0.0
 
 使用者：utf_types 1.0.0（COPYRIGHT）
 
@@ -15645,7 +15728,7 @@ Test code is dedicated to the Public Domain when so designated (see
 the individual files for PD/CC0-dedicated sections).
 ```
 
-### 265. uuid 1.29.2
+### 268. uuid 1.29.2
 
 使用者：uuid 1.29.2（LICENSE-MIT）
 
@@ -15678,7 +15761,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 266. want 0.3.2
+### 269. want 0.3.2
 
 使用者：want 0.3.2（LICENSE）
 
@@ -15704,7 +15787,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 267. web-time 1.1.0
+### 270. web-time 1.1.0
 
 使用者：web-time 1.1.0（LICENSE-APACHE）
 
@@ -15912,7 +15995,7 @@ Apache License
    limitations under the License.
 ```
 
-### 268. web-time 1.1.0
+### 271. web-time 1.1.0
 
 使用者：web-time 1.1.0（LICENSE-MIT）
 
@@ -15940,7 +16023,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 269. webpki-roots 1.0.10
+### 272. webpki-roots 1.0.10
 
 使用者：webpki-roots 1.0.10（LICENSE）
 
@@ -16008,7 +16091,7 @@ of Data, including for example machine learning models and models'
 insights.
 ```
 
-### 270. weezl 0.1.12
+### 273. weezl 0.1.12
 
 使用者：weezl 0.1.12（LICENSE-MIT）
 
@@ -16036,7 +16119,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 271. which 8.0.6
+### 274. which 8.0.6
 
 使用者：which 8.0.6（LICENSE.txt）
 
@@ -16062,7 +16145,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### 272. windows 0.58.0 等 22 项
+### 275. windows 0.58.0 等 22 项
 
 使用者：windows 0.58.0（license-apache-2.0）、windows 0.62.2（license-apache-2.0）、windows-collections 0.3.2（license-apache-2.0）、windows-core 0.58.0（license-apache-2.0）、windows-core 0.62.2（license-apache-2.0）、windows-future 0.3.2（license-apache-2.0）、windows-implement 0.58.0（license-apache-2.0）、windows-implement 0.60.2（license-apache-2.0）、windows-interface 0.58.0（license-apache-2.0）、windows-interface 0.59.3（license-apache-2.0）、windows-link 0.2.1（license-apache-2.0）、windows-numerics 0.3.1（license-apache-2.0）、windows-registry 0.6.1（license-apache-2.0）、windows-result 0.2.0（license-apache-2.0）、windows-result 0.4.1（license-apache-2.0）、windows-strings 0.1.0（license-apache-2.0）、windows-strings 0.5.1（license-apache-2.0）、windows-sys 0.61.2（license-apache-2.0）、windows-targets 0.52.6（license-apache-2.0）、windows-threading 0.2.1（license-apache-2.0）、windows-version 0.1.7（license-apache-2.0）、windows_x86_64_msvc 0.52.6（license-apache-2.0）
 
@@ -16270,7 +16353,7 @@ Apache License
    limitations under the License.
 ```
 
-### 273. windows 0.58.0 等 22 项
+### 276. windows 0.58.0 等 22 项
 
 使用者：windows 0.58.0（license-mit）、windows 0.62.2（license-mit）、windows-collections 0.3.2（license-mit）、windows-core 0.58.0（license-mit）、windows-core 0.62.2（license-mit）、windows-future 0.3.2（license-mit）、windows-implement 0.58.0（license-mit）、windows-implement 0.60.2（license-mit）、windows-interface 0.58.0（license-mit）、windows-interface 0.59.3（license-mit）、windows-link 0.2.1（license-mit）、windows-numerics 0.3.1（license-mit）、windows-registry 0.6.1（license-mit）、windows-result 0.2.0（license-mit）、windows-result 0.4.1（license-mit）、windows-strings 0.1.0（license-mit）、windows-strings 0.5.1（license-mit）、windows-sys 0.61.2（license-mit）、windows-targets 0.52.6（license-mit）、windows-threading 0.2.1（license-mit）、windows-version 0.1.7（license-mit）、windows_x86_64_msvc 0.52.6（license-mit）
 
@@ -16298,7 +16381,7 @@ MIT License
     SOFTWARE
 ```
 
-### 274. xmlwriter 0.1.0
+### 277. xmlwriter 0.1.0
 
 使用者：xmlwriter 0.1.0（LICENSE）
 
@@ -16326,7 +16409,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 275. zerocopy 0.8.63 等 2 项
+### 278. zerocopy 0.8.63 等 2 项
 
 使用者：zerocopy 0.8.63（LICENSE-APACHE）、zerocopy-derive 0.8.63（LICENSE-APACHE）
 
@@ -16534,7 +16617,7 @@ Apache License
    limitations under the License.
 ```
 
-### 276. zerocopy 0.8.63 等 2 项
+### 279. zerocopy 0.8.63 等 2 项
 
 使用者：zerocopy 0.8.63（LICENSE-BSD）、zerocopy-derive 0.8.63（LICENSE-BSD）
 
@@ -16565,7 +16648,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 277. zerocopy 0.8.63 等 2 项
+### 280. zerocopy 0.8.63 等 2 项
 
 使用者：zerocopy 0.8.63（LICENSE-MIT）、zerocopy-derive 0.8.63（LICENSE-MIT）
 
@@ -16597,7 +16680,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 278. zeroize 1.9.1
+### 281. zeroize 1.9.1
 
 使用者：zeroize 1.9.1（LICENSE-MIT）
 
@@ -16629,7 +16712,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 279. zeroize_derive 1.5.0
+### 282. zeroize_derive 1.5.0
 
 使用者：zeroize_derive 1.5.0（LICENSE-MIT）
 
@@ -16661,7 +16744,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### 280. zlib-rs 0.6.8
+### 283. zlib-rs 0.6.8
 
 使用者：zlib-rs 0.6.8（LICENSE）
 
@@ -16687,7 +16770,7 @@ freely, subject to the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### 281. zopfli 0.8.4
+### 284. zopfli 0.8.4
 
 使用者：zopfli 0.8.4（COPYING）
 
@@ -16895,7 +16978,7 @@ Apache License
    limitations under the License.
 ```
 
-### 282. zstd 0.14.4 等 3 项
+### 285. zstd 0.14.4 等 3 项
 
 使用者：zstd 0.14.4（LICENSE）、zstd-safe 8.3.0（LICENSE）、zstd-sys 2.1.3+zstd.1.5.7（LICENSE）
 
@@ -16930,7 +17013,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 283. zstd-sys 2.1.3+zstd.1.5.7
+### 286. zstd-sys 2.1.3+zstd.1.5.7
 
 使用者：zstd-sys 2.1.3+zstd.1.5.7（LICENSE.BSD-2-Clause）
 
@@ -16966,7 +17049,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 284. zstd-sys 2.1.3+zstd.1.5.7
+### 287. zstd-sys 2.1.3+zstd.1.5.7
 
 使用者：zstd-sys 2.1.3+zstd.1.5.7（LICENSE.BSD-3-Clause）
 
@@ -17005,7 +17088,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 285. zstd-sys 2.1.3+zstd.1.5.7
+### 288. zstd-sys 2.1.3+zstd.1.5.7
 
 使用者：zstd-sys 2.1.3+zstd.1.5.7（zstd/LICENSE）
 
@@ -17042,7 +17125,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### 286. zune-core 0.5.3 等 2 项
+### 289. zune-core 0.5.3 等 2 项
 
 使用者：zune-core 0.5.3（LICENSE-MIT）、zune-jpeg 0.5.15（LICENSE-MIT）
 
@@ -17070,7 +17153,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 287. zune-core 0.5.3 等 2 项
+### 290. zune-core 0.5.3 等 2 项
 
 使用者：zune-core 0.5.3（LICENSE-ZLIB）、zune-jpeg 0.5.15（LICENSE-ZLIB）
 

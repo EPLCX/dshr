@@ -22,6 +22,7 @@ mod process;
 mod reload;
 mod runtime;
 mod services;
+mod storage;
 mod stream;
 mod surface;
 mod watch;

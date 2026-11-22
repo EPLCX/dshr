@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::preset::preset_read_only;
 use crate::system_prompt::SUBAGENT_PROMPT;
-use crate::{Agent, AgentConfig, ApprovalRequest, Approver, CallEnv, Chunk, Decision, LiveEvent, Preset, Session, Subagent};
+use crate::{Agent, AgentConfig, AgentIdentity, ApprovalRequest, Approver, CallEnv, Chunk, Decision, LiveEvent, Preset, Session, Subagent};
 
 pub const DELEGATE: &str = "delegate";
 
@@ -114,6 +114,8 @@ impl SubagentRunner {
             config.options.insert(preset);
         }
         config.options.insert(Subagent { explicit_preset: explicit.is_some() });
+        // 子代理的身份：属于发起它的会话，代理名是它的日志名。
+        config.options.insert(AgentIdentity { session: env.identity.session.clone(), agent: log_name.to_owned() });
         let mut session = Session::create(log_name, env.agents_dir.join(format!("{log_name}.jsonl")))
             .map_err(|error| format!("无法创建子代理日志: {error}"))?;
         let sub = Agent::new(

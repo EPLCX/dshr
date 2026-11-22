@@ -41,10 +41,10 @@ pub use catalog::{
 pub use compaction::{CompactionPlugin, estimate_tokens};
 pub use delegate::{DELEGATE, DelegatePlugin, SubagentRunner};
 pub use hooks::{
-    AfterTool, AfterToolCall, AfterToolHook, BeforeRequest, BeforeStep, BeforeStepHook, CallEnv, EventKinds, EventLabel, EventLabels,
-    EventObserver, EventObservers, GateRequest, GateTool, LlmAccess, ModelChoices, ObservedSession, ReviewTool, ReviewToolHook,
-    SessionInfo, TransformRequest, TransformRequestHook, TurnContext, TurnEnded, TurnEndedHook, TurnInput, TurnStart, TurnStarted,
-    TurnStartedHook, TurnState,
+    AfterTool, AfterToolCall, AfterToolHook, AgentIdentity, BeforeRequest, BeforeStep, BeforeStepHook, CallEnv, EventKinds, EventLabel,
+    EventLabels, EventObserver, EventObservers, GateRequest, GateTool, LlmAccess, ModelChoices, ObservedSession, ReviewTool,
+    ReviewToolHook, SessionInfo, TransformRequest, TransformRequestHook, TurnContext, TurnControl, TurnEnded, TurnEndedHook, TurnInput,
+    TurnStart, TurnStarted, TurnStartedHook, TurnState,
 };
 pub use permission::{
     AutoReviewer, Gate, PermissionMode, PermissionPlugin, READ_ONLY_DENIED, REVIEW_FAILED, UserIntent, gate, read_only_turn,
@@ -218,6 +218,8 @@ struct ToolCall<'a> {
     session: &'a SessionInfo,
     /// 用户最近说的话（自动审查用）。
     intent: &'a Arc<str>,
+    /// 插件要求这一步之后结束本轮时置位。
+    control: &'a TurnControl,
 }
 
 /// 工具执行期间通过 `ToolContext::emit_event` 写的自定义事件（类型名，数据），调用结束后写进日志。
@@ -380,6 +382,8 @@ impl Agent {
             let plugins = self.plugins.snapshot();
             session.set_observers(plugins.items::<EventObservers>().to_vec(), &self.tool_ctx.workspace);
             let current = Step { tools: ToolRegistry::load(&plugins).await, plugins };
+            // 这一步里插件（工具、`afterTool`）可以要求本轮在这一步之后结束。
+            let control = TurnControl::default();
 
             let message = match self.request_with_retry(session, &current, sink, cancel, state).await? {
                 ModelResult::Done(message) => message,
@@ -455,8 +459,14 @@ impl Agent {
                         finish_call(session, sink, call_id, name, ToolOutput::error(format!("Unknown tool: {name}")), &emitted)?;
                         continue;
                     };
-                    let call =
-                        ToolCall { id: call_id, agents_dir: &agents_dir, emitted: &emitted, session: &session_info, intent: &intent };
+                    let call = ToolCall {
+                        id: call_id,
+                        agents_dir: &agents_dir,
+                        emitted: &emitted,
+                        session: &session_info,
+                        intent: &intent,
+                        control: &control,
+                    };
                     let ctx = self.call_context(&current, &call, sink, cancel);
                     let refused = tokio::select! {
                         biased;
@@ -497,6 +507,11 @@ impl Agent {
                     session.append(EventBody::StepEnd { turn, step }, sink)?;
                     return end_turn(session, sink, turn, TurnEndReason::Interrupted, final_text, None);
                 }
+            }
+            // 插件要求结束本轮（如工具已经给出了最终结果）：不再请求模型。
+            if control.end_requested() {
+                session.append(EventBody::StepEnd { turn, step }, sink)?;
+                return end_turn(session, sink, turn, TurnEndReason::Completed, final_text, None);
             }
             if continues {
                 session.append(EventBody::TurnContinue { reason: ContinueReason::MaxTokens }, sink)?;
@@ -570,18 +585,15 @@ impl Agent {
             max_tokens: None,
             effort: self.config.effort,
         };
+        let mut ctx = self.tool_ctx.clone();
+        ctx.plugins = step.plugins.clone();
+        ctx.options.insert(SessionInfo { id: session.id().to_owned(), log_path: session.log_path().to_owned() });
+        ctx.options.insert(LlmAccess { provider: self.provider.clone(), model: self.config.model.clone() });
         for hook in step.plugins.hooks::<BeforeRequest>() {
-            hook(&mut request, &self.config);
+            hook(&mut request, &self.config, &ctx);
         }
-        let transforms = step.plugins.hooks::<TransformRequest>();
-        if !transforms.is_empty() {
-            let mut ctx = self.tool_ctx.clone();
-            ctx.plugins = step.plugins.clone();
-            ctx.options.insert(SessionInfo { id: session.id().to_owned(), log_path: session.log_path().to_owned() });
-            ctx.options.insert(LlmAccess { provider: self.provider.clone(), model: self.config.model.clone() });
-            for hook in transforms {
-                hook.transform(&mut request, &ctx).await;
-            }
+        for hook in step.plugins.hooks::<TransformRequest>() {
+            hook.transform(&mut request, &ctx).await;
         }
         session.append(EventBody::RequestHeader { provider: self.provider.id().to_owned(), model: request.model.clone() }, sink)?;
 
@@ -672,6 +684,7 @@ impl Agent {
         ctx.plugins = step.plugins.clone();
         ctx.options.insert(CallEnv {
             call_id: call_id.to_owned(),
+            identity: AgentIdentity::of(&self.config.options, Some(&call.session.id)),
             provider: self.provider.clone(),
             approver: self.approver.clone(),
             config: self.config.clone(),
@@ -679,6 +692,7 @@ impl Agent {
             cancel: cancel.clone(),
         });
         ctx.options.insert(call.session.clone());
+        ctx.options.insert(call.control.clone());
         ctx.options.insert(UserIntent(call.intent.clone()));
         ctx.options.insert(LlmAccess { provider: self.provider.clone(), model: self.config.model.clone() });
         let (sink, output_call) = (sink.clone(), call_id.to_owned());
