@@ -52,10 +52,7 @@ pub(crate) fn spawn_title(path: PathBuf, user: &str, model: String, provider: Ar
     let request = ChatRequest {
         model,
         system: Some(TITLE_PROMPT.into()),
-        messages: vec![Message {
-            role: Role::User,
-            content: vec![ContentBlock::text(title_input(user))],
-        }],
+        messages: vec![Message { role: Role::User, content: vec![ContentBlock::text(title_input(user))] }],
         tools: Vec::new(),
         // 有的模型即使不要求也会先输出思考，不限制输出长度。
         max_tokens: None,
