@@ -1404,7 +1404,7 @@ impl WorkspaceView {
             }
             session_search::SessionSearchEvent::Close => this.close_session_search(window, cx),
         });
-        view.update(cx, |view, cx| view.focus(window, cx));
+        // 焦点等弹窗画出来再进搜索框（见 `SessionSearchView::focus_pending`）。
         self.session_search_leaving = None;
         self.session_search = Some((view, subscription));
         cx.notify();

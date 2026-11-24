@@ -1,5 +1,6 @@
 //! “搜索会话”弹窗：按标题找会话。顶上是搜索框，下面是结果（没输入时是最近的会话），底部是按键提示。
 //! ↑ ↓ 选择，Enter 打开，Esc 关闭；鼠标悬停的那一项成为高亮项，点一下打开。
+//! 搜索框的角色是 `SearchInput`（UIA 里是编辑框）：讲述人聚焦到它时自动切到焦点模式，打的字进输入框。
 
 use std::ops::Range;
 use std::time::{Duration, SystemTime};
@@ -35,6 +36,9 @@ pub struct SessionSearchView {
     matches: Vec<usize>,
     highlighted: usize,
     focus: FocusHandle,
+    /// 刚打开、焦点还没进搜索框。等弹窗第一次画出来再给焦点：在那之前无障碍树里还没有搜索框，
+    /// 讲述人收不到这次焦点变化，停在浏览模式里，打的字被当成快速导航键（“没有下一个标题级别”），输入不进去。
+    focus_pending: bool,
     scroll: ScrollHandle,
     phase: motion::Phase,
     _subscriptions: Vec<Subscription>,
@@ -57,6 +61,7 @@ impl SessionSearchView {
             matches,
             highlighted: 0,
             focus: cx.focus_handle(),
+            focus_pending: true,
             scroll: ScrollHandle::new(),
             phase: motion::Phase::SETTLED,
             _subscriptions: subscriptions,
@@ -68,7 +73,8 @@ impl SessionSearchView {
     }
 
     /// 焦点放进搜索框。
-    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+    fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_pending = false;
         gpui_kit::Focusable::focus_handle(self.input.read(cx), cx).focus(window, cx);
     }
 
@@ -241,9 +247,15 @@ impl Render for SessionSearchView {
                     .px(px(space::XL))
                     .py(px(space::L))
                     .child(Icon::new(IconName::Search).size(px(size::ICON_LG)).text_color(p.text_secondary))
-                    .child(div().flex_1().min_w(px(0.)).child(
-                        Input::new(&self.input).appearance(false).large().role(Role::ComboBox).aria_label(t!("sidebar.search").to_string()),
-                    ))
+                    .child(
+                        div().flex_1().min_w(px(0.)).child(
+                            Input::new(&self.input)
+                                .appearance(false)
+                                .large()
+                                .role(Role::SearchInput)
+                                .aria_label(t!("sidebar.search").to_string()),
+                        ),
+                    )
                     .child(crate::design::framed(
                         "close-session-search",
                         Button::new("close-session-search")
@@ -296,6 +308,12 @@ impl Render for SessionSearchView {
             )
             // Tab 只在弹窗里循环。
             .focus_trap("session-search-trap", &self.focus)
+            .when(self.focus_pending, |dialog| {
+                let view = cx.entity().downgrade();
+                dialog.child(crate::design::focus_after_paint(move |window, cx| {
+                    view.update(cx, |this, cx| this.focus_input(window, cx)).ok();
+                }))
+            })
     }
 }
 
