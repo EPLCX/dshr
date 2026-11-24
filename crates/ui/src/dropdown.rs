@@ -390,7 +390,7 @@ impl DropdownState {
         window.focus_prev(cx);
     }
 
-    /// 展开的列表。`phase` 是展开、收起的进度：从展开的方向带一点过冲地滑出，收起时退回去淡出。
+    /// 展开的列表。`phase` 是展开、收起的进度：从展开的方向淡入、收几像素到位，收起时原地淡出。
     fn render_list(&self, phase: motion::Phase, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette(cx);
         let count = self.items.len();

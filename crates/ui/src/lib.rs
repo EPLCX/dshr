@@ -52,10 +52,9 @@ pub use backend::Backend;
 pub use cards::{AccountUi, FsUi, PermissionUi, PlanUi, PresetsUi, builtin_ui_plugins};
 pub use conversation::{ConversationEvent, ConversationView};
 pub use design::Palette;
-use design::motion::Edge;
 use design::{
-    Tone, Typography as _, brand_mark, heading, hint, hover_fill, list_item, menu_item_enter, menu_popover, motion, palette, pressable,
-    radius, readable_with_id, shadow, size, space, status_dot,
+    Tone, Typography as _, brand_mark, heading, hint, hover_fill, list_item, menu_popover, motion, palette, pressable, radius,
+    readable_with_id, shadow, size, space, status_dot,
 };
 pub use plugin::{
     ClickHandler, ComposerControl, ComposerPanel, PageBuilder, PageContent, PanelContext, RowData, SettingsPage, SidebarAction,
@@ -603,9 +602,6 @@ struct OpenInstallDialog {
     _subscription: Subscription,
 }
 
-/// 会话列表刚载入后多久之内新出现的行错峰滑入。
-const SIDEBAR_INTRO: std::time::Duration = std::time::Duration::from_millis(400);
-
 /// 插件在状态栏放了内容时，多久重画一次状态行（内容可能随时间变化）。
 const STATUS_REFRESH: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -744,8 +740,6 @@ pub struct WorkspaceView {
     install_dialog_leaving: Option<Entity<install_dialog::InstallDialog>>,
     /// 排队等着显示的安装确认（同时来了好几个时一个一个问）。
     install_queue: std::collections::VecDeque<PendingInstall>,
-    /// 会话列表第一次画出来的时刻：之后一小段时间里新出现的行错峰滑入，再往后单独出现的行不等。
-    sidebar_intro: std::cell::Cell<Option<std::time::Instant>>,
     /// 上次设给系统的窗口标题（任务栏、Alt+Tab、读屏软件读的）；变了才重新设。
     window_title: String,
     /// 界面插件登记的侧边栏入口和状态行。
@@ -830,7 +824,6 @@ impl WorkspaceView {
             install_dialog: None,
             install_dialog_leaving: None,
             install_queue: Default::default(),
-            sidebar_intro: std::cell::Cell::new(None),
             window_title: String::new(),
             session_menu: None,
             pending_delete: None,
@@ -1577,7 +1570,7 @@ impl WorkspaceView {
                 .accessibility_label(t!("sidebar.session_actions", title = session.title).to_string()),
         );
         // 菜单向下展开。
-        let body = move |menu: &design::MenuFocus, animate: bool, _: &mut Window, cx: &mut App| {
+        let body = move |menu: &design::MenuFocus, _: &mut Window, cx: &mut App| {
             let p = palette(cx);
             let (rename_view, delete_view) = (view.clone(), view.clone());
             let (rename_id, delete_id, title) = (id.clone(), id.clone(), title.clone());
@@ -1592,9 +1585,9 @@ impl WorkspaceView {
             v_flex()
                 .w(px(180.))
                 .p(px(space::XS))
-                .child(menu_item_enter(rename, "session-rename-enter", 0, animate))
-                .child(menu_item_enter(
-                    list_item("session-delete", None, delete_label.to_string(), false, &p)
+                .child(rename.into_any_element())
+                .child(
+                    (list_item("session-delete", None, delete_label.to_string(), false, &p)
                         .focus_on_hover()
                         .track_focus(&menu.item(1, cx))
                         .text_color(p.danger)
@@ -1610,11 +1603,9 @@ impl WorkspaceView {
                                     }
                                 })
                                 .ok();
-                        }),
-                    "session-delete-enter",
-                    1,
-                    animate,
-                ))
+                        }))
+                    .into_any_element(),
+                )
                 .into_any_element()
         };
         let popover = menu_popover(
@@ -1665,7 +1656,7 @@ impl WorkspaceView {
                     gpui_kit::Focusable::focus_handle(input.read(cx), cx),
                     Input::new(input).small().aria_label(t!("sidebar.rename").to_string()),
                 ));
-            return motion::fade_in(editor, ElementId::Name(format!("session-rename-{}", session.id).into())).into_any_element();
+            return editor.into_any_element();
         }
         let id = session.id.clone();
         let selected = self.active.read(cx).session_id() == Some(session.id.as_str());
@@ -1722,11 +1713,8 @@ impl WorkspaceView {
                     .on_click(cx.listener(move |this, _, window, cx| this.open_session(&id, window, cx))),
             )
             .child(menu);
-        // 按会话 id 而不是行号：新会话插到最前面时，滑入的是它，而不是被挤到最后的那一行。
-        // 列表刚载入时一行接一行错峰滑入；之后单独出现的行不用等。
-        let entrance = motion::Entrance::new(motion::BASE).from(Edge::Left, motion::SHORT);
-        let entrance = if self.in_sidebar_intro() { entrance.stagger(index, motion::STAGGER_ROW) } else { entrance };
-        entrance.play(row, ElementId::Name(format!("session-enter-{}", session.id).into())).into_any_element()
+        // 会话行直接显示：列表载入、新建会话都是第一帧就到位，不错峰、不滑入。
+        row.into_any_element()
     }
 
     fn render_group_header(&self, index: usize, group: &WorkspaceGroup, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1796,11 +1784,7 @@ impl WorkspaceView {
                 ));
             }
         }
-        let enter_id = match &group.path {
-            Some(path) => format!("workspace-enter-{}", path.display()),
-            None => "workspace-enter-other".to_owned(),
-        };
-        motion::slide_in(row, ElementId::Name(enter_id.into()), Edge::Left, motion::SHORT).into_any_element()
+        row.into_any_element()
     }
 
     /// 当前会话的标题；还没有会话时是“新会话”。
@@ -1823,7 +1807,7 @@ impl WorkspaceView {
     }
 
     /// 标题栏里的当前位置：工作区 › 会话标题，运行中时后面带加载圈，等待处理时带提醒图标。
-    /// 换会话、标题变了时从下面轻轻浮上来。由 [`TitleView`] 画；系统的窗口标题见 [`Self::sync_window_title`]。
+    /// 换会话、标题变了时直接换上。由 [`TitleView`] 画；系统的窗口标题见 [`Self::sync_window_title`]。
     fn render_title(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let (session_id, workspace) = {
@@ -1856,13 +1840,8 @@ impl WorkspaceView {
             .children(crumb)
             .child(div().min_w(px(0.)).truncate().font_weight(FontWeight::MEDIUM).child(title.clone()))
             .children(status.map(|status| div().flex_none().pl(px(space::XS)).child(status)));
-        let enter_id = format!("title-enter-{}-{title}", session_id.as_deref().unwrap_or("new"));
-        motion::Entrance::new(motion::FAST).from(Edge::Bottom, motion::NUDGE).play(row, ElementId::Name(enter_id.into())).into_any_element()
-    }
-
-    /// 会话列表刚载入的一小段时间（见 `sidebar_intro`）。
-    fn in_sidebar_intro(&self) -> bool {
-        self.sidebar_intro.get().is_some_and(|shown| shown.elapsed() < SIDEBAR_INTRO)
+        // 换会话、标题变了直接换上：标题栏是高频变化的地方，不做进场。
+        row.into_any_element()
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2023,34 +2002,21 @@ impl WorkspaceView {
     fn render_sidebar_full(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let hidden = self.backend.hidden_entries();
-        if self.sidebar_intro.get().is_none() && !self.sessions.is_empty() {
-            self.sidebar_intro.set(Some(std::time::Instant::now()));
-        }
         let mut list: Vec<AnyElement> = Vec::new();
         for (group_index, group) in self.groups().iter().enumerate() {
             list.push(self.render_group_header(group_index, group, window, cx));
-            // 折叠、展开时高度收起、展开（会话行在里面，id 按分组，不随折叠变）。
-            let reveal_id = match &group.path {
-                Some(path) => format!("workspace-reveal-{}", path.display()),
-                None => "workspace-reveal-other".to_owned(),
-            };
-            let expanded = !self.collapsed.contains(&group.path);
-            let reveal_id = ElementId::Name(reveal_id.into());
-            let Some(phase) = motion::expansion(reveal_id.clone(), expanded, window, cx) else {
+            // 折叠、展开直接到位（只有箭头转动）：不动画高度，下面的分组不会被一路推着走。
+            if self.collapsed.contains(&group.path) {
                 continue;
-            };
+            }
             let mut rows: Vec<AnyElement> = Vec::new();
             if group.sessions.is_empty() {
                 rows.push(
-                    motion::nudge_in(
-                        div().pl(px(space::XXL + space::S)).py(px(space::XS)).child(hint(
-                            t!("sidebar.no_sessions").to_string(),
-                            Tone::Neutral,
-                            &p,
-                        )),
-                        ("workspace-empty", group_index),
-                    )
-                    .into_any_element(),
+                    div()
+                        .pl(px(space::XXL + space::S))
+                        .py(px(space::XS))
+                        .child(hint(t!("sidebar.no_sessions").to_string(), Tone::Neutral, &p))
+                        .into_any_element(),
                 );
             }
             // 每组先显示最近的 `SIDEBAR_PAGE` 个；正在看的、在运行的会话不管多早都显示。
@@ -2086,7 +2052,7 @@ impl WorkspaceView {
                         .into_any_element(),
                 );
             }
-            list.push(motion::reveal(reveal_id, phase, v_flex().gap(px(2.)).children(rows)));
+            list.push(v_flex().gap(px(2.)).children(rows).into_any_element());
         }
 
         let new_session = list_item("new-session", Some(IconName::Plus), t!("sidebar.new_session").to_string(), false, &p)
@@ -2184,17 +2150,14 @@ impl WorkspaceView {
                             .filter(|(_, entry)| entry.entry.place == dshr_agent::EntryPlace::Sidebar)
                             .map(|(index, entry)| {
                                 let open = self.plugin_page.as_ref().is_some_and(|page| page.title == entry.entry.label);
-                                let item = list_item(
+                                list_item(
                                     ("plugin-entry", index),
                                     Some(plugin_page::entry_icon(entry.entry.icon.as_deref())),
                                     entry.entry.label.clone(),
                                     open,
                                     &p,
                                 )
-                                .on_click(cx.listener(move |this, _, window, cx| this.open_plugin_page(index, window, cx)));
-                                // 插件热重载加进来的入口滑入。
-                                let enter_id = format!("plugin-entry-enter-{}-{}", entry.plugin, entry.entry.label);
-                                motion::slide_in(item, ElementId::Name(enter_id.into()), Edge::Left, motion::SHORT)
+                                .on_click(cx.listener(move |this, _, window, cx| this.open_plugin_page(index, window, cx)))
                             }),
                     )
                     .child(
@@ -2257,9 +2220,8 @@ impl Render for WorkspaceView {
         // 另一边一重绘，没重绘的这一边就从无障碍树里整个消失（例如一输入文字，侧边栏就读不到了）。
         // 只有读屏软件连着时才有这份开销；它连上时 GPUI 会强制重绘一次，这里随之切换。
         let cache = !window.is_a11y_active();
-        // 收起、展开侧边栏时宽度有过渡（减少动态效果时直接到位）。
-        let expanded = motion::tween("sidebar-width", if self.sidebar_collapsed { 0. } else { 1. }, window, cx);
-        let sidebar_width = size::SIDEBAR_RAIL_WIDTH + (size::SIDEBAR_WIDTH - size::SIDEBAR_RAIL_WIDTH) * expanded;
+        // 收起、展开侧边栏直接到位：宽度过渡会让对话区每帧重排、文字每帧重新换行，看起来在抖。
+        let sidebar_width = if self.sidebar_collapsed { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH };
         if (self.sidebar_width.get() - sidebar_width).abs() > f32::EPSILON {
             self.sidebar_width.set(sidebar_width);
             // 缓存的侧边栏按新宽度重画。
@@ -2269,12 +2231,9 @@ impl Render for WorkspaceView {
         let sidebar = if cache { self.sidebar.clone().cached(sidebar_style) } else { ViewElement::new(self.sidebar.clone()) };
         let active =
             if cache { self.active.clone().cached(StyleRefinement::default().size_full()) } else { ViewElement::new(self.active.clone()) };
-        // 切换会话时对话区淡入并上浮一点：包裹层的 id 跟着当前对话变，换一个对话就重播一次。
-        let conversation = motion::rise_in(
-            div().flex_1().h_full().min_w(px(0.)).child(active),
-            ("conversation-enter", self.active.entity_id().as_u64() as usize),
-        );
-        // 设置以弹窗形式盖在工作区上：遮罩淡入，卡片带一点过冲地浮上来；关上时卡片下沉淡出。
+        // 切换会话直接换上：点下去第一帧就是新对话，不淡入、不上浮。
+        let conversation = div().flex_1().h_full().min_w(px(0.)).child(active);
+        // 设置以弹窗形式盖在工作区上：遮罩淡入，卡片淡入并收几像素到位；关上时原地淡出，不挡下面的操作。
         // 卡片的样子由设置视图自己按进度画（阴影在卡片上，要跟着渐显）。
         let settings_phase = motion::presence("settings-overlay", self.settings.is_some(), motion::SLOW, motion::FAST, window, cx);
         if settings_phase.is_none() {

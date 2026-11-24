@@ -194,8 +194,8 @@ impl Render for WelcomeView {
             .children(crate::title_bar::title_bar(false, None, window, cx))
             // 平滑滚动层放在最前，先于各滚动容器拿到滚轮事件（见 `smooth_scroll`）。
             .child(self.scroll.layer(cx))
-            // 窗口打开时内容浮上来；底部按钮固定不动。
-            .child(motion::Entrance::new(motion::SLOW).from(motion::Edge::Bottom, motion::PAGE).play(body, "welcome-enter"))
+            // 首次启动只看到一次：内容从半透明收到原位；底部按钮固定不动。
+            .child(motion::Entrance::new(motion::SLOW).from(motion::Edge::Bottom, motion::SHORT).play(body, "welcome-enter"))
             .child(
                 v_flex()
                     .flex_none()

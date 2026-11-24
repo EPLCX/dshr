@@ -1341,8 +1341,7 @@ pub fn menu_trigger_focus(id: impl Into<ElementId>, window: &mut Window, cx: &mu
 /// 弹出菜单（权限、预设、模型、会话的“…”）。
 ///
 /// 打开、关闭、焦点、Esc 和点外面关闭都交给组件库的 `Popover`；外观和动画在这里画：
-/// 菜单从触发按钮那一侧带一点过冲地浮出来，阴影随之渐显；里面的选项错峰出现（`body` 的第二个参数为
-/// `true` 时由调用方套上 [`menu_item_enter`]）。
+/// 菜单从触发按钮那一侧淡入、收几像素到位（没有过冲），阴影随之渐显；里面的选项和菜单一起出现，不错峰。
 ///
 /// 键盘：打开时焦点落在第 `initial` 项（当前选中的那一项），↑ / ↓ / Home / End 在各项之间移动，
 /// Enter / 空格选中。`body` 用第一个参数（[`MenuFocus`]）给每一项取焦点句柄，见那里的说明。
@@ -1357,7 +1356,7 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
     trigger: T,
     on_open_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
     initial: usize,
-    body: impl Fn(&MenuFocus, bool, &mut Window, &mut App) -> AnyElement + 'static,
+    body: impl Fn(&MenuFocus, &mut Window, &mut App) -> AnyElement + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
@@ -1374,7 +1373,7 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
         menu.0.update(cx, |state, _| state.initial_given = false);
     }
     let phase = motion::presence((id.clone(), "presence"), open, motion::BASE, motion::FAST, window, cx);
-    // 向上展开的菜单从下面浮上来，向下展开的从上面落下来。
+    // 向上展开的菜单从下面收上来，向下展开的从上面收下来。
     let from = match anchor {
         Anchor::BottomLeft | Anchor::BottomRight | Anchor::BottomCenter => motion::Edge::Bottom,
         _ => motion::Edge::Top,
@@ -1402,7 +1401,7 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
             move |_, window, cx| {
                 let p = palette(cx);
                 menu.begin(cx);
-                let content = body(&menu, true, window, cx);
+                let content = body(&menu, window, cx);
                 let give_initial = !menu.0.read(cx).initial_given;
                 let content = menu.container(content).when(give_initial, |container| {
                     let (menu, hold) = (menu.clone(), hold_focus.clone());
@@ -1436,7 +1435,7 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
                     .anchor(anchor)
                     .offset(point(px(0.), offset))
                     .snap_to_window_with_margin(px(space::S))
-                    .child(motion::inert(surface(body(&menu, false, window, cx), phase, &p))),
+                    .child(motion::inert(surface(body(&menu, window, cx), phase, &p))),
             )
             .with_priority(1),
         )
@@ -1458,18 +1457,6 @@ pub fn focus_after_paint(then: impl FnOnce(&mut Window, &mut App) + 'static) -> 
     )
     .absolute()
     .size_0()
-}
-
-/// 弹出菜单里第 `index` 个选项的进场（错峰、从菜单展开的方向轻轻移入）。见 [`menu_popover`]。
-pub fn menu_item_enter<E: IntoElement + Styled + 'static>(item: E, id: impl Into<ElementId>, index: usize, animate: bool) -> AnyElement {
-    if !animate {
-        return item.into_any_element();
-    }
-    motion::Entrance::new(motion::BASE)
-        .from(motion::Edge::Bottom, motion::NUDGE)
-        .stagger(index, motion::STAGGER_ITEM)
-        .play(item, id)
-        .into_any_element()
 }
 
 /// 单选菜单里的一项（权限、预设、模型）：读屏软件读作“单选菜单项，已勾选 / 未勾选”。
@@ -1608,7 +1595,7 @@ mod tests {
                         .ok();
                     },
                     1,
-                    move |menu, _, _, cx| {
+                    move |menu, _, cx| {
                         let p = super::palette(cx);
                         let items: Vec<FocusHandle> = (0..3).map(|index| menu.item(index, cx)).collect();
                         let mut seen = seen.borrow_mut();

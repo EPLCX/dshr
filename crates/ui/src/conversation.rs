@@ -24,10 +24,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::announce::{announce, announce_after};
 use crate::backend::{Backend, ModelChoice, TurnOptions, UiApprover};
-use crate::design::motion::Edge;
 use crate::design::{
     MenuFocus, Tone, Typography as _, badge, brand_mark, card, description, divider, heading, hint, hover_fill, list_item, menu_choice,
-    menu_item_enter, menu_popover, mono_font, motion, palette, pressable, radius, readable_with_id, size, space, with_focus_ring,
+    menu_popover, mono_font, motion, palette, pressable, radius, readable_with_id, size, space, with_focus_ring,
 };
 use crate::plugin::{ComposerControl, PanelContext, UiRegistry};
 use crate::transcript::{PluginViewResolver, Row, ToolRow, ToolStatus, Transcript, TurnFooter, tail_lines};
@@ -210,14 +209,6 @@ pub struct ConversationView {
     transcript: Transcript,
     /// 消息列表的虚拟化状态：只有看得见的行会被渲染，行数与 `transcript.rows` 保持一致（[`Self::sync_rows`]）。
     list: Entity<MessageScrollerState>,
-    /// 新出现的行和刚展开的工具输出的进场动画。列表是虚拟化的，按出现的时刻算进度，
-    /// 往回翻看时滚回视口的旧行不会重播。
-    entering_rows: motion::Timeline<usize>,
-    /// 工具卡片里展开、折叠的部分（输出、审批、实时输出）。同样按时刻算进度；
-    /// 播放期间每帧重新测量那一行（列表缓存了行高，不重新测量就看不到高度变化）。
-    tool_motion: motion::Timeline<(String, ToolPart)>,
-    /// 已经出现过的审批区、实时输出，用来发现“刚出现”。
-    tool_parts_shown: HashSet<(String, ToolPart)>,
     input: Entity<TextareaState>,
     options: TurnOptions,
     /// 写入 `session/options` 事件时用的、挂在界面线程上的实时事件出口（事件先给对话区，再进日志）。
@@ -366,9 +357,6 @@ impl ConversationView {
             transcript,
             ui,
             list,
-            entering_rows: motion::Timeline::new(motion::BASE, motion::FAST),
-            tool_motion: motion::Timeline::new(motion::BASE, motion::FAST),
-            tool_parts_shown: HashSet::new(),
             input,
             options,
             ui_event_sink: None,
@@ -438,58 +426,14 @@ impl ConversationView {
         self.row_focus.retain(|index, _| *index < rows);
         self.message_focus.retain(|index, _| *index < rows);
         self.row_bounds.borrow_mut().retain(|index, _| *index < rows);
-        let changed = dirty.clone();
-        let known = self.list.update(cx, |list, cx| {
+        // 新行、流式内容直接出现在最终位置：不滑入、不展开高度，正在读的内容不会被推着走。
+        self.list.update(cx, |list, cx| {
             let known = list.item_count();
             let kept = known.min(rows);
             if known != rows {
                 list.splice(kept..known, rows - kept, cx);
             }
             for index in dirty.into_iter().filter(|index| *index < kept) {
-                list.remeasure_items(index..index + 1, cx);
-            }
-            known
-        });
-        // 新加的行浮上来；顺便丢掉播完的记录。
-        self.tool_motion.retain(|_| true);
-        self.entering_rows.retain(|index| *index < rows);
-        for index in known..rows {
-            self.entering_rows.enter(index);
-        }
-        // 审批区、实时输出刚出现时展开。
-        for index in changed.into_iter().chain(known..rows) {
-            if let Some(Row::Tool(tool)) = self.transcript.rows.get(index) {
-                let parts = [(ToolPart::Live, tool_shows_live(tool))];
-                let id = tool.call_id.clone();
-                for (part, present) in parts {
-                    let key = (id.clone(), part);
-                    if present && self.tool_parts_shown.insert(key.clone()) {
-                        self.tool_motion.enter(key);
-                    } else if !present {
-                        self.tool_parts_shown.remove(&key);
-                    }
-                }
-            }
-        }
-    }
-
-    /// 正在展开、折叠的工具卡片所在的行要每帧重新测量。在构造消息列表之前调用（列表布局时不能改它）。
-    /// 刚播完的也再量一次：最后一帧量到的是动画中的高度，不是最终高度。
-    fn remeasure_moving_rows(&mut self, cx: &mut Context<Self>) {
-        let moving: HashSet<String> = self.tool_motion.keys().map(|(id, _)| id.clone()).collect();
-        self.tool_motion.retain(|_| true);
-        if moving.is_empty() {
-            return;
-        }
-        let rows: Vec<usize> = self
-            .transcript
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(index, row)| matches!(row, Row::Tool(tool) if moving.contains(tool.call_id.as_str())).then_some(index))
-            .collect();
-        self.list.update(cx, |list, cx| {
-            for index in rows {
                 list.remeasure_items(index..index + 1, cx);
             }
         });
@@ -683,10 +627,6 @@ impl ConversationView {
                         this.transcript = Transcript::new(this.ui.clone()).with_plugin_views(views).replay(session.events());
                         this.session = Some(session);
                         this.error = this.error_after_open.take().filter(|(session, _)| *session == id).map(|(_, error)| error);
-                        // 记录里已有的行是一次载入的，不逐行播放（切换会话时整个对话区淡入，见 `WorkspaceView::render`）。
-                        this.entering_rows.clear();
-                        this.tool_motion.clear();
-                        this.tool_parts_shown.clear();
                         this.message_focus.clear();
                         this.current_message = None;
                         let rows = this.transcript.rows.len();
@@ -1452,16 +1392,15 @@ impl ConversationView {
         cx.notify();
     }
 
-    /// 首页标题：品牌标记 + 标语 + “预览版”徽标，依次浮上来。
+    /// 首页标题：品牌标记 + 标语 + “预览版”徽标。每次新建会话都会看到，所以直接显示，不让人等它浮上来。
     fn render_hero(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette(cx);
-        let part = |index: usize| motion::Entrance::new(motion::SLOW).from(Edge::Bottom, motion::PAGE).stagger(index, motion::STAGGER_HERO);
         h_flex()
             .justify_center()
             .gap(px(space::M))
-            .child(part(0).play(brand_mark(size::ICON_HERO, &p), "hero-mark-enter"))
-            .child(part(1).play(heading(t!("conversation.hero_title").to_string(), 1).text_display(), "hero-title-enter"))
-            .child(part(2).play(badge(t!("conversation.preview").to_string(), &p), "hero-badge-enter"))
+            .child(brand_mark(size::ICON_HERO, &p))
+            .child(heading(t!("conversation.hero_title").to_string(), 1).text_display())
+            .child(badge(t!("conversation.preview").to_string(), &p))
     }
 
     /// 输入卡片上方的工作区选择。
@@ -1507,7 +1446,7 @@ impl ConversationView {
         let modes = [PermissionMode::Manual, PermissionMode::Workspace, PermissionMode::AutoReview, PermissionMode::FullAccess];
         let initial = modes.iter().position(|mode| *mode == current).unwrap_or(0);
         // 菜单向上展开（锚在输入卡片底部）。
-        let body = move |menu: &MenuFocus, animate: bool, _: &mut Window, cx: &mut App| {
+        let body = move |menu: &MenuFocus, _: &mut Window, cx: &mut App| {
             let p = palette(cx);
             v_flex()
                 .w(px(size::MENU_WIDTH))
@@ -1550,7 +1489,7 @@ impl ConversationView {
                         })
                         .ok();
                     });
-                    menu_item_enter(item, ("permission-mode-enter", index), index, animate)
+                    item.into_any_element()
                 }))
                 .into_any_element()
         };
@@ -1597,7 +1536,7 @@ impl ConversationView {
                 .map_or(0, |index| Preset::ALL.len() + index),
             None => Preset::ALL.iter().position(|preset| *preset == current).unwrap_or(0),
         };
-        let body = move |menu: &MenuFocus, animate: bool, _: &mut Window, cx: &mut App| {
+        let body = move |menu: &MenuFocus, _: &mut Window, cx: &mut App| {
             let p = palette(cx);
             let builtin = Preset::ALL.len();
             v_flex()
@@ -1637,7 +1576,7 @@ impl ConversationView {
                             })
                             .ok();
                         });
-                    menu_item_enter(item, ("preset-enter", index), index, animate)
+                    item.into_any_element()
                 }))
                 // 插件提供的预设排在内置的后面。
                 .children(plugin_presets.iter().enumerate().map(|(index, preset)| {
@@ -1679,7 +1618,7 @@ impl ConversationView {
                         })
                         .ok();
                     });
-                    menu_item_enter(item, ("plugin-preset-enter", index), builtin + index, animate)
+                    item.into_any_element()
                 }))
                 .into_any_element()
         };
@@ -1772,8 +1711,7 @@ impl ConversationView {
                 PendingAttachment::Screenshot { .. } => true,
                 PendingAttachment::Mention { .. } => false,
             };
-            let enter_id = ElementId::Name(format!("attachment-enter-{}", name).into());
-            let chip = h_flex()
+            h_flex()
                 .gap(px(space::XS))
                 .pl(px(space::S))
                 .rounded(px(radius::MD))
@@ -1794,8 +1732,7 @@ impl ConversationView {
                                 cx.notify();
                             }
                         })),
-                ));
-            motion::slide_in(chip, enter_id, Edge::Left, motion::SHORT)
+                ))
         });
         Some(h_flex().flex_wrap().gap(px(space::XS)).children(chips).into_any_element())
     }
@@ -1832,7 +1769,7 @@ impl ConversationView {
                 .label(label)
                 .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM))),
         );
-        let body = move |menu: &MenuFocus, animate: bool, _: &mut Window, cx: &mut App| {
+        let body = move |menu: &MenuFocus, _: &mut Window, cx: &mut App| {
             let p = palette(cx);
             let effort_group = t!("conversation.effort").to_string();
             // 换页：改视图状态，焦点移到新页上对应的那一项（下一帧画出来时生效）。
@@ -1887,7 +1824,7 @@ impl ConversationView {
                                     })
                                     .ok();
                                 });
-                        let item = menu_item_enter(item, ("model-choice-enter", index), index, animate);
+                        let item = item.into_any_element();
                         // 不许收缩：列表限了高度，弹性布局会把每一行压到文字的高度，而不是滚动。
                         rows.push(match header {
                             Some(header) => v_flex().flex_none().gap(px(2.)).child(header).child(item).into_any_element(),
@@ -1926,7 +1863,7 @@ impl ConversationView {
                     menu_body
                         .child(list)
                         .child(div().my(px(space::XS)).child(divider(&p)))
-                        .child(menu_item_enter(entry, "model-effort-entry-enter", entry_index, animate))
+                        .child(entry.into_any_element())
                         .into_any_element()
                 }
                 ModelMenuPage::Effort => {
@@ -1967,10 +1904,10 @@ impl ConversationView {
                                 .ok();
                                 back(window, cx);
                             });
-                        menu_item_enter(item, ("effort-enter", index), index + 1, animate)
+                        item.into_any_element()
                     });
                     menu_body
-                        .child(menu_item_enter(back_item, "model-effort-back-enter", 0, animate))
+                        .child(back_item.into_any_element())
                         .child(div().my(px(space::XS)).child(divider(&p)))
                         .children(levels)
                         .child(div().px(px(space::S)).pt(px(space::XS)).child(hint(
@@ -2010,7 +1947,7 @@ impl ConversationView {
     }
     /// 圆形发送按钮；运行中且输入为空时变成停止按钮，有输入时把消息加入队列。
     ///
-    /// 可用与不可用、发送与停止之间都有过渡：不透明度渐变，停止的底色交叉淡入，换图标时新图标轻轻浮上来。
+    /// 可用与不可用之间不透明度渐变，发送与停止之间底色交叉淡入；图标直接换上。
     fn render_send_button(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let has_text = !self.input_text(cx).is_empty();
         let running = self.is_running();
@@ -2018,8 +1955,6 @@ impl ConversationView {
         let enabled = stop || (has_text && self.workspace.is_some());
         let p = palette(cx);
         let opacity = motion::tween("send-opacity", if enabled { 1. } else { 0.35 }, window, cx);
-        let icon_enter =
-            |icon: Icon, id: &'static str| motion::Entrance::new(motion::FAST).from(Edge::Bottom, motion::NUDGE).play(icon, id);
         let base = pressable("send", &p)
             .size(px(size::CONTROL_MD))
             .flex_none()
@@ -2038,14 +1973,14 @@ impl ConversationView {
             return base
                 .accessibility_label(t!("conversation.stop").to_string())
                 .cursor_pointer()
-                .child(icon_enter(Icon::new(IconName::Square).size(px(size::ICON_SM)).text_color(p.surface), "send-icon-stop"))
+                .child(Icon::new(IconName::Square).size(px(size::ICON_SM)).text_color(p.surface))
                 .on_click(cx.listener(|this, _, _, cx| this.stop(cx)))
                 .into_any_element();
         }
         let label = if running { t!("conversation.add_to_queue") } else { t!("conversation.send") };
         base.accessibility_label(label.to_string())
             .disabled(!enabled)
-            .child(icon_enter(Icon::new(IconName::ArrowUp).size(px(size::ICON_MD)).text_color(p.on_accent), "send-icon-send"))
+            .child(Icon::new(IconName::ArrowUp).size(px(size::ICON_MD)).text_color(p.on_accent))
             .when(enabled, |button| button.cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))))
             .into_any_element()
     }
@@ -2130,9 +2065,8 @@ impl ConversationView {
             ));
         let body_id = SharedString::from(format!("plugin-panel-body-{}", panel.key));
         let view = panel.view.clone();
-        let body = motion::expand(SharedString::from(format!("plugin-panel-reveal-{}", panel.key)), expanded, window, cx, || {
-            div().pt(px(space::S)).child(div().max_h(px(320.)).id(body_id).overflow_y_scroll().child(view)).into_any_element()
-        });
+        // 展开、折叠直接到位：面板在输入框上方，高度一动整个对话区都跟着动。
+        let body = expanded.then(|| div().pt(px(space::S)).child(div().max_h(px(320.)).id(body_id).overflow_y_scroll().child(view)));
         card(&p).px(px(space::L)).py(px(space::M)).child(v_flex().child(header).children(body)).into_any_element()
     }
 
@@ -2176,7 +2110,7 @@ impl ConversationView {
                             .accessibility_label(t!("conversation.unsteer").to_string())
                             .on_click(cx.listener(move |this, _, _, cx| this.unsteer(id, cx))),
                     ));
-                motion::nudge_in(row, ("steering-enter", id as usize)).into_any_element()
+                row.into_any_element()
             })
             .collect();
         let rows: Vec<_> = self
@@ -2227,8 +2161,7 @@ impl ConversationView {
                                 }
                             })),
                     ));
-                // 新排队的消息加在末尾，按位置给 id 就是新的那一行淡入。
-                motion::nudge_in(row, ("queued-enter", index)).into_any_element()
+                row.into_any_element()
             })
             .collect();
         v_flex().gap(px(space::XS)).children(steered).children(rows).into_any_element()
@@ -2286,10 +2219,7 @@ impl ConversationView {
             ));
         }
         if self.workspace.is_none() {
-            column = column.child(motion::nudge_in(
-                div().px(px(space::XS)).child(hint(t!("conversation.no_workspace_hint").to_string(), Tone::Neutral, &p)),
-                "no-workspace-enter",
-            ));
+            column = column.child(div().px(px(space::XS)).child(hint(t!("conversation.no_workspace_hint").to_string(), Tone::Neutral, &p)));
         }
         // 有审批在等：输入卡片的位置换成审批面板（焦点自动移过去，键盘就能答）。
         if let Some(approval) = self.render_approval(window, cx) {
@@ -2529,7 +2459,8 @@ impl ConversationView {
             .children(note)
             .child(v_flex().gap(px(2.)).children(options))
             .child(div().px(px(space::XS)).child(hint(t!("tool.approval_keys").to_string(), Tone::Neutral, &p)));
-        Some(motion::nudge_in(panel, SharedString::from(format!("approval-enter-{}", tool.call_id))).into_any_element())
+        // 审批是异步来的、要用户注意：从半透明收到原位，第一帧就读得清。
+        Some(motion::appear(panel, SharedString::from(format!("approval-enter-{}", tool.call_id))).into_any_element())
     }
 
     /// 审批面板里 ↑ / ↓：焦点在选项之间循环移动。
@@ -2657,7 +2588,6 @@ impl ConversationView {
     /// 消息列表那一块：列表、顶部淡出、“回到最新”按钮。由 [`TranscriptView`] 画。
     fn render_transcript_area(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
-        self.remeasure_moving_rows(cx);
         let transcript = self.render_transcript(cx);
         // 往下看过之后，内容会从面板顶边滚出去：顶上淡出一小段，内容渐隐进标题栏下面，而不是被一刀切断。
         // 停在最上面时什么都不盖（那里本来就是留白）。它贴着面板的左上角，要跟着面板一起圆角，
@@ -2752,7 +2682,7 @@ impl ConversationView {
             .child(Icon::new(IconName::ArrowDown).size(px(size::ICON_MD)))
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_latest(window, cx)));
         let row = div().absolute().left_0().right_0().bottom(px(space::L)).flex().justify_center().child(button);
-        Some(motion::fade_in(row, "jump-to-latest-enter").into_any_element())
+        Some(row.into_any_element())
     }
 
     /// 回到最新内容，焦点放到最后一条消息上（没有消息时放回输入框）。
@@ -3118,14 +3048,8 @@ impl ConversationView {
                 .left_0()
                 .size_full(),
             );
-        // 新行进场：自己发的消息从右边（气泡靠右）滑入，其余的从下面浮上来。
-        match self.entering_rows.phase(&index, window, cx) {
-            Some(phase) => {
-                let from = if matches!(self.transcript.rows.get(index), Some(Row::User { .. })) { Edge::Right } else { Edge::Bottom };
-                motion::slide(row, phase.visibility(), from, motion::SHORT).into_any_element()
-            }
-            None => row.into_any_element(),
-        }
+        // 新行直接出现在最终位置：发出的消息第一帧就在，流式输出时内容不会一直在动。
+        row.into_any_element()
     }
 
     fn render_row_content(&self, index: usize, row: &Row, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -3282,12 +3206,6 @@ impl ConversationView {
             .child(hover_fill(hover_bg, radius::LG, false))
             .on_click(cx.listener(move |this, _, _, cx| {
                 let expanded = this.transcript.toggle_tool(&toggle_id);
-                let key = (toggle_id.clone(), ToolPart::Output);
-                if expanded {
-                    this.tool_motion.enter(key);
-                } else {
-                    this.tool_motion.leave(key);
-                }
                 this.sync_rows(cx);
                 // 列表停在底部时会跟着内容往上滚；展开的卡片变高，刚点的标题可能被顶出视口。
                 // 这时改为停在这张卡片上，让它留在眼前。
@@ -3329,7 +3247,6 @@ impl ConversationView {
             });
 
         let mut tool_card = card(&p).overflow_hidden().child(header);
-        let part_phase = |part: ToolPart, window: &mut Window, cx: &App| self.tool_motion.phase(&(tool.call_id.clone(), part), window, cx);
 
         // 审批在输入框的位置（见 `render_approval`）；卡片上只提示一句，状态由标题里的“等待审批”表达。
         if tool.approval.is_some() {
@@ -3363,14 +3280,11 @@ impl ConversationView {
                     .text_mono(mono.clone())
                     .child(readable_with_id(("live-output", index), tail)),
             );
-            let phase = part_phase(ToolPart::Live, window, cx).unwrap_or(motion::Phase::SETTLED);
-            tool_card = tool_card.child(motion::reveal(("live-reveal", index), phase, live));
+            tool_card = tool_card.child(live);
         }
 
-        // 展开时高度展开、内容淡入；折叠时先收起再移除。
-        let output_phase = part_phase(ToolPart::Output, window, cx);
-        let collapsing = output_phase.is_some_and(|phase| phase.leaving);
-        if (tool.expanded || collapsing)
+        // 展开、折叠直接到位（只有箭头转动）：列表里的行高不做动画，下面的内容不会被一路推着走。
+        if tool.expanded
             && let ToolStatus::Done { output, .. } = &tool.status
         {
             let body = div().id(("tool-output", index)).max_h(px(320.)).overflow_y_scroll().bg(p.sunken).text_mono(mono);
@@ -3381,20 +3295,10 @@ impl ConversationView {
                 Some(content) => body.child(div().px(px(space::M)).py(px(space::S)).child(content)),
                 None => body.px(px(space::M)).py(px(space::S)).child(readable_with_id("output", output.clone())),
             };
-            let phase = output_phase.unwrap_or(motion::Phase::SETTLED);
-            tool_card = tool_card.child(motion::reveal(("output-reveal", index), phase, v_flex().child(divider(&p)).child(body)));
+            tool_card = tool_card.child(v_flex().child(divider(&p)).child(body));
         }
         tool_card.into_any_element()
     }
-}
-
-/// 工具卡片里会展开、折叠的部分。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ToolPart {
-    /// 运行结束后点标题展开的输出。
-    Output,
-    /// 运行中的实时输出（终端面板）。
-    Live,
 }
 
 /// 运行中、已经有实时输出时显示终端面板。
@@ -3790,17 +3694,12 @@ impl Render for ConversationView {
             self.composer_move = None;
             // 首页：标题与输入卡片一起，在可用区域中偏上居中。
             let hero = self.render_hero(cx);
-            return root.child(
-                v_flex().flex_1().items_center().justify_center().px(px(space::XXL)).pb(px(space::XXXL * 2.)).child(
-                    v_flex().w_full().max_w(px(size::CONTENT_MAX_WIDTH)).gap(px(space::XXXL)).child(hero).child(
-                        // 输入卡片跟在标题后面浮上来。
-                        motion::Entrance::new(motion::SLOW)
-                            .from(Edge::Bottom, motion::SHORT)
-                            .delay(motion::STAGGER_HERO * 2)
-                            .play(div().w_full().child(composer), COMPOSER_SLOT),
-                    ),
+            return root.child(v_flex().flex_1().items_center().justify_center().px(px(space::XXL)).pb(px(space::XXXL * 2.)).child(
+                v_flex().w_full().max_w(px(size::CONTENT_MAX_WIDTH)).gap(px(space::XXXL)).child(hero).child(
+                    // 输入卡片直接在位，第一帧就能打字。
+                    div().id(COMPOSER_SLOT).w_full().child(composer),
                 ),
-            );
+            ));
         }
         // 刚从首页发出第一条消息：输入卡片从首页的位置平滑滑到底部，而不是一下跳过去。
         // 新位置这一帧还没布局，按上一帧的视图底边和卡片高度推算（卡片内容不变，高度一样）；最后一帧偏移归零，
@@ -4165,13 +4064,6 @@ mod menu_tests {
         let fixture = open(cx, 1);
         long_transcript(cx, &fixture, 5);
         let view = fixture.view.clone();
-        // 新行的进场动画播放期间每帧都要重画消息列表：先让它们播完。
-        cx.update(|cx| {
-            view.update(cx, |view, _| {
-                view.entering_rows.clear();
-                view.tool_motion.clear();
-            })
-        });
         draw(cx, fixture.window);
         draw_frame(cx, fixture.window);
         let before = read(cx, &fixture, |view| view.rows_rendered);

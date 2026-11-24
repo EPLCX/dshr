@@ -1,62 +1,52 @@
 //! 动效。规则见 `docs/design.md` §5.5；这里是唯一的实现位置，视图不直接写时长、缓动和位移。
 //!
-//! 基调：有方向、有层次，但不抢内容。进场用先快后慢的曲线，浮层（弹窗、菜单）的位移带一点过冲，
-//! 退场比进场短、只往回退一半距离；任何信息都不能只靠动画表达。
+//! 基调：**响应即时，动画只说明连续性。** 用户操作的结果第一帧就以最终样子出现、可以操作；
+//! 动画不能挡在结果前面，也不能让人等。所以：
+//! - 高频操作（切换会话、切页、新消息、流式内容、悬停进入、键盘导航）不做动画。
+//! - 不动画布局（宽度、高度、行高）：展开、折叠直接到位，只转动箭头。
+//! - 必须有的进场不从透明开始（[`FLOOR`]），位移只有几像素；没有过冲，没有错峰。
+//! - 退场只淡出、不位移，而且不挡操作。
 //! 开启“减少动态效果”时没有动画：元素直接以最终状态出现、消失；循环动画停在起始帧。
 //!
 //! 几种做法，按场合选：
-//! - [`Entrance`]（及 [`fade_in`] / [`nudge_in`] / [`rise_in`] / [`slide_in`] / [`error_in`]）：
-//!   动画状态记在元素上，元素一挂上就播放。适合“出现即挂载”的内容。包裹层的 `id` 要稳定，
-//!   需要重播时换一个 `id`；不要用会变的 `id` 包裹可能持有键盘焦点的控件，`id` 一变焦点就丢了。
-//! - [`presence`] + [`pop`] / [`reveal`]：进场和退场。关闭后元素还要再画一小段时间，调用方在
-//!   [`presence`] 返回 `None` 之前继续渲染它（弹窗、菜单、下拉框、展开的表单）。
-//! - [`Timeline`]：按登记的时刻算进度，不依赖元素状态。虚拟列表的行滚出视口再滚回来，元素状态已经没了，
-//!   用前两种会重播；用这个只在真正出现、展开、折叠时播放一次。
-//! - [`Highlight`]：悬停、选中的底色过渡，画在控件的最底层。
+//! - [`appear`] / [`error_in`] / [`message_in`]：异步出现、需要引起注意的小块内容（审批、提示、错误）。
+//!   动画状态记在元素上，元素一挂上就播放。包裹层的 `id` 要稳定，需要重播时换一个 `id`。
+//! - [`presence`] + [`pop`]：浮层（弹窗、菜单、下拉框）的进场和退场。关闭后元素还要再画一小段时间，
+//!   调用方在 [`presence`] 返回 `None` 之前继续渲染它。
+//! - [`Highlight`]：悬停、选中的底色：亮起立即到位，熄灭时淡出。
 //! - [`tween`]：一个数值（不透明度、角度）的过渡。[`turn`] 用它转动展开箭头。
-//! - [`spinner`] / [`typing_dots`]：只用在图标和小圆点上。GPUI 只能变换 SVG 和图片，
-//!   不能缩放、旋转整块内容。
+//! - [`spinner`] / [`typing_dots`]：只用在图标和小圆点上。
 //!
 //! GPUI 没有图层合成：`opacity` 按每个图元分别相乘。带阴影的浮层淡入时，阴影会先于卡片显出来、
 //! 像一块暗板透过卡片，所以 [`pop`] 把阴影强度按不透明度的三次方渐显。
 
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
-use std::hash::Hash;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::base::motion::{Easing, MotionReveal, Presence, PresencePhase, Transition, TransitionId};
+use gpui_kit::base::motion::{Easing, Presence, PresencePhase, Transition, TransitionId};
 use gpui_kit::component::{Icon, IconName, h_flex};
 use gpui_kit::*;
 
-// ---- 时长、位移、错峰 ----
+// ---- 时长、位移 ----
 
-/// 悬停、选中、小块提示的淡入，以及所有退场。
-pub const FAST: Duration = Duration::from_millis(140);
-/// 菜单、下拉框、列表行进场、展开与折叠。
-pub const BASE: Duration = Duration::from_millis(220);
-/// 弹窗、页面切换、首页标题。
-pub const SLOW: Duration = Duration::from_millis(320);
+/// 悬停熄灭、箭头、所有退场。
+pub const FAST: Duration = Duration::from_millis(90);
+/// 菜单、下拉框、开关、提示的进场。
+pub const BASE: Duration = Duration::from_millis(120);
+/// 弹窗、首页输入框滑到底部、首次启动的欢迎页。
+pub const SLOW: Duration = Duration::from_millis(180);
 
 /// 提示、错误这类小块内容的位移。
-pub const NUDGE: f32 = 4.;
-/// 行内元素、列表行、菜单的位移。
-pub const SHORT: f32 = 8.;
-/// 页面切换。
-pub const PAGE: f32 = 12.;
-/// 弹窗。
-pub const MEDIUM: f32 = 16.;
+pub const NUDGE: f32 = 2.;
+/// 菜单、下拉框、欢迎页的位移。
+pub const SHORT: f32 = 4.;
+/// 弹窗的位移。
+pub const MEDIUM: f32 = 8.;
 
-/// 菜单里的选项。
-pub const STAGGER_ITEM: Duration = Duration::from_millis(15);
-/// 侧边栏第一次载入的会话行。
-pub const STAGGER_ROW: Duration = Duration::from_millis(20);
-/// 首页标题的几个部分。
-pub const STAGGER_HERO: Duration = Duration::from_millis(60);
-/// 错峰最多排到第几个；再往后的和最后一个同时出现，长列表不会拖很久。
-pub const STAGGER_MAX: usize = 8;
+/// 进场起始的不透明度：第一帧就读得清，动画只是收个尾，不是“从无到有”。
+pub const FLOOR: f32 = 0.5;
 
 /// 循环动画的帧率上限：只是状态提示，不值得每帧重绘。
 const LOOP_FPS: f32 = 30.;
@@ -65,12 +55,10 @@ const LOOP_FPS: f32 = 30.;
 
 /// 进场：很快到位，最后一段放缓。
 const ENTER: Easing = Easing::CubicBezier { x1: 0.16, y1: 1., x2: 0.3, y2: 1. };
-/// 退场：先慢后快，干脆地离开。
+/// 退场：干脆地离开。
 const EXIT: Easing = Easing::CubicBezier { x1: 0.4, y1: 0., x2: 1., y2: 1. };
-/// 状态变化（底色、高度、旋转）。
+/// 状态变化（底色、旋转、开关）。
 const STANDARD: Easing = Easing::CubicBezier { x1: 0.2, y1: 0., x2: 0., y2: 1. };
-/// 过冲的幅度：约 7%，到位前轻轻越过一点再回来。
-const BACK: f32 = 1.4;
 
 pub fn enter(t: f32) -> f32 {
     ENTER.sample(t.clamp(0., 1.))
@@ -84,21 +72,18 @@ pub fn standard(t: f32) -> f32 {
     STANDARD.sample(t.clamp(0., 1.))
 }
 
-/// 带过冲的先快后慢（ease-out-back）。只用于位移；结果会略大于 1，不能拿来当不透明度。
-pub fn overshoot(t: f32) -> f32 {
-    let t = t.clamp(0., 1.) - 1.;
-    1. + (BACK + 1.) * t * t * t + BACK * t * t
+/// 进场时的不透明度：从 [`FLOOR`] 开始。
+fn enter_opacity(t: f32) -> f32 {
+    FLOOR + (1. - FLOOR) * enter(t)
 }
 
 // ---- 方向与位移 ----
 
-/// 元素从哪一边来（退场时往这一边退）。
+/// 元素从哪一边来。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Top,
     Bottom,
-    Left,
-    Right,
 }
 
 /// 把元素画在离终点还差 `remaining`（1 是整段距离，0 是到位）的地方。用相对定位，不影响布局。
@@ -108,24 +93,22 @@ pub fn shift<E: Styled>(element: E, from: Edge, distance: f32, remaining: f32) -
     match from {
         Edge::Top => element.top(-offset),
         Edge::Bottom => element.top(offset),
-        Edge::Left => element.left(-offset),
-        Edge::Right => element.left(offset),
     }
 }
 
 // ---- 进场 ----
 
-/// 一次性的进场：元素挂上时从透明（可选：偏一点）过渡到原位。见模块说明里的第一种做法。
+/// 一次性的进场：元素挂上时从半透明（可选：偏几像素）收到原位。只给异步出现、需要注意的内容用，
+/// 以及首次启动的欢迎页；用户自己操作的结果直接显示。
 #[derive(Debug, Clone, Copy)]
 pub struct Entrance {
     duration: Duration,
-    delay: Duration,
     from: Option<(Edge, f32)>,
 }
 
 impl Entrance {
     pub fn new(duration: Duration) -> Self {
-        Self { duration, delay: Duration::ZERO, from: None }
+        Self { duration, from: None }
     }
 
     /// 从 `edge` 那边偏 `distance` 像素的地方进来。
@@ -134,19 +117,9 @@ impl Entrance {
         self
     }
 
-    pub fn delay(mut self, delay: Duration) -> Self {
-        self.delay = delay;
-        self
-    }
-
-    /// 第 `index` 个错峰出现，间隔 `step`；超过 [`STAGGER_MAX`] 的不再往后推。
-    pub fn stagger(self, index: usize, step: Duration) -> Self {
-        self.delay(step * index.min(STAGGER_MAX) as u32)
-    }
-
     /// 按进度（0 到 1，线性）画出中间状态。
     fn apply<E: Styled>(&self, element: E, t: f32) -> E {
-        let element = element.opacity(enter(t));
+        let element = element.opacity(enter_opacity(t));
         match self.from {
             Some((edge, distance)) => shift(element, edge, distance, 1. - enter(t)),
             None => element,
@@ -154,72 +127,50 @@ impl Entrance {
     }
 
     pub fn play<E: IntoElement + Styled + 'static>(self, element: E, id: impl Into<ElementId>) -> AnimationElement<E> {
-        one_shot(element, id, self.delay, self.duration, move |element, t| self.apply(element, t))
+        one_shot(element, id, self.duration, move |element, t| self.apply(element, t))
     }
 }
 
-/// 一次性动画：先停在起点 `delay`，再用 `duration` 从 0 走到 1（线性，缓动由 `apply` 自己套）。
+/// 一次性动画：先停在起点 1ms，再用 `duration` 从 0 走到 1（线性，缓动由 `apply` 自己套）。
 ///
-/// 所有一次性动画都是“停一下 + 播放”这两段，延迟为 0 时也一样（停 1ms）。GPUI 按元素 id 记着播到第几段：
-/// 同一个 id 这一帧是两段、下一帧变成一段（比如侧边栏只在刚载入时错峰），它会去取不存在的第二段而崩溃。
-/// 段数固定就不会出这种事。GPUI 的动画元素本身会遵守“减少动态效果”（直接画最终状态）。
+/// 所有一次性动画都是“停一下 + 播放”这两段。GPUI 按元素 id 记着播到第几段，同一个 id 段数一变它会去取
+/// 不存在的段而崩溃；段数固定就不会出这种事。GPUI 的动画元素本身会遵守“减少动态效果”（直接画最终状态）。
 fn one_shot<E: IntoElement + Styled + 'static>(
     element: E,
     id: impl Into<ElementId>,
-    delay: Duration,
     duration: Duration,
     apply: impl Fn(E, f32) -> E + 'static,
 ) -> AnimationElement<E> {
-    element.with_animations(id, vec![Animation::new(delay.max(MIN_HOLD)), Animation::new(duration)], move |element, index, t| {
+    element.with_animations(id, vec![Animation::new(MIN_HOLD), Animation::new(duration)], move |element, index, t| {
         apply(element, if index == 0 { 0. } else { t })
     })
 }
 
-/// 不需要延迟时“停在起点”的那一段的长度：不能是 0（GPUI 用它做除数），短到看不出来。
+/// “停在起点”那一段的长度：不能是 0（GPUI 用它做除数），短到看不出来。
 const MIN_HOLD: Duration = Duration::from_millis(1);
 
-/// 淡入。用于遮罩、整块区域的切换。
-pub fn fade_in<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>) -> AnimationElement<E> {
-    Entrance::new(FAST).play(element, id)
+/// 异步出现、需要注意的小块内容（审批区、操作结果提示）：从半透明收到原位，上浮两像素。
+pub fn appear<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>) -> AnimationElement<E> {
+    Entrance::new(BASE).from(Edge::Bottom, NUDGE).play(element, id)
 }
 
-/// 淡入并上浮一点。用于提示、错误、保存结果这类就地出现的小块内容。
-pub fn nudge_in<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>) -> AnimationElement<E> {
-    Entrance::new(FAST).from(Edge::Bottom, NUDGE).play(element, id)
-}
-
-/// 从下方浮上来并淡入。用于新出现的行、展开的内容。
-pub fn rise_in<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>) -> AnimationElement<E> {
-    Entrance::new(BASE).from(Edge::Bottom, SHORT).play(element, id)
-}
-
-/// 从 `from` 那边滑进来并淡入（页面切换、用户消息、侧边栏的新行）。
-pub fn slide_in<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>, from: Edge, distance: f32) -> AnimationElement<E> {
-    Entrance::new(BASE).from(from, distance).play(element, id)
-}
-
-/// 出错：淡入，再左右轻轻晃两下，表示“这里需要处理”。原因必须同时写在文字里。
+/// 出错：第一帧就完全显示，再左右轻晃一下，表示“这里需要处理”。原因必须同时写在文字里。
 pub fn error_in<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>) -> AnimationElement<E> {
-    one_shot(element, id, Duration::ZERO, FAST * 3, |element, t| element.opacity(enter(t * 3.)).left(px(shake(t))))
+    one_shot(element, id, FAST * 2, |element, t| element.left(px(shake(t))))
 }
 
-/// 操作结果的一行提示：成功时 [`nudge_in`]，失败时 [`error_in`]。
+/// 操作结果的一行提示：成功时 [`appear`]，失败时 [`error_in`]。
 pub fn message_in<E: IntoElement + Styled + 'static>(element: E, id: impl Into<ElementId>, error: bool) -> AnyElement {
-    if error { error_in(element, id).into_any_element() } else { nudge_in(element, id).into_any_element() }
+    if error { error_in(element, id).into_any_element() } else { appear(element, id).into_any_element() }
 }
 
-/// 晃动的横向位移：两个来回，越晃越小，结束时回到原位。
+/// 晃动的横向位移：一个来回，越晃越小，结束时回到原位。
 fn shake(t: f32) -> f32 {
     let t = t.clamp(0., 1.);
-    NUDGE * (TAU * 2. * t).sin() * (1. - t)
+    NUDGE * 1.5 * (TAU * t).sin() * (1. - t)
 }
 
-/// 按进度（0 到 1，已经过缓动）画出从 `from` 那边滑进来的中间状态。给 [`Timeline`] 用。
-pub fn slide<E: Styled>(element: E, t: f32, from: Edge, distance: f32) -> E {
-    shift(element.opacity(t.clamp(0., 1.)), from, distance, 1. - t)
-}
-
-// ---- 进场与退场 ----
+// ---- 浮层的进场与退场 ----
 
 /// 正在进场或退场的进度。`progress` 是线性的：进场从 0 到 1，退场从 1 回到 0。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -232,24 +183,15 @@ impl Phase {
     /// 已经完全显示、没有动画。
     pub const SETTLED: Phase = Phase { progress: 1., leaving: false };
 
-    pub fn is_settled(self) -> bool {
-        !self.leaving && self.progress >= 1.
-    }
-
     /// 内容的可见程度（不透明度，0 到 1）。
     pub fn visibility(self) -> f32 {
         if self.leaving { 1. - exit(1. - self.progress) } else { enter(self.progress) }
     }
-
-    /// 高度展开的程度（0 到 1）。
-    pub fn extent(self) -> f32 {
-        if self.leaving { 1. - exit(1. - self.progress) } else { standard(self.progress) }
-    }
 }
 
 /// 进场、退场的状态，按 `id` 记在当前视图里。`present` 变成 `false` 后还会返回一段时间的
-/// `Some(Phase { leaving: true, .. })`，调用方这期间继续画它（不响应操作）；返回 `None` 才真正移除。
-/// 中途反悔（打开又立刻关上）时从当前位置往回走，不会跳。
+/// `Some(Phase { leaving: true, .. })`，调用方这期间继续画它（不响应操作、不挡下面的操作）；
+/// 返回 `None` 才真正移除。中途反悔（打开又立刻关上）时从当前位置往回走，不会跳。
 ///
 /// 在视图的 `render` 里调用，并且每帧都要调用（关着的时候也是），状态才不会丢。
 pub fn presence(
@@ -274,11 +216,12 @@ pub fn presence(
     }
 }
 
-/// 浮层（弹窗卡片、菜单、下拉列表）在 `phase` 时的样子：不透明度、带过冲的位移、渐显的阴影。
+/// 浮层（弹窗卡片、菜单、下拉列表）在 `phase` 时的样子：进场时淡入并从 `from` 那边收几像素到位
+/// （没有过冲）；退场时原地淡出，不位移。阴影按不透明度的三次方渐显。
 /// `shadow` 是完全显示时的阴影（见 `design::shadow`）。
 pub fn pop<E: Styled>(element: E, from: Edge, distance: f32, phase: Phase, shadow: Vec<BoxShadow>) -> E {
     let visibility = phase.visibility();
-    let remaining = if phase.leaving { exit(1. - phase.progress) * 0.5 } else { 1. - overshoot(phase.progress) };
+    let remaining = if phase.leaving { 0. } else { 1. - enter(phase.progress) };
     let ink = visibility * visibility * visibility;
     let shadow = shadow.into_iter().map(|mut shadow| {
         shadow.color = shadow.color.opacity(ink);
@@ -292,124 +235,9 @@ pub fn inert(element: impl IntoElement) -> Div {
     div().relative().child(element).child(div().absolute().inset_0().occlude())
 }
 
-/// 按 `phase` 展开、收起高度（量出内容的高度，按进度裁剪），内容同时淡入淡出。
-/// 完全展开时不再测量，但保持同样的元素结构，里面控件的状态（焦点、滚动位置）不会丢。
-pub fn reveal(id: impl Into<ElementId>, phase: Phase, child: impl IntoElement) -> AnyElement {
-    let id = id.into();
-    if phase.is_settled() {
-        return div().id(id).w_full().child(div().child(child)).into_any_element();
-    }
-    let content = div().opacity(phase.visibility()).child(child).into_any_element();
-    MotionReveal::new(id, phase.extent(), content).into_any_element()
-}
-
-/// 展开、收起用的 [`presence`]（展开 BASE，收起 FAST）。返回 `None` 时不用画；否则把内容交给 [`reveal`]。
-pub fn expansion(id: impl Into<ElementId>, open: bool, window: &mut Window, cx: &mut App) -> Option<Phase> {
-    presence(id, open, BASE, FAST, window, cx)
-}
-
-/// [`expansion`] + [`reveal`]：`open` 时展开，关上时收起后移除。`child` 只在需要画时才构造。
-pub fn expand(
-    id: impl Into<ElementId>,
-    open: bool,
-    window: &mut Window,
-    cx: &mut App,
-    child: impl FnOnce() -> AnyElement,
-) -> Option<AnyElement> {
-    let id = id.into();
-    let phase = expansion(id.clone(), open, window, cx)?;
-    Some(reveal(id, phase, child()))
-}
-
-// ---- 不依赖元素状态的时刻表 ----
-
-#[derive(Debug, Clone, Copy)]
-struct Clip {
-    started: Instant,
-    leaving: bool,
-}
-
-/// 进场、退场时刻表：登记出现、消失的时刻，渲染时按经过的时间算进度。用于虚拟列表。
-pub struct Timeline<K> {
-    clips: HashMap<K, Clip>,
-    enter: Duration,
-    exit: Duration,
-}
-
-impl<K: Eq + Hash + Clone> Timeline<K> {
-    pub fn new(enter: Duration, exit: Duration) -> Self {
-        Self { clips: HashMap::new(), enter, exit }
-    }
-
-    /// 开始进场。正在退场时从当前位置折回。
-    pub fn enter(&mut self, key: K) {
-        self.enter_at(key, Instant::now());
-    }
-
-    /// 开始退场。正在进场时从当前位置折回。
-    pub fn leave(&mut self, key: K) {
-        self.leave_at(key, Instant::now());
-    }
-
-    fn enter_at(&mut self, key: K, now: Instant) {
-        let from = self.progress_at(&key, now).unwrap_or(0.);
-        let started = now.checked_sub(self.enter.mul_f32(from)).unwrap_or(now);
-        self.clips.insert(key, Clip { started, leaving: false });
-    }
-
-    fn leave_at(&mut self, key: K, now: Instant) {
-        let from = self.progress_at(&key, now).unwrap_or(1.);
-        let started = now.checked_sub(self.exit.mul_f32(1. - from)).unwrap_or(now);
-        self.clips.insert(key, Clip { started, leaving: true });
-    }
-
-    pub fn clear(&mut self) {
-        self.clips.clear();
-    }
-
-    /// 丢掉已经播完的和 `keep` 不要的。
-    pub fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
-        let now = Instant::now();
-        let (enter, exit) = (self.enter, self.exit);
-        self.clips.retain(|key, clip| {
-            let length = if clip.leaving { exit } else { enter };
-            now.duration_since(clip.started) < length && keep(key)
-        });
-    }
-
-    /// 登记着的（包括刚播完、还没被 [`Self::retain`] 丢掉的）。
-    pub fn keys(&self) -> impl Iterator<Item = &K> {
-        self.clips.keys()
-    }
-
-    /// 线性进度：进场从 0 到 1，退场从 1 到 0；没登记或已经播完时为 `None`。
-    fn progress_at(&self, key: &K, now: Instant) -> Option<f32> {
-        let clip = self.clips.get(key)?;
-        let length = if clip.leaving { self.exit } else { self.enter };
-        let elapsed = now.saturating_duration_since(clip.started);
-        if elapsed >= length || length.is_zero() {
-            return None;
-        }
-        let t = elapsed.as_secs_f32() / length.as_secs_f32();
-        Some(if clip.leaving { 1. - t } else { t })
-    }
-
-    /// 当前的进度；没登记、已经播完或减少动态效果时为 `None`（调用方按自己的状态画最终样子）。
-    /// 还在播放时请求下一帧，调用方不用自己安排重绘。
-    pub fn phase(&self, key: &K, window: &mut Window, cx: &App) -> Option<Phase> {
-        if cx.reduce_motion() {
-            return None;
-        }
-        let leaving = self.clips.get(key)?.leaving;
-        let progress = self.progress_at(key, Instant::now())?;
-        window.request_animation_frame();
-        Some(Phase { progress, leaving })
-    }
-}
-
 // ---- 悬停、选中的底色 ----
 
-/// 悬停、选中时的底色，带过渡。放在控件的第一个子元素（铺满控件、画在最底层），控件本身不再设
+/// 悬停、选中时的底色：亮起立即到位，熄灭时淡出。放在控件的第一个子元素（铺满控件、画在最底层），控件本身不再设
 /// `bg` / `hover`。悬停按这一层自己的范围判断，被别的浮层盖住时不算悬停。
 pub struct Highlight {
     id: ElementId,
@@ -450,7 +278,11 @@ struct HighlightState {
 }
 
 impl HighlightState {
+    /// 亮起立即到位（悬停的反馈要跟手）；熄灭时用 `FAST` 淡出。
     fn value(&self, now: Instant) -> f32 {
+        if self.to >= self.from {
+            return self.to;
+        }
         let t = now.saturating_duration_since(self.started).as_secs_f32() / FAST.as_secs_f32();
         self.from + (self.to - self.from) * standard(t)
     }
@@ -732,8 +564,8 @@ mod tests {
     use gpui_kit::{AnyWindowHandle, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Window, div};
 
     use super::{
-        BASE, Edge, Entrance, FAST, Phase, SHORT, SLOW, STAGGER_ROW, Timeline, enter, exit, message_in, overshoot, presence, pulse, shake,
-        standard,
+        BASE, Edge, Entrance, FAST, FLOOR, HighlightState, Phase, SLOW, appear, enter, enter_opacity, exit, message_in, presence, pulse,
+        shake, standard,
     };
 
     /// 每次渲染记下 [`presence`] 的结果。
@@ -799,27 +631,26 @@ mod tests {
         assert!((turned.progress - halfway.progress).abs() < 0.1, "{halfway:?} → {turned:?}");
     }
 
-    /// 同一个 id 前后用不同的进场（错峰与否、成功与出错）。
+    /// 同一个 id 前后用不同的进场（成功与出错、有无位移）。
     struct Shapes {
-        staggered: bool,
         error: bool,
     }
 
     impl Render for Shapes {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let entrance = Entrance::new(BASE).from(Edge::Left, SHORT);
-            let entrance = if self.staggered { entrance.stagger(3, STAGGER_ROW) } else { entrance };
-            div().child(entrance.play(div(), "row-enter")).child(message_in(div(), "message-enter", self.error))
+            let entrance = if self.error { Entrance::new(BASE) } else { Entrance::new(BASE).from(Edge::Top, 4.) };
+            div()
+                .child(entrance.play(div(), "row-enter"))
+                .child(message_in(div(), "message-enter", self.error))
+                .child(appear(div(), "appear"))
         }
     }
 
-    /// 侧边栏的行只在列表刚载入时错峰：错峰的那段播完后同一个 id 换成不错峰的进场，不能崩。
     #[gpui::test]
     fn switching_the_entrance_under_the_same_id_does_not_crash(cx: &mut TestAppContext) {
         let (window, view) = cx.update(|cx| {
             gpui_kit::init(cx);
-            let (window, view) =
-                gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|_| Shapes { staggered: true, error: false })).unwrap();
+            let (window, view) = gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|_| Shapes { error: false })).unwrap();
             (window, view)
         });
         let draw = |cx: &mut TestAppContext| {
@@ -830,19 +661,13 @@ mod tests {
             .unwrap();
         };
         draw(cx);
-        // 过了错峰的延迟：第一段播完，进到第二段。
-        cx.executor().advance_clock(STAGGER_ROW * 3 + Duration::from_millis(20));
+        cx.executor().advance_clock(Duration::from_millis(20));
         draw(cx);
-        cx.update(|cx| {
-            view.update(cx, |view, _| {
-                view.staggered = false;
-                view.error = true;
-            })
-        });
+        cx.update(|cx| view.update(cx, |view, _| view.error = true));
         draw(cx);
         cx.executor().advance_clock(SLOW);
         draw(cx);
-        cx.update(|cx| view.update(cx, |view, _| view.staggered = true));
+        cx.update(|cx| view.update(cx, |view, _| view.error = false));
         draw(cx);
     }
 
@@ -853,8 +678,6 @@ mod tests {
         step(cx, window, &host, false, Duration::ZERO);
         assert_eq!(step(cx, window, &host, true, Duration::ZERO), Some(Phase::SETTLED));
         assert_eq!(step(cx, window, &host, false, Duration::ZERO), None);
-        // 时长本身没变（`BASE` 只是确认常量可用）。
-        assert!(BASE > FAST);
     }
 
     fn close(a: f32, b: f32) -> bool {
@@ -863,7 +686,7 @@ mod tests {
 
     #[test]
     fn curves_start_at_zero_and_end_at_one() {
-        for curve in [enter, exit, standard, overshoot] {
+        for curve in [enter, exit, standard] {
             assert!(close(curve(0.), 0.));
             assert!(close(curve(1.), 1.));
         }
@@ -872,10 +695,29 @@ mod tests {
         assert!(exit(0.5) < 0.5);
     }
 
+    /// 时长都很短：动画只是收尾，不让人等。
     #[test]
-    fn overshoot_goes_a_little_past_the_target() {
-        let peak = (0..=100).map(|step| overshoot(step as f32 / 100.)).fold(0., f32::max);
-        assert!(peak > 1.03 && peak < 1.1, "过冲 {peak}");
+    fn durations_stay_short() {
+        assert!(FAST < BASE && BASE < SLOW);
+        assert!(SLOW <= Duration::from_millis(200));
+    }
+
+    /// 进场第一帧就读得清，不是从透明开始。
+    #[test]
+    fn entrances_start_readable() {
+        assert!(close(enter_opacity(0.), FLOOR));
+        assert!(close(enter_opacity(1.), 1.));
+    }
+
+    /// 悬停底色亮起立即到位，熄灭时才有过渡。
+    #[test]
+    fn highlight_lights_up_at_once_and_fades_out() {
+        let now = Instant::now();
+        let on = HighlightState { from: 0., to: 1., started: now, hovered: Default::default() };
+        assert_eq!(on.value(now), 1.);
+        let off = HighlightState { from: 1., to: 0., started: now, hovered: Default::default() };
+        assert!(close(off.value(now), 1.));
+        assert!(close(off.value(now + FAST), 0.));
     }
 
     #[test]
@@ -903,30 +745,5 @@ mod tests {
         let still: Vec<f32> = (0..3).map(|index| pulse(0., index)).collect();
         assert!(still.iter().all(|value| close(*value, still[0])));
         assert!((0..3).all(|index| (0..=10).map(|step| pulse(step as f32 / 10., index)).fold(0., f32::max) > 0.9));
-    }
-
-    #[test]
-    fn timeline_plays_once_and_reverses_from_where_it_is() {
-        let mut timeline = Timeline::new(Duration::from_millis(200), Duration::from_millis(100));
-        let start = Instant::now();
-        assert_eq!(timeline.progress_at(&1, start), None);
-
-        timeline.enter_at(1, start);
-        assert!(close(timeline.progress_at(&1, start + Duration::from_millis(50)).unwrap(), 0.25));
-        assert_eq!(timeline.progress_at(&1, start + Duration::from_millis(200)), None);
-
-        // 进场到一半时收起：从 0.5 往回退，退场一共 100ms，所以再过 50ms 收完。
-        let half = start + Duration::from_millis(100);
-        timeline.leave_at(1, half);
-        assert!(close(timeline.progress_at(&1, half).unwrap(), 0.5));
-        assert!(close(timeline.progress_at(&1, half + Duration::from_millis(25)).unwrap(), 0.25));
-        assert_eq!(timeline.progress_at(&1, half + Duration::from_millis(50)), None);
-
-        // 退场途中又展开：从当前位置往前走。
-        let mut timeline = Timeline::new(Duration::from_millis(200), Duration::from_millis(100));
-        timeline.leave_at(2, start);
-        let quarter = start + Duration::from_millis(75);
-        timeline.enter_at(2, quarter);
-        assert!(close(timeline.progress_at(&2, quarter).unwrap(), 0.25));
     }
 }
