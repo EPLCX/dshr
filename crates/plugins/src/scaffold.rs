@@ -89,7 +89,12 @@ impl Scaffold {
              [config.properties.greeting]\n\
              type = \"string\"\n\
              default = \"Hello\"\n\
-             description = \"问候语\"\n",
+             title = \"问候语\"                     # 表单里显示的名字；其它语言写在 i18n.<语言> 或 locales/<语言>.json\n\
+             description = \"打招呼时用的第一个词\"\n\
+             \n\
+             [config.properties.greeting.i18n.en]\n\
+             title = \"Greeting\"\n\
+             description = \"The first word of the greeting\"\n",
         );
         if self.bundle {
             text.push_str(

@@ -72,6 +72,7 @@ description = "统计工作区文件的字数"
 capabilities = ["fs:workspace:read"]
 secrets = ["API_TOKEN"]          # 用户填写的密钥名（大写字母、数字、_），值不进文件
 timeout_ms = 30000               # 单次工具调用的时限，默认 30 秒
+default_locale = "zh-CN"         # 找不到界面语言的文案时用哪种语言，默认 en（见“多语言”）
 uses = ["other-plugin"]          # 要调用的其他插件的 api
 
 [engines]
@@ -83,7 +84,12 @@ zod = "vendor/zod.js"
 [config.properties.max_chars]    # 配置项的 JSON Schema：设置页据此生成表单
 type = "integer"
 default = 100000
+title = "最多字符数"              # 表单里显示的名字（不写时显示键名 max_chars）
 description = "最多统计多少个字符"
+
+[config.properties.max_chars.i18n.en]   # 其它语言的标题和说明
+title = "Max characters"
+description = "Stop counting after this many characters"
 ```
 
 | 键 | 说明 |
@@ -94,6 +100,7 @@ description = "最多统计多少个字符"
 | `capabilities` | 声明的能力（见 [能力](#能力)） |
 | `secrets` | 插件要用的密钥名 |
 | `timeout_ms` | 单次工具调用的时限；用户可以在 `[plugins.<id>] timeout_ms` 里改 |
+| `default_locale` | 插件的默认语言，默认 `en`；界面语言没有对应文案时用它 |
 | `uses` | 要调用其 `api` 的其他插件 id（派生能力 `plugins:call:<id>`） |
 | `[engines] dshr` | 要求的 dshr 版本 |
 | `[imports]` | import map |
@@ -180,6 +187,55 @@ export const tools = [{
 ```js
 const limit = host.config.max_chars ?? 100000;
 ```
+
+配置项在表单里显示 `title`（如 `count` 显示成“数量”），下面一行是 `description`。两者都可以按界面语言切换，写法见下面的“多语言”。
+字符串枚举的选项可以用 `enumTitles` 给出显示文字（存的仍是原来的值）：
+
+```toml
+[config.properties.level]
+type = "string"
+enum = ["low", "high"]
+enumTitles = ["低", "高"]
+title = "级别"
+
+[config.properties.level.i18n.en]
+title = "Level"
+enumTitles = ["Low", "High"]
+```
+
+用 `oneOf = [{ const = "low", title = "低" }, …]` 的写法时，每一项的 `title` 就是它的显示文字。
+
+### 多语言
+
+插件可以自带各语言的文案：在插件文件夹里放 `locales/<语言>.json`，文件名是语言代码（和“设置 → 通用 → 语言”一致：
+`zh-CN`、`zh-TW`、`zh-HK`、`en`、`de`、`el`、`ja`、`es`、`fr`、`pt`）。内容是 key → 文案，可以嵌套，嵌套的 key 用 `.` 连起来：
+
+```jsonc
+// locales/en.json
+{
+  "name": "Word count",
+  "description": "Count the words of workspace files",
+  "greeting": "Counted {count} words in {file}",
+  "config": {
+    "max_chars": { "title": "Max characters", "description": "Stop counting after this many characters" },
+    "level": { "enum": { "low": "Low", "high": "High" } }
+  }
+}
+```
+
+- `name`、`description`：设置页插件卡片上的名字和说明，没写时用清单里的。
+- `config.<键>.title`、`config.<键>.description`、`config.<键>.enum.<取值>`：配置项的标题、说明和选项文字，优先于清单里的
+  `title` / `i18n` / `enumTitles`。
+- 其余 key 随意，脚本里用 `host.i18n.t(key, vars)` 取（见 [插件 API 参考 · i18n](plugin-api.md#i18n)）：
+
+```js
+host.i18n.t("greeting", { count: 42, file: "a.md" });   // 英文界面：Counted 42 words in a.md
+host.i18n.locale;                                       // 当前界面语言，如 "zh-CN"
+host.i18n.pick({ "zh-CN": "统计字数", en: "Count words" }); // 不用语言文件，直接内联
+```
+
+找文案时按这个顺序回退：界面语言本身 → 同一语种的其它写法（繁体中文 `zh-HK`、`zh-TW` 之间互相优先，其次是 `zh-CN`）
+→ `default_locale` → `en`；都没有时 `t` 返回 key 本身。语言文件改了会和别的文件一样触发热重载。
 
 **密钥**：API 密钥、令牌**永远不要**写进文件或配置。在清单里声明名字，让用户去设置：
 

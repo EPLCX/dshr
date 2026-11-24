@@ -535,7 +535,8 @@ fn load<'js>(ctx: &Ctx<'js>, state: &Rc<State>, manifest: &PluginManifest, confi
     let namespace = module.namespace().map_err(explain)?;
 
     let register: Function = api.get("register").map_err(explain)?;
-    let exports: String = register.call((namespace, config)).map_err(explain)?;
+    let i18n = serde_json::json!({ "messages": manifest.messages, "defaultLocale": manifest.default_locale }).to_string();
+    let exports: String = register.call((namespace, config, i18n)).map_err(explain)?;
     let exports = serde_json::from_str(&exports).map_err(|error| format!("模块导出的格式不对：{error}"))?;
     let entries = Entries {
         call: api.get("call").map_err(explain)?,

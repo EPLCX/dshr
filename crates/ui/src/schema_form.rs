@@ -25,8 +25,14 @@ pub enum FieldKind {
 pub struct Field {
     /// `[plugins.<id>]` 里的键。
     pub key: String,
+    /// schema 里的标题（`title`），表单里代替键名显示，如 `count` 显示成“数量”。
+    pub title: Option<String>,
     /// schema 里的说明（Rust 插件是字段的文档注释）。
     pub description: Option<String>,
+    /// 各语言的标题、说明、选项标题：`i18n.<语言> = { title, description, enumTitles }`。
+    pub i18n: Option<serde_json::Map<String, Value>>,
+    /// 选项的显示文字（和取值一一对应）：`enumTitles = [..]`，或 `oneOf` 里每一项的 `title`。
+    pub choice_titles: Option<Vec<String>>,
     pub kind: FieldKind,
     /// 没写这一项时插件用的值。
     pub default: Option<Value>,
@@ -60,7 +66,10 @@ pub fn fields(schema: &Value) -> Vec<Field> {
             let pick = |name: &str| property.get(name).or_else(|| target.get(name));
             Some(Field {
                 key: key.clone(),
+                title: pick("title").and_then(Value::as_str).map(str::to_owned),
                 description: pick("description").and_then(Value::as_str).map(str::to_owned),
+                i18n: pick("i18n").and_then(Value::as_object).cloned(),
+                choice_titles: choice_titles_of(target).or_else(|| pick("enumTitles").and_then(strings_of)),
                 kind: kind_of(target)?,
                 default: pick("default").filter(|value| !value.is_null()).cloned(),
                 minimum: pick("minimum").and_then(Value::as_f64),
@@ -114,7 +123,63 @@ fn choices_of(property: &Value) -> Option<Vec<String>> {
     (!choices.is_empty()).then_some(choices)
 }
 
+/// 字符串数组。
+fn strings_of(value: &Value) -> Option<Vec<String>> {
+    value.as_array()?.iter().map(|item| item.as_str().map(str::to_owned)).collect()
+}
+
+/// `oneOf: [{const, title}, ..]` 写法里每个选项的标题（都写了才算）。
+fn choice_titles_of(property: &Value) -> Option<Vec<String>> {
+    let variants = property.get("oneOf")?.as_array()?;
+    variants
+        .iter()
+        .map(|variant| variant.get("title")?.as_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()
+        .filter(|titles| !titles.is_empty())
+}
+
 impl Field {
+    /// `i18n` 里当前语言（按语言回退）的那一份的 `name` 项。
+    fn localized(&self, locale: &str, name: &str) -> Option<&Value> {
+        let i18n = self.i18n.as_ref()?;
+        // 只挑写了这一项的语言：英文只翻了标题时，中文界面的说明仍然回退到别的语言。
+        let candidates = dshr_plugins::locale::candidates(locale, i18n.keys().map(String::as_str), dshr_plugins::locale::DEFAULT_LOCALE);
+        candidates.iter().find_map(|code| i18n.get(code)?.get(name))
+    }
+
+    /// 表单里显示的名字。依次取：插件语言文件里的 `config.<键>.title` → `i18n.<语言>.title` → `title` → 键名。
+    /// `messages` 查插件的语言文件（已按语言回退）。
+    pub fn label(&self, locale: &str, messages: impl Fn(&str) -> Option<String>) -> String {
+        messages(&format!("config.{}.title", self.key))
+            .or_else(|| self.localized(locale, "title").and_then(Value::as_str).map(str::to_owned))
+            .or_else(|| self.title.clone())
+            .unwrap_or_else(|| self.key.clone())
+    }
+
+    /// 说明，取法同 [`Field::label`]（`config.<键>.description`、`i18n.<语言>.description`、`description`）。
+    pub fn localized_description(&self, locale: &str, messages: impl Fn(&str) -> Option<String>) -> Option<String> {
+        messages(&format!("config.{}.description", self.key))
+            .or_else(|| self.localized(locale, "description").and_then(Value::as_str).map(str::to_owned))
+            .or_else(|| self.description.clone())
+    }
+
+    /// 选项的显示文字：`config.<键>.enum.<取值>` → `i18n.<语言>.enumTitles` → `enumTitles` / `oneOf` 的 `title` → 取值本身。
+    pub fn choice_labels(&self, locale: &str, messages: impl Fn(&str) -> Option<String>) -> Vec<String> {
+        let FieldKind::Choice(choices) = &self.kind else { return Vec::new() };
+        let localized = self.localized(locale, "enumTitles").and_then(strings_of).filter(|titles| titles.len() == choices.len());
+        let fallback = self.choice_titles.clone().filter(|titles| titles.len() == choices.len());
+        choices
+            .iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                messages(&format!("config.{}.enum.{choice}", self.key))
+                    .or_else(|| localized.as_ref().map(|titles| titles[index].clone()))
+                    .or_else(|| fallback.as_ref().map(|titles| titles[index].clone()))
+                    .unwrap_or_else(|| choice.clone())
+            })
+            .collect()
+    }
+
     /// 输入框里显示的文字：配置文件里写的值，没写时是默认值。
     pub fn display(&self, value: Option<&Value>) -> String {
         match value.or(self.default.as_ref()) {
@@ -287,6 +352,39 @@ mod tests {
         assert_eq!(format_bound(1.0), "1");
         assert_eq!(format_bound(0.1), "0.1");
         assert_eq!(format_bound(-3.0), "-3");
+    }
+
+    #[test]
+    fn titles_follow_the_interface_language() {
+        let schema = json!({
+            "properties": {
+                "count": {"type": "integer", "title": "数量", "description": "最多统计多少个",
+                          "i18n": {"en": {"title": "Count"}, "zh-TW": {"title": "數量", "description": "最多統計多少個"}}},
+                "level": {"type": "string", "enum": ["low", "high"], "enumTitles": ["低", "高"],
+                          "i18n": {"en": {"enumTitles": ["Low", "High"]}}},
+                "mode": {"oneOf": [{"const": "fast", "title": "快"}, {"const": "careful", "title": "稳"}]},
+                "plain": {"type": "string"}
+            }
+        });
+        let all = fields(&schema);
+        let get = |key: &str| all.iter().find(|field| field.key == key).unwrap();
+        let none = |_: &str| None;
+        assert_eq!(get("count").label("en", none), "Count");
+        assert_eq!(get("count").label("zh-HK", none), "數量");
+        assert_eq!(get("count").label("zh-CN", none), "數量", "没写简体时先用同语种的繁体");
+        assert_eq!(get("count").label("fr", none), "Count", "别的语言回退到英文");
+        assert_eq!(get("count").localized_description("en", none).as_deref(), Some("最多统计多少个"));
+        assert_eq!(get("count").localized_description("zh-HK", none).as_deref(), Some("最多統計多少個"));
+        assert_eq!(get("plain").label("en", none), "plain");
+        // 语言文件优先。
+        let files = |key: &str| (key == "config.count.title").then(|| "Anzahl".to_owned());
+        assert_eq!(get("count").label("de", files), "Anzahl");
+
+        assert_eq!(get("level").choice_labels("en", none), ["Low", "High"]);
+        assert_eq!(get("level").choice_labels("ja", none), ["Low", "High"]);
+        assert_eq!(get("mode").choice_labels("zh-CN", none), ["快", "稳"]);
+        let files = |key: &str| (key == "config.mode.enum.careful").then(|| "Careful".to_owned());
+        assert_eq!(get("mode").choice_labels("en", files), ["快", "Careful"]);
     }
 
     /// 内置插件真正声明的 schema（schemars 生成）也能读出来。

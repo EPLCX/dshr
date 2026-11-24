@@ -490,9 +490,11 @@ fn card_of(
         .unwrap_or_default();
     crate::PluginCard {
         id: id.to_owned(),
-        name: manifest.ok().and_then(|manifest| manifest.name.clone()),
+        name: manifest.ok().and_then(|manifest| manifest.display_name(&crate::locale::current_locale())),
         version: manifest.ok().and_then(|manifest| manifest.version.clone()),
-        description: manifest.ok().and_then(|manifest| manifest.description.clone()),
+        description: manifest.ok().and_then(|manifest| manifest.display_description(&crate::locale::current_locale())),
+        messages: manifest.ok().map(|manifest| manifest.messages.clone()).unwrap_or_default(),
+        default_locale: manifest.ok().map_or_else(|| crate::locale::DEFAULT_LOCALE.to_owned(), |manifest| manifest.default_locale.clone()),
         declared,
         missing: missing.unwrap_or_default(),
         secrets,

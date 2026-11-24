@@ -275,6 +275,27 @@ pub struct PluginManifest {
     pub home: Option<PathBuf>,
     /// 要求的宿主版本（`[engines] dshr`，semver 范围写法）。
     pub requires_dshr: Option<String>,
+    /// 插件自带的文案（`locales/<语言>.json`），见 `locale.rs`。
+    pub messages: crate::locale::Messages,
+    /// 找不到界面语言的文案时用哪种语言（清单里的 `default_locale`，默认 `en`）。
+    pub default_locale: String,
+}
+
+impl PluginManifest {
+    /// 插件语言文件里 `key` 在 `locale` 下的文案（按语言回退）。
+    pub fn message(&self, locale: &str, key: &str) -> Option<&str> {
+        crate::locale::lookup(&self.messages, locale, &self.default_locale, key)
+    }
+
+    /// 显示名：语言文件里的 `name` 优先，其次是清单的 `name`。
+    pub fn display_name(&self, locale: &str) -> Option<String> {
+        self.message(locale, "name").map(str::to_owned).or_else(|| self.name.clone())
+    }
+
+    /// 一句话说明：语言文件里的 `description` 优先，其次是清单的 `description`。
+    pub fn display_description(&self, locale: &str) -> Option<String> {
+        self.message(locale, "description").map(str::to_owned).or_else(|| self.description.clone())
+    }
 }
 
 /// 这个程序的版本（插件的 `[engines] dshr` 拿它比）。
@@ -300,6 +321,7 @@ struct RawManifest {
     main: Option<String>,
     capabilities: Vec<String>,
     timeout_ms: Option<u64>,
+    default_locale: Option<String>,
     config: Option<toml::Table>,
     secrets: Vec<String>,
     imports: std::collections::BTreeMap<String, String>,
@@ -482,6 +504,11 @@ pub(crate) fn load(dir: &Path, folder_name: &str) -> Result<PluginManifest, Stri
         imports.insert(specifier, target);
     }
     let bundle = crate::bundle::load(dir, raw.mcp.servers, &raw.secrets)?;
+    let messages = crate::locale::load(dir)?;
+    let default_locale = raw.default_locale.unwrap_or_else(|| crate::locale::DEFAULT_LOCALE.to_owned());
+    if !crate::locale::valid_code(&default_locale) {
+        return Err(format!("default_locale = \"{default_locale}\" 不是语言代码（如 en、zh-CN）"));
+    }
     for key in raw.engines.keys() {
         if key != "dshr" {
             return Err(format!("[engines] 里只认 dshr，不认识 {key}"));
@@ -520,5 +547,7 @@ pub(crate) fn load(dir: &Path, folder_name: &str) -> Result<PluginManifest, Stri
         bundle,
         home: None,
         requires_dshr,
+        messages,
+        default_locale,
     })
 }
