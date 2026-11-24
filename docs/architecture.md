@@ -212,7 +212,7 @@ pub trait Tool: Send + Sync {
 - **`Backend`**：界面的后端一半。持有 tokio 运行时（2 个工作线程，名为 `dshr-agent`）、配置、密钥缓存、插件 `Context`、MCP 服务器、HTTP 客户端，
   负责开始对话、保存设置等。**界面线程上不扫文件、不执行插件脚本、不联网、不读钥匙串**：这些都交给后台，界面先按用户的操作更新，做完再对账。
 - **视图**：欢迎窗（`welcome.rs`）、工作区窗口（`lib.rs`：侧边栏、标题栏、会话视图的切换）、对话视图（`conversation.rs` + `transcript.rs`）、
-  设置弹窗（`settings.rs`、`provider_form.rs`、`schema_form.rs`）、插件页面（`plugin_page.rs`）、安装确认框（`install_dialog.rs`）、托盘（`tray.rs`）、
+  设置弹窗（`settings.rs`、`provider_form.rs`、`schema_form.rs`）、插件页面（`plugin_page.rs`）、搜索会话弹窗（`session_search.rs`）、安装确认框（`install_dialog.rs`）、托盘（`tray.rs`）、
   单实例（`single_instance.rs`）。
 - **桥**（`bridge.rs`）：插件在自己的线程上请求界面做事（发消息、写输入框、确认安装），请求排进队列并唤醒窗口，由主线程取出处理。
 - **设计系统**：`design.rs`（token、基础组件、焦点轮廓、配色）和 `design/motion.rs`（动效），规则见 [设计规范](design.md)。

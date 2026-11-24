@@ -207,6 +207,7 @@ MCP 服务器的配置里还可以用 `${env:名字}` 引用任意环境变量�
 | `settings` | `ctrl-,` | `cmd-,` |
 | `focus_composer` | `ctrl-l` | `cmd-l` |
 | `toggle_sidebar` | `ctrl-b` | `cmd-b` |
+| `search_sessions` | `ctrl-k` | `cmd-k` |
 
 按键写成 `修饰键-…-键`，修饰键可以是 `ctrl`、`alt`、`shift`、`cmd`、`fn`，至少要有一个；减号本身写作 `ctrl--`。
 写错的项按默认值处理，不会影响启动。
