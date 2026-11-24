@@ -193,18 +193,35 @@ fn window_options(size: (f32, f32), min_size: Option<(f32, f32)>, resizable: boo
         app_owns_titlebar_drag: title_bar::app_owns_drag(),
         is_resizable: resizable,
         window_min_size: min_size.map(|(width, height)| gpui_kit::size(px(width), px(height))),
+        // Windows：先建成隐藏的窗口，等 GPUI 装好无障碍适配器再显示（见 `show_when_accessible`）。
+        show: !cfg!(windows),
         ..Default::default()
+    }
+}
+
+/// 显示用 [`window_options`] 打开的窗口。
+///
+/// Windows 上 GPUI 在创建窗口时（`CreateWindowExW` 之后、`SetWindowPlacement`）就把它显示出来，无障碍适配器
+/// 要到 `open_window` 稍后的 `a11y_init` 才装上。讲述人开着时，窗口一出现它就来要无障碍树（`WM_GETOBJECT`），
+/// 这时还没有适配器，系统给它一个只有窗口本身、没有任何控件的默认对象，讲述人记住这个对象，什么都读不到，
+/// 直到窗口隐藏再显示（最小化再恢复）才重新来要。AccessKit 也要求窗口在适配器建好之后再显示。
+/// 所以 Windows 上窗口先不显示，`open_window` 返回（适配器已经装好）之后再在这里显示并激活。
+/// 其它平台窗口打开时就已经显示，这里什么也不做。
+fn show_when_accessible(handle: AnyWindowHandle, cx: &mut App) {
+    if cfg!(windows) {
+        handle.update(cx, |_, window, _| window.activate_window()).ok();
     }
 }
 
 fn open_welcome_window(backend: Arc<Backend>, workspace: Option<PathBuf>, cx: &mut App) {
     let theme = backend.file_config().ui.theme;
-    gpui_kit::open_window(window_options(WELCOME_SIZE, None, false, cx), cx, |window, cx| {
+    let (handle, _) = gpui_kit::open_window(window_options(WELCOME_SIZE, None, false, cx), cx, |window, cx| {
         apply_theme(theme, window, cx);
         touch::install(window, cx);
         cx.new(|cx| WelcomeView::new(backend, workspace, window, cx))
     })
     .expect("无法打开欢迎窗口");
+    show_when_accessible(handle, cx);
 }
 
 pub(crate) fn open_workspace_window(backend: Arc<Backend>, workspace: Option<PathBuf>, cx: &mut App) {
@@ -226,6 +243,7 @@ pub(crate) fn open_workspace_window(backend: Arc<Backend>, workspace: Option<Pat
         cx.new(|cx| WorkspaceView::new(backend, workspace, window, cx))
     })
     .expect("无法打开工作区窗口");
+    show_when_accessible(handle, cx);
     cx.set_global(MainWindow { handle, view });
 }
 
