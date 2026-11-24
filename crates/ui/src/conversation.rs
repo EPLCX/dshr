@@ -157,6 +157,8 @@ pub enum ConversationEvent {
     WorkspaceChosen(PathBuf),
     /// 插件的命令要打开它的一页（`{ open: page }`）。
     OpenPluginPage { plugin: String, page: String, title: String },
+    /// 新会话发出了第一条消息：它当时的模式、权限、模型，留给之后的新会话沿用（只在这次运行期间）。
+    NewSessionStarted(TurnOptions),
 }
 
 /// 斜杠菜单里的一项：插件的斜杠命令（`/名字`）或命令（`/插件:id`）。
@@ -534,6 +536,18 @@ impl ConversationView {
     /// 当前的模式、权限、模型（[`WorkspaceView`](crate::WorkspaceView) 在空会话被切走又切回时用来恢复）。
     pub fn turn_options(&self) -> &TurnOptions {
         &self.options
+    }
+
+    /// 输入框里没发出去的原文（不去掉首尾空白）：切走时由 [`WorkspaceView`](crate::WorkspaceView) 记下。
+    pub fn draft(&self, cx: &App) -> String {
+        self.input.read(cx).value().to_string()
+    }
+
+    /// 切回来时放回没发出去的字；输入框里已经有字（比如插件刚放进去的）就不覆盖。
+    pub fn restore_draft(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !text.is_empty() && self.input.read(cx).value().is_empty() {
+            self.set_composer_text(text, window, cx);
+        }
     }
 
     /// 恢复空会话上次的模式、权限、模型；只更新界面状态，不写日志（会话还没开始）。
@@ -1153,6 +1167,7 @@ impl ConversationView {
             self.show_error(error, cx);
             return false;
         }
+        let new_session = self.session.is_none();
         let session = match self.session.take() {
             Some(session) => session,
             None => match self.backend.create_session() {
@@ -1183,6 +1198,9 @@ impl ConversationView {
         // 讲述人读焦点时会打断正在读的实时区域；等它们过去再读，这句话就不会被挤掉。
         announce_after(t!("a11y.sending").to_string(), ANNOUNCE_AFTER_SEND, cx);
         let options_snapshot = self.options.clone();
+        if new_session {
+            cx.emit(ConversationEvent::NewSessionStarted(options_snapshot.clone()));
+        }
         self.session_id = Some(session.id().to_owned());
         let (event_tx, mut events) = mpsc::unbounded_channel();
         self.ui_event_sink = Some(event_tx.clone());
@@ -4372,6 +4390,16 @@ mod menu_tests {
             })
             .unwrap();
         assert!(focused, "点在回复正文上也应该让这条消息获得焦点");
+    }
+
+    #[gpui::test]
+    fn restore_draft_keeps_existing_text(cx: &mut TestAppContext) {
+        let fixture = open(cx, 1);
+        let view = fixture.view.clone();
+        step(cx, fixture.window, |window, cx| view.update(cx, |view, cx| view.restore_draft("  草稿 ", window, cx)));
+        assert_eq!(cx.update(|cx| view.read(cx).draft(cx)), "  草稿 ", "空输入框放回草稿，原样保留空白");
+        step(cx, fixture.window, |window, cx| view.update(cx, |view, cx| view.restore_draft("别的", window, cx)));
+        assert_eq!(cx.update(|cx| view.read(cx).draft(cx)), "  草稿 ", "已有字时不覆盖");
     }
 
     #[gpui::test]

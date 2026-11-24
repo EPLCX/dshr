@@ -686,8 +686,13 @@ pub struct WorkspaceView {
     /// 当前显示的对话，加上在后台运行的对话。空闲的后台对话会被释放，再打开时从日志重建。
     conversations: Vec<OpenConversation>,
     active: Entity<ConversationView>,
-    /// 切走时那个空会话上的模式、权限、模型：切回空会话时恢复（只在这个窗口这次打开期间有效）。
+    /// 新会话输入卡片上的模式、权限、模型：空会话被切走时、新会话发出第一条消息时记下，
+    /// 之后每个新会话都沿用（只在这次运行期间有效，不写盘；关掉再开回到配置里的默认值）。
     blank_options: Option<backend::TurnOptions>,
+    /// 空会话被切走时输入框里没发出去的字，切回空会话时放回。
+    blank_draft: String,
+    /// 各个会话输入框里没发出去的字，按会话 id：切走（视图可能随后被释放）再切回来时放回。只在内存里。
+    drafts: HashMap<String, String>,
     /// 折叠起来的工作区分组。
     collapsed: HashSet<Option<PathBuf>>,
     /// 点过“显示更多”的分组现在显示几个会话；没有记录的分组显示 [`SIDEBAR_PAGE`] 个。
@@ -780,6 +785,8 @@ impl WorkspaceView {
             conversations: vec![first],
             active,
             blank_options: None,
+            blank_draft: String::new(),
+            drafts: HashMap::new(),
             collapsed: HashSet::new(),
             sidebar_limits: HashMap::new(),
             settings: None,
@@ -1148,6 +1155,9 @@ impl WorkspaceView {
             ConversationEvent::OpenPluginPage { plugin, page, title } => {
                 this.open_page(plugin.clone(), page.clone(), title.clone(), window, cx);
             }
+            ConversationEvent::NewSessionStarted(options) => {
+                this.blank_options = Some(options.clone());
+            }
         });
         let observer = cx.observe(&view, |this, view, cx| {
             let state = {
@@ -1169,21 +1179,49 @@ impl WorkspaceView {
     }
 
     fn activate(&mut self, view: Entity<ConversationView>, window: &mut Window, cx: &mut Context<Self>) {
-        // 切走一个空会话时，记下它上面选的模式、权限、模型；切回空会话时恢复
-        // （只在这次窗口打开期间有效；关掉再开就回到配置里的默认值）。
+        // 切走时记下输入卡片的状态，切回时恢复（只在这次运行期间，不写盘）：
+        // 空会话记模式、权限、模型和没发出去的字；已有会话只记字（选项已经写在它的日志里）。
         if self.active != view {
-            if self.active.read(cx).is_blank() {
-                self.blank_options = Some(self.active.read(cx).turn_options().clone());
-            } else if view.read(cx).is_blank()
-                && let Some(options) = self.blank_options.take()
-            {
-                view.update(cx, |conversation, cx| conversation.set_turn_options(options, cx));
-            }
+            self.stash_composer(cx);
+            self.restore_composer(&view, window, cx);
         }
         self.active = view;
         self.prune(cx);
         self.focus_active(window, cx);
         cx.notify();
+    }
+
+    /// 记下当前对话输入卡片上的状态（见 [`Self::activate`]）。
+    fn stash_composer(&mut self, cx: &App) {
+        let conversation = self.active.read(cx);
+        let draft = conversation.draft(cx);
+        if conversation.is_blank() {
+            self.blank_options = Some(conversation.turn_options().clone());
+            self.blank_draft = draft;
+        } else if let Some(id) = conversation.session_id() {
+            if draft.is_empty() {
+                self.drafts.remove(id);
+            } else {
+                self.drafts.insert(id.to_owned(), draft);
+            }
+        }
+    }
+
+    /// 把记下的状态放回要切到的对话。
+    fn restore_composer(&mut self, view: &Entity<ConversationView>, window: &mut Window, cx: &mut Context<Self>) {
+        let conversation = view.read(cx);
+        if conversation.is_blank() {
+            let options = self.blank_options.clone();
+            let draft = std::mem::take(&mut self.blank_draft);
+            view.update(cx, |conversation, cx| {
+                if let Some(options) = options {
+                    conversation.set_turn_options(options, cx);
+                }
+                conversation.restore_draft(&draft, window, cx);
+            });
+        } else if let Some(draft) = conversation.session_id().and_then(|id| self.drafts.remove(id)) {
+            view.update(cx, |conversation, cx| conversation.restore_draft(&draft, window, cx));
+        }
     }
 
     /// 只保留当前对话和正在运行的对话。
@@ -1422,6 +1460,7 @@ impl WorkspaceView {
         // 视图里的会话（和它开着的日志文件）这时才关掉；Windows 上目录里有打开的文件时移动会被拒绝。
         // 后台任务可能还握着句柄一小会儿，所以被拒绝时稍等再试几次。
         self.sessions.retain(|session| session.id != id);
+        self.drafts.remove(id);
         cx.notify();
         let (backend, id) = (self.backend.clone(), id.to_owned());
         cx.spawn(async move |this, cx| {
