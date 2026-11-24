@@ -47,6 +47,28 @@ title_bar:
     pt: "Fechar"
 
 sidebar:
+  collapse:
+    zh-CN: "收起侧边栏"
+    en: "Collapse sidebar"
+    zh-HK: "收埋側邊欄"
+    zh-TW: "收合側邊欄"
+    de: "Seitenleiste einklappen"
+    el: "Σύμπτυξη πλαϊνής στήλης"
+    ja: "サイドバーを折りたたむ"
+    es: "Contraer barra lateral"
+    fr: "Réduire la barre latérale"
+    pt: "Recolher barra lateral"
+  expand:
+    zh-CN: "展开侧边栏"
+    en: "Expand sidebar"
+    zh-HK: "展開側邊欄"
+    zh-TW: "展開側邊欄"
+    de: "Seitenleiste ausklappen"
+    el: "Ανάπτυξη πλαϊνής στήλης"
+    ja: "サイドバーを展開"
+    es: "Expandir barra lateral"
+    fr: "Développer la barre latérale"
+    pt: "Expandir barra lateral"
   new_session:
     zh-CN: 新会话
     en: New session
@@ -4544,6 +4566,17 @@ settings:
     pt: "Salvo"
 
 shortcuts:
+  toggle_sidebar:
+    zh-CN: "收起或展开侧边栏"
+    en: "Toggle sidebar"
+    zh-HK: "收埋或者展開側邊欄"
+    zh-TW: "收合或展開側邊欄"
+    de: "Seitenleiste ein-/ausklappen"
+    el: "Εναλλαγή πλαϊνής στήλης"
+    ja: "サイドバーの表示を切り替え"
+    es: "Mostrar u ocultar la barra lateral"
+    fr: "Afficher ou masquer la barre latérale"
+    pt: "Mostrar ou ocultar a barra lateral"
   new_session:
     zh-CN: 新会话
     en: New session

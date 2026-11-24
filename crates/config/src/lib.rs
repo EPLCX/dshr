@@ -241,6 +241,8 @@ pub struct UiConfig {
     pub text_scale: TextScalePreference,
     /// 侧边栏里的工作区（用户选过的目录），最近使用的在前。
     pub workspaces: Vec<PathBuf>,
+    /// 侧边栏收起成一列图标按钮。
+    pub sidebar_collapsed: bool,
     /// 配色方案（`<数据目录>/themes/<id>.toml` 或插件的 `themes`）；空的是默认配色。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub palette: String,
@@ -258,6 +260,7 @@ impl Default for UiConfig {
             high_contrast: HighContrastPreference::System,
             text_scale: TextScalePreference::System,
             workspaces: Vec::new(),
+            sidebar_collapsed: false,
             palette: String::new(),
         }
     }

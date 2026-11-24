@@ -248,6 +248,8 @@ actions!(
         ToggleSettings,
         /// 把焦点放回输入框。
         FocusComposer,
+        /// 收起或展开侧边栏。
+        ToggleSidebar,
     ]
 );
 
@@ -265,6 +267,7 @@ pub(crate) const EDITABLE_SHORTCUTS: &[EditableShortcut] = &[
     EditableShortcut { action: "new_session", label: "shortcuts.new_session", mac: "cmd-n", other: "ctrl-n" },
     EditableShortcut { action: "settings", label: "shortcuts.settings", mac: "cmd-,", other: "ctrl-," },
     EditableShortcut { action: "focus_composer", label: "shortcuts.focus_composer", mac: "cmd-l", other: "ctrl-l" },
+    EditableShortcut { action: "toggle_sidebar", label: "shortcuts.toggle_sidebar", mac: "cmd-b", other: "ctrl-b" },
 ];
 
 /// 生效中的按键：用户改过的（且写法有效）优先，否则用默认值。
@@ -282,7 +285,7 @@ pub(crate) fn bind_keys(bindings: &dshr_config::Keybindings, cx: &mut App) {
         .bindings()
         .filter(|binding| {
             let action = binding.action().as_any();
-            !(action.is::<NewSession>() || action.is::<ToggleSettings>() || action.is::<FocusComposer>())
+            !(action.is::<NewSession>() || action.is::<ToggleSettings>() || action.is::<FocusComposer>() || action.is::<ToggleSidebar>())
         })
         .cloned()
         .collect();
@@ -297,6 +300,7 @@ pub(crate) fn bind_keys(bindings: &dshr_config::Keybindings, cx: &mut App) {
         KeyBinding::new(key(0), NewSession, None),
         KeyBinding::new(key(1), ToggleSettings, None),
         KeyBinding::new(key(2), FocusComposer, None),
+        KeyBinding::new(key(3), ToggleSidebar, None),
     ]);
 }
 
@@ -695,6 +699,10 @@ pub struct WorkspaceView {
     drafts: HashMap<String, String>,
     /// 折叠起来的工作区分组。
     collapsed: HashSet<Option<PathBuf>>,
+    /// 侧边栏收起成一列图标按钮（`ui.sidebar_collapsed`，重启后保留）。
+    sidebar_collapsed: bool,
+    /// 侧边栏现在的宽度（收起、展开时有过渡）：每帧在 `render` 里算好，侧边栏视图按它画。
+    sidebar_width: std::cell::Cell<f32>,
     /// 点过“显示更多”的分组现在显示几个会话；没有记录的分组显示 [`SIDEBAR_PAGE`] 个。
     sidebar_limits: HashMap<Option<PathBuf>, usize>,
     /// 打开设置时存在；关闭时丢弃，下次打开重新读取配置。
@@ -748,6 +756,7 @@ impl WorkspaceView {
         if let Some(path) = &workspace {
             backend.remember_workspace(path).ok();
         }
+        let sidebar_collapsed = backend.file_config().ui.sidebar_collapsed;
         let first = Self::open_conversation(&backend, workspace, window, cx);
         let active = first.view.clone();
         // 等窗口第一次绘制后再把焦点放进输入框；构造期间设的焦点在窗口激活时会丢。
@@ -788,6 +797,8 @@ impl WorkspaceView {
             blank_draft: String::new(),
             drafts: HashMap::new(),
             collapsed: HashSet::new(),
+            sidebar_collapsed,
+            sidebar_width: std::cell::Cell::new(if sidebar_collapsed { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH }),
             sidebar_limits: HashMap::new(),
             settings: None,
             settings_leaving: None,
@@ -1340,6 +1351,21 @@ impl WorkspaceView {
         self.new_session(None, window, cx);
     }
 
+    fn on_toggle_sidebar(&mut self, _: &ToggleSidebar, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_sidebar(cx);
+    }
+
+    /// 收起或展开侧边栏，记进配置。
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        let collapsed = self.sidebar_collapsed;
+        if let Err(error) = self.backend.update_config(|config| config.ui.sidebar_collapsed = collapsed) {
+            self.sidebar_error = Some(t!("sidebar.action_failed", error = error).to_string());
+        }
+        self.session_menu = None;
+        cx.notify();
+    }
+
     fn on_toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings.is_some() {
             self.close_settings(window, cx);
@@ -1841,7 +1867,140 @@ impl WorkspaceView {
         cx.notify();
     }
 
-    fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// 侧边栏图标按钮（收起后的一列、展开时品牌行右边的“收起”）：悬停显示名字。
+    fn sidebar_icon_button(
+        &self,
+        id: &'static str,
+        icon: impl Into<Icon>,
+        label: String,
+        on_click: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        crate::design::framed(
+            id,
+            Button::new(id)
+                .ghost()
+                .icon(icon)
+                .tooltip(label.clone())
+                .accessibility_label(label)
+                .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx))),
+        )
+        .into_any_element()
+    }
+
+    /// 收起后的侧边栏：一列图标按钮（展开、新会话、添加工作区、搜索；底部是插件入口和设置）。
+    fn render_sidebar_rail(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let hidden = self.backend.hidden_entries();
+        // macOS 自绘标题栏时左上角是红黄绿按钮：品牌标志让开，那一行只留着拖动窗口。
+        let traffic_lights = title_bar::brand_offset(0., window) > 0.;
+        let brand = title_bar::drag_region("sidebar-brand", window, cx)
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .w_full()
+            .h(px(size::NAV_ITEM))
+            .when(!traffic_lights, |row| row.child(brand_mark(size::ICON_LG, &p)));
+        let top = v_flex()
+            .items_center()
+            .gap(px(space::XS))
+            .child(self.sidebar_icon_button(
+                "sidebar-expand",
+                IconName::PanelLeftOpen,
+                t!("sidebar.expand").to_string(),
+                |this, _, cx| this.toggle_sidebar(cx),
+                cx,
+            ))
+            .child(self.sidebar_icon_button(
+                "rail-new-session",
+                gpui_kit::assets::IconName::SquarePen,
+                t!("sidebar.new_session").to_string(),
+                |this, window, cx| this.new_session(None, window, cx),
+                cx,
+            ))
+            .child(self.sidebar_icon_button(
+                "rail-add-workspace",
+                gpui_kit::assets::IconName::FolderPlus,
+                t!("sidebar.add_workspace").to_string(),
+                |this, window, cx| this.add_workspace(window, cx),
+                cx,
+            ));
+        let mut bottom: Vec<AnyElement> = Vec::new();
+        for item in self.ui.sidebar_items().iter().filter(|item| !hidden.contains(&format!("sidebar:{}", item.id))) {
+            let on_click = item.on_click.clone();
+            bottom.push(
+                crate::design::framed(
+                    item.id,
+                    Button::new(item.id)
+                        .ghost()
+                        .icon(item.icon.clone())
+                        .tooltip((item.label)())
+                        .accessibility_label((item.label)())
+                        .on_click(move |_, window, cx| on_click(window, cx)),
+                )
+                .into_any_element(),
+            );
+        }
+        for (index, entry) in self.plugin_entries.iter().enumerate() {
+            if entry.entry.place != dshr_agent::EntryPlace::Sidebar {
+                continue;
+            }
+            let id = ElementId::NamedInteger("rail-plugin-entry".into(), index as u64);
+            bottom.push(
+                crate::design::framed(
+                    id.clone(),
+                    Button::new(id)
+                        .ghost()
+                        .icon(plugin_page::entry_icon(entry.entry.icon.as_deref()))
+                        .tooltip(entry.entry.label.clone())
+                        .accessibility_label(entry.entry.label.clone())
+                        .on_click(cx.listener(move |this, _, window, cx| this.open_plugin_page(index, window, cx))),
+                )
+                .into_any_element(),
+            );
+        }
+        bottom.push(self.sidebar_icon_button(
+            "rail-settings",
+            IconName::Settings,
+            t!("sidebar.settings").to_string(),
+            |this, window, cx| this.open_settings(window, cx),
+            cx,
+        ));
+        v_flex()
+            .id("sidebar-rail")
+            .role(Role::Navigation)
+            .w(px(size::SIDEBAR_RAIL_WIDTH))
+            .h_full()
+            .flex_none()
+            .items_center()
+            .pb(px(space::M))
+            .when(!title_bar::custom(), |rail| rail.pt(px(space::M)))
+            .gap(px(space::XS))
+            .child(brand)
+            .child(top)
+            .child(div().flex_1())
+            .child(v_flex().items_center().pt(px(space::S)).gap(px(space::XS)).border_t_1().border_color(p.border).children(bottom))
+            .into_any_element()
+    }
+
+    fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let width = self.sidebar_width.get();
+        // 宽度在过渡：外层按当前宽度裁切，里面按收起或展开时的宽度排版，内容不会被挤得换行。
+        let inner = if self.sidebar_collapsed { self.render_sidebar_rail(window, cx) } else { self.render_sidebar_full(window, cx) };
+        div()
+            .w(px(width))
+            .h_full()
+            .flex_none()
+            .overflow_hidden()
+            .bg(p.sidebar)
+            .when(!title_bar::custom(), |sidebar| sidebar.border_r_1().border_color(p.border))
+            .child(inner)
+            .into_any_element()
+    }
+
+    fn render_sidebar_full(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let hidden = self.backend.hidden_entries();
         if self.sidebar_intro.get().is_none() && !self.sessions.is_empty() {
@@ -1912,6 +2071,13 @@ impl WorkspaceView {
 
         let new_session = list_item("new-session", Some(IconName::Plus), t!("sidebar.new_session").to_string(), false, &p)
             .on_click(cx.listener(|this, _, window, cx| this.new_session(None, window, cx)));
+        let collapse = self.sidebar_icon_button(
+            "sidebar-collapse",
+            IconName::PanelLeftClose,
+            t!("sidebar.collapse").to_string(),
+            |this, _, cx| this.toggle_sidebar(cx),
+            cx,
+        );
 
         v_flex()
             .w(px(size::SIDEBAR_WIDTH))
@@ -1921,21 +2087,26 @@ impl WorkspaceView {
             // 自绘标题栏时侧边栏一直通到窗口顶上：品牌行贴着顶边，和对话区上方的标题栏一样高，也能拖动窗口。
             .when(title_bar::custom(), |sidebar| sidebar.pt_0())
             .gap(px(space::XS))
-            .bg(p.sidebar)
-            // 自绘标题栏时侧边栏和标题栏是同一块“框架”，和对话区之间靠对话面板自己的描边分开。
-            .when(!title_bar::custom(), |sidebar| sidebar.border_r_1().border_color(p.border))
             .child(
-                title_bar::drag_region("sidebar-brand", window, cx)
-                    .flex()
+                h_flex()
                     .flex_none()
                     .items_center()
-                    .h(px(size::NAV_ITEM))
-                    .px(px(space::M))
-                    // macOS：品牌放在红黄绿按钮右边。
-                    .pl(px(space::M + title_bar::brand_offset(space::M * 2., window)))
-                    .gap(px(space::S))
-                    .child(brand_mark(size::ICON_LG, &p))
-                    .child(div().text_heading().child(APP_NAME)),
+                    .child(
+                        title_bar::drag_region("sidebar-brand", window, cx)
+                            .flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .items_center()
+                            .h(px(size::NAV_ITEM))
+                            .px(px(space::M))
+                            // macOS：品牌放在红黄绿按钮右边。
+                            .pl(px(space::M + title_bar::brand_offset(space::M * 2., window)))
+                            .gap(px(space::S))
+                            .child(brand_mark(size::ICON_LG, &p))
+                            .child(div().text_heading().child(APP_NAME)),
+                    )
+                    // 收起按钮放在拖动区外面：Windows 上拖动区整块交给系统，里面的按钮点不到。
+                    .child(collapse),
             )
             .child(new_session)
             .child(
@@ -2035,6 +2206,7 @@ impl WorkspaceView {
                             .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(text.clone()))
                     })),
             )
+            .into_any_element()
     }
 }
 
@@ -2065,7 +2237,15 @@ impl Render for WorkspaceView {
         // 另一边一重绘，没重绘的这一边就从无障碍树里整个消失（例如一输入文字，侧边栏就读不到了）。
         // 只有读屏软件连着时才有这份开销；它连上时 GPUI 会强制重绘一次，这里随之切换。
         let cache = !window.is_a11y_active();
-        let sidebar_style = StyleRefinement::default().w(px(size::SIDEBAR_WIDTH)).h_full().flex_none();
+        // 收起、展开侧边栏时宽度有过渡（减少动态效果时直接到位）。
+        let expanded = motion::tween("sidebar-width", if self.sidebar_collapsed { 0. } else { 1. }, window, cx);
+        let sidebar_width = size::SIDEBAR_RAIL_WIDTH + (size::SIDEBAR_WIDTH - size::SIDEBAR_RAIL_WIDTH) * expanded;
+        if (self.sidebar_width.get() - sidebar_width).abs() > f32::EPSILON {
+            self.sidebar_width.set(sidebar_width);
+            // 缓存的侧边栏按新宽度重画。
+            self.sidebar.update(cx, |_, cx| cx.notify());
+        }
+        let sidebar_style = StyleRefinement::default().w(px(sidebar_width)).h_full().flex_none();
         let sidebar = if cache { self.sidebar.clone().cached(sidebar_style) } else { ViewElement::new(self.sidebar.clone()) };
         let active =
             if cache { self.active.clone().cached(StyleRefinement::default().size_full()) } else { ViewElement::new(self.active.clone()) };
@@ -2156,7 +2336,12 @@ impl Render for WorkspaceView {
         let framed = title_bar::custom();
         self.sync_window_title(window, cx);
         self.publish_bridge_snapshot(cx);
-        let title = self.title.clone().into_any_element();
+        // macOS 上侧边栏收起后红黄绿按钮伸到标题栏里：标题往右让开。
+        let title = h_flex()
+            .min_w(px(0.))
+            .pl(px(title_bar::brand_offset(self.sidebar_width.get(), window)))
+            .child(self.title.clone())
+            .into_any_element();
         // 焦点框按真正触发的设备显示（见 `design::focus_from_keyboard`）。
         design::track_focus_source(div())
             .relative()
@@ -2165,6 +2350,7 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(Self::on_new_session))
             .on_action(cx.listener(Self::on_toggle_settings))
             .on_action(cx.listener(Self::on_focus_composer))
+            .on_action(cx.listener(Self::on_toggle_sidebar))
             // 插件命令的快捷键（和内置快捷键冲突的不生效）。
             .on_key_down(cx.listener(Self::on_plugin_shortcut))
             .text_color(p.text)

@@ -8,7 +8,10 @@ use std::borrow::Cow;
 
 use gpui_kit::{AssetSource, Result, SharedString};
 
-gpui_kit::assets::icon_assets!(ExtraIcons, [Image, Share2, Database, GitBranch, Hand, ShieldCheck, ShieldAlert, CornerDownLeft]);
+gpui_kit::assets::icon_assets!(
+    ExtraIcons,
+    [Image, Share2, Database, GitBranch, Hand, ShieldCheck, ShieldAlert, CornerDownLeft, SquarePen, FolderPlus]
+);
 
 /// 通用无障碍标志（圆圈里张开双臂的人形），见 `design::AppIcon::UniversalAccess`。Lucide 没有这个图标，
 /// 按它的风格画：24×24、2px 描边、圆角端点，人形取自 `person-standing`、缩进圆圈里。

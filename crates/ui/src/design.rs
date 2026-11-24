@@ -38,6 +38,8 @@ pub mod size {
     pub const LIST_ITEM: f32 = 32.;
     pub const NAV_ITEM: f32 = 40.;
     pub const SIDEBAR_WIDTH: f32 = 260.;
+    /// 收起后的侧边栏：一列图标按钮。
+    pub const SIDEBAR_RAIL_WIDTH: f32 = 56.;
     pub const CONTENT_MAX_WIDTH: f32 = 860.;
     pub const MODAL_WIDTH: f32 = 1000.;
     pub const MODAL_HEIGHT: f32 = 820.;

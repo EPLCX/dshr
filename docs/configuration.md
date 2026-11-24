@@ -107,6 +107,7 @@ urls = ["https://example.com/dshr-plugins/index.json"]
 | `text_scale` | `"system"` 或百分比数字 | `"system"` | 文字大小；设置页提供 90、100、115、130 |
 | `palette` | 字符串 | 空 | 配色方案：`themes/<id>.toml` 写 `<id>`，插件带的写 `<插件 id>/<id>`；空表示默认配色。开启高对比度时不起作用 |
 | `workspaces` | 路径数组 | 空 | 侧边栏里的工作区，最近用过的在前；由程序维护 |
+| `sidebar_collapsed` | 布尔 | `false` | 侧边栏收起成一列图标按钮；在界面上收起、展开时由程序维护 |
 | `welcome_skipped` | 布尔 | `false` | 欢迎窗里点过“稍后设置”；由程序维护 |
 
 ### [[providers]]
@@ -205,6 +206,7 @@ MCP 服务器的配置里还可以用 `${env:名字}` 引用任意环境变量�
 | `new_session` | `ctrl-n` | `cmd-n` |
 | `settings` | `ctrl-,` | `cmd-,` |
 | `focus_composer` | `ctrl-l` | `cmd-l` |
+| `toggle_sidebar` | `ctrl-b` | `cmd-b` |
 
 按键写成 `修饰键-…-键`，修饰键可以是 `ctrl`、`alt`、`shift`、`cmd`、`fn`，至少要有一个；减号本身写作 `ctrl--`。
 写错的项按默认值处理，不会影响启动。
