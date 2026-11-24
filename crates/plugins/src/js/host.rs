@@ -1526,6 +1526,13 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
     native!("log", |host, level: String, message: String| plain host.log(&level, &message));
     native!("output", |host, text: String| plain host.output(&text));
     native!("workspace", |host| plain host.workspace());
+    // 多语言（`host.i18n`）：界面当前语言；给定可用的语言，按回退顺序排好。
+    native!("locale", |_host| plain crate::locale::current_locale());
+    native!("localeCandidates", |_host, locale: String, available: String, fallback: String| plain {
+        let available: Vec<String> = serde_json::from_str(&available).unwrap_or_default();
+        serde_json::to_string(&crate::locale::candidates(&locale, available.iter().map(String::as_str), &fallback))
+            .unwrap_or_else(|_| "[]".to_owned())
+    });
     native!("emitEvent", |host, kind: String, json: String| host.emit_event(&kind, &json));
     native!("readFile", |host, path: String| host.read_file(&path));
     native!("readFileBytes", |host, path: String| host.read_file_bytes(&path));

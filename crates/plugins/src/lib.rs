@@ -21,6 +21,7 @@ pub mod index;
 pub mod install;
 /// 在任意文件夹里开发插件：`dshr plugin link`。
 pub mod links;
+pub mod locale;
 mod manifest;
 /// 打包与签名：`dshr plugin pack`、`dshr plugin keygen`。
 #[cfg(feature = "js")]
@@ -68,6 +69,17 @@ pub struct PluginCard {
     pub mcp_servers: Vec<(String, String, Option<dshr_mcp::ServerStatus>)>,
     /// 链接到插件目录之外的文件夹（`dshr plugin link`，开发中）时是那个文件夹。
     pub linked: Option<std::path::PathBuf>,
+    /// 插件自带的文案（`locales/<语言>.json`）：设置页用它显示配置项的标题和说明。
+    pub messages: locale::Messages,
+    /// 插件的默认语言。
+    pub default_locale: String,
+}
+
+impl PluginCard {
+    /// 语言文件里 `key` 在 `locale` 下的文案（按语言回退）。
+    pub fn message(&self, locale: &str, key: &str) -> Option<String> {
+        locale::lookup(&self.messages, locale, &self.default_locale, key).map(str::to_owned)
+    }
 }
 
 /// 没有编进 JS 运行时的构建：插件目录里的东西不加载。

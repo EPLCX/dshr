@@ -46,7 +46,7 @@
 | `dshr-agent` | agent 循环、`Session`、会话目录、审批、权限、沙箱插件、压缩、预设、子代理、标题、提示词扩展、界面扩展点（`UiSurfaces` 等） | 以上全部 |
 | `dshr-skills` | Skills 的发现与提示词目录 | agent、context |
 | `dshr-mcp` | MCP 客户端：stdio 与 streamable HTTP、服务器生命周期、资源、prompts、OAuth | agent、tools、auth、config |
-| `dshr-plugins` | JS 插件宿主（QuickJS，`js` feature）、清单、能力授权、插件包、安装、打包签名、索引、来源与回滚、创造模式 | agent、tools、mcp、config |
+| `dshr-plugins` | JS 插件宿主（QuickJS，`js` feature）、清单、插件自带的多语言文案（`locale.rs`）、能力授权、插件包、安装、打包签名、索引、来源与回滚、创造模式 | agent、tools、mcp、config |
 | `dshr-ui` | GPUI 界面：欢迎窗、工作区窗口、对话视图、设置、安装确认框、托盘、单实例、辅助功能、设计系统 | 以上全部、gpui-kit |
 | `dshr-cli` | 命令行（二进制 `dshr`） | — |
 | `dshr-desktop` | 桌面版（二进制 `dshr-desktop`） | ui |
@@ -216,7 +216,7 @@ pub trait Tool: Send + Sync {
   单实例（`single_instance.rs`）。
 - **桥**（`bridge.rs`）：插件在自己的线程上请求界面做事（发消息、写输入框、确认安装），请求排进队列并唤醒窗口，由主线程取出处理。
 - **设计系统**：`design.rs`（token、基础组件、焦点轮廓、配色）和 `design/motion.rs`（动效），规则见 [设计规范](design.md)。
-- **本地化**：`rust-i18n`，文案在 `crates/ui/locales/app.yml`，十种语言。
+- **本地化**：`rust-i18n`，文案在 `crates/ui/locales/app.yml`，十种语言；切换语言时同时告诉 `dshr_plugins::locale`，插件的 `host.i18n` 和设置页里插件配置项的标题跟着变。
 - **辅助功能**：通过 AccessKit 暴露给读屏软件；`system_a11y.rs` 读系统的高对比度、文字大小、动画设置；`touch.rs` 处理 Windows 触摸手势。
 
 ### UI 插件

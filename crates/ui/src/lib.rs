@@ -385,6 +385,8 @@ pub(crate) const FIXED_SHORTCUTS: &[(&str, &str, &str)] = &[
 
 pub(crate) fn apply_language(code: &str) {
     rust_i18n::set_locale(code);
+    // 插件读 `host.i18n.locale`、设置页按语言显示插件配置项的标题，都看这个。
+    dshr_plugins::locale::set_locale(code);
 }
 
 /// 套用配置里选的配色方案（`ui.palette`）；空的或找不到时用默认配色。方案不合规（颜色写错、对比度太低）时报错，

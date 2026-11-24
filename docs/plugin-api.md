@@ -353,9 +353,25 @@ export const state = {
 |---|---|---|
 | `host.workspace` | — | 当前工作区的路径；没有工作区时是插件数据目录 |
 | `host.config` | — | 插件的配置（`[plugins.<id>]`，只读） |
+| `host.i18n` | — | 多语言，见下面的 [i18n](#i18n) |
 | `host.log(...args)`、`console.*` | — | 写插件日志（设置页的“日志”、`dshr plugin dev` 的 `logs`），保留最近 200 行 |
 | `host.output(text)` | — | 工具运行时的实时输出（显示在卡片里，不进日志） |
 | `host.emitEvent(kind, data)` | — | 写一条插件事件；`kind` 以 `<插件 id>/` 开头 |
+
+### i18n
+
+不需要能力，任何场合都能用（同步钩子、`render`、`prompt` 也可以）。文案放在插件文件夹的 `locales/<语言>.json` 里，写法和回退顺序见
+[插件开发 · 多语言](plugins.md#多语言)。
+
+| 成员 | 说明 |
+|---|---|
+| `host.i18n.locale` | 界面当前语言，如 `"zh-CN"`、`"en"`；用户在设置里切换后立即变 |
+| `host.i18n.locales` | 插件自带了哪些语言（`locales/` 里的文件名） |
+| `host.i18n.t(key, vars?)` | 当前语言的文案（按语言回退），`{name}` 换成 `vars.name`；找不到时返回 `key` |
+| `host.i18n.pick(table, vars?)` | 从 `{ "zh-CN": "…", en: "…" }` 里按同样的回退顺序挑一条 |
+
+界面节点每次渲染都会重新调用 `render`，在里面用 `t` 就会跟着语言变。工具的 `description`、入口的 `label` 这类在加载时就定下来的文字，
+取的是加载那一刻的语言。
 
 ### 插件数据目录
 

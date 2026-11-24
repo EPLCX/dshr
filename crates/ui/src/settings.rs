@@ -453,7 +453,13 @@ impl SettingsView {
                     let choice = match &field.kind {
                         FieldKind::Choice(choices) => {
                             let current = field.display(value.as_ref());
-                            let labels: Vec<SharedString> = choices.iter().map(|choice| choice.clone().into()).collect();
+                            let locale = dshr_plugins::locale::current_locale();
+                            let labels: Vec<SharedString> = field
+                                .choice_labels(&locale, |key| card.as_ref().and_then(|card| card.message(&locale, key)))
+                                .into_iter()
+                                .map(SharedString::from)
+                                .collect();
+                            debug_assert_eq!(labels.len(), choices.len());
                             let selected = choices.iter().position(|choice| *choice == current);
                             let select = cx.new(|cx| DropdownState::new(labels, selected, cx).width(200.));
                             subscriptions.push(cx.subscribe(&select, move |this, _, DropdownChanged(index): &DropdownChanged, cx| {
@@ -1459,7 +1465,7 @@ impl SettingsView {
             .enumerate()
             .map(|(field_index, state)| {
                 let field = &state.field;
-                let label = plugin_field_label(row.id, field);
+                let label = plugin_field_label(row.id, row.card.as_ref(), field);
                 // 元素 id：同一页里每个插件的每一项都不同。
                 let element_id = SharedString::from(format!("plugin-field-{}-{}", row.id, field.key));
                 let control: AnyElement = match (&field.kind, &state.input) {
@@ -1520,7 +1526,7 @@ impl SettingsView {
                 v_flex()
                     .gap(px(space::XS))
                     .child(control)
-                    .children(plugin_field_hint(row.id, field).map(|text| hint(text, Tone::Neutral, &p)))
+                    .children(plugin_field_hint(row.id, row.card.as_ref(), field).map(|text| hint(text, Tone::Neutral, &p)))
                     .into_any_element()
             })
             .collect()
@@ -2833,14 +2839,19 @@ fn plugin_description(id: &str) -> Option<String> {
     translated(&format!("plugin_desc.{id}"))
 }
 
-/// 配置项的名字：文案里有 `plugin_config.<插件>.<键>` 就用它，否则直接显示键名。
-fn plugin_field_label(plugin: &str, field: &Field) -> String {
-    translated(&format!("plugin_config.{plugin}.{}", field.key)).unwrap_or_else(|| field.key.clone())
+/// 配置项的名字：内置插件的文案 `plugin_config.<插件>.<键>` 优先；其次是插件自己写的标题（语言文件、
+/// `i18n.<语言>.title`、`title`，见 [`Field::label`]）；都没有时直接显示键名。
+fn plugin_field_label(plugin: &str, card: Option<&dshr_plugins::PluginCard>, field: &Field) -> String {
+    let locale = dshr_plugins::locale::current_locale();
+    translated(&format!("plugin_config.{plugin}.{}", field.key))
+        .unwrap_or_else(|| field.label(&locale, |key| card.and_then(|card| card.message(&locale, key))))
 }
 
-/// 配置项下面的说明：文案（`…_desc`）优先，其次是 schema 里的说明；后面跟上范围和默认值。
-fn plugin_field_hint(plugin: &str, field: &Field) -> Option<String> {
-    let description = translated(&format!("plugin_config.{plugin}.{}_desc", field.key)).or_else(|| field.description.clone());
+/// 配置项下面的说明：文案（`…_desc`）优先，其次是插件写的说明（按界面语言）；后面跟上范围和默认值。
+fn plugin_field_hint(plugin: &str, card: Option<&dshr_plugins::PluginCard>, field: &Field) -> Option<String> {
+    let locale = dshr_plugins::locale::current_locale();
+    let description = translated(&format!("plugin_config.{plugin}.{}_desc", field.key))
+        .or_else(|| field.localized_description(&locale, |key| card.and_then(|card| card.message(&locale, key))));
     let range = match (field.minimum, field.maximum) {
         (Some(minimum), Some(maximum)) => {
             Some(t!("settings.field_range", min = schema_form::format_bound(minimum), max = schema_form::format_bound(maximum)).to_string())

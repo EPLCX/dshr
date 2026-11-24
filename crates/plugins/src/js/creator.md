@@ -84,7 +84,13 @@ capabilities = ["fs:workspace:read"]   # fs:workspace:read, fs:workspace:write, 
 [config.properties.max_chars]          # optional JSON Schema for user settings; the script reads host.config
 type = "integer"
 default = 100000
+title = "Max characters"               # label shown in Settings instead of the key
+description = "Stop counting after this many characters"
+[config.properties.max_chars.i18n.zh-CN] # optional per-language title / description / enumTitles
+title = "最多字符数"
 ```
+
+Translations (optional): put `locales/<lang>.json` files (`en`, `zh-CN`, `zh-TW`, `zh-HK`, `de`, `el`, `ja`, `es`, `fr`, `pt`) in the plugin folder, each a (possibly nested) object of key → text. `name`, `description` and `config.<key>.title` / `.description` / `.enum.<value>` localize the Settings card. In the script, `host.i18n.t(key, vars)` returns the text for the current UI language (`{name}` placeholders filled from `vars`, falls back to `default_locale`, then `en`, then the key), `host.i18n.locale` is the UI language and `host.i18n.pick({ "zh-CN": "…", en: "…" })` picks from an inline table.
 
 `index.js` is an ES module. It may `import "./lib/x.js"` and `import data from "./data.json"` from its own folder, names mapped in `[imports]`, and the built-in modules `dshr:path` (POSIX path helpers) and `dshr:events` (`EventEmitter`). Nothing else: no npm, no `require`, `process`, `fs` or global `fetch`. Everything outside the script goes through `host`.
 

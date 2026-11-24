@@ -363,3 +363,38 @@ async fn hooks_tell_the_main_agent_from_sub_agents() {
     agent.run_turn(&mut session, "go".into(), &tx, &CancellationToken::new()).await.unwrap();
     assert_eq!(data(&f, "advisor", "seen").unwrap(), "main-session/main\nmain-session/call-7\nmain-session/main\n");
 }
+
+#[tokio::test]
+async fn plugins_read_their_own_translations() {
+    let f = Fixture::new();
+    f.plugin(
+        "polyglot",
+        "default_locale = \"en\"\n[config.properties.count]\ntype = \"integer\"\ntitle = \"数量\"\n",
+        r#"export const tools = [{ name: "greet", readOnly: true, async execute(_input, host) {
+            return JSON.stringify({
+              locale: host.i18n.locale,
+              locales: host.i18n.locales.sort(),
+              hello: host.i18n.t("hello", { name: "dshr" }),
+              title: host.i18n.t("config.count.title"),
+              missing: host.i18n.t("nope"),
+              picked: host.i18n.pick({ "zh-CN": "简体", en: "English" }),
+            });
+        } }];"#,
+    );
+    let dir = f.plugins_dir().join("polyglot").join("locales");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("en.json"), r#"{ "hello": "Hello, {name}", "config": { "count": { "title": "Count" } } }"#).unwrap();
+    std::fs::write(dir.join("zh-CN.json"), r#"{ "hello": "你好，{name}" }"#).unwrap();
+    crate::locale::set_locale("zh-HK");
+    let cx = f.context();
+    let output = f.call(&cx, "greet", json!({})).await;
+    assert!(!output.is_error, "{output:?}");
+    let value: Value = serde_json::from_str(&output.content).unwrap();
+    assert_eq!(value["locale"], "zh-HK");
+    assert_eq!(value["locales"], json!(["en", "zh-CN"]));
+    assert_eq!(value["hello"], "你好，dshr");
+    // 中文没有这一条：回退到默认语言（英文）。
+    assert_eq!(value["title"], "Count");
+    assert_eq!(value["missing"], "nope");
+    assert_eq!(value["picked"], "简体");
+}

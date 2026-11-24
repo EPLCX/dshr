@@ -178,6 +178,44 @@
   const pages = new Map();
   let prompt = null;
   let config = {};
+  // 插件自带的文案（locales/<语言>.json，已拍平成 key → 文案）和默认语言。
+  let i18nData = { messages: {}, defaultLocale: "en" };
+  // 从“语言代码 → 值”的对象里按回退顺序挑一个。
+  const pickLocale = (table) => {
+    if (table === null || typeof table !== "object") return undefined;
+    const order = JSON.parse(native.localeCandidates(native.locale(), JSON.stringify(Object.keys(table)), i18nData.defaultLocale));
+    for (const code of order) if (table[code] !== undefined) return table[code];
+    return undefined;
+  };
+  const formatText = (template, vars) =>
+    vars && typeof vars === "object"
+      ? String(template).replace(/\{([^{}]+)\}/g, (whole, name) => (Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole))
+      : String(template);
+  const i18n = Object.freeze({
+    // 界面当前语言（如 "zh-CN"、"en"），每次读都是最新的。
+    get locale() {
+      return native.locale();
+    },
+    // 插件自带哪些语言。
+    get locales() {
+      return Object.keys(i18nData.messages);
+    },
+    // 语言文件里的文案，按语言回退；{name} 换成 vars 里的值。找不到时返回 key 本身。
+    t(key, vars) {
+      key = String(key);
+      const order = JSON.parse(native.localeCandidates(native.locale(), JSON.stringify(Object.keys(i18nData.messages)), i18nData.defaultLocale));
+      for (const code of order) {
+        const text = i18nData.messages[code]?.[key];
+        if (text !== undefined) return formatText(text, vars);
+      }
+      return key;
+    },
+    // 从内联的多语言对象里挑当前语言的一条：pick({ "zh-CN": "数量", en: "Count" })。
+    pick(table, vars) {
+      const value = pickLocale(table);
+      return typeof value === "string" ? formatText(value, vars) : value;
+    },
+  });
   let lifecycle = { activate: null, deactivate: null, state: null };
 
   const HOOKS = ["beforeTool", "afterTool", "beforeStep", "beforeRequest", "turnEnded", "reviewTool", "transformRequest", "turnStarted", "beforeWrite"];
@@ -252,6 +290,7 @@
     get config() {
       return config;
     },
+    i18n,
     log: logger("info"),
     output: (text) => native.output(String(text)),
     emitEvent: (kind, data) => native.emitEvent(String(kind), JSON.stringify(data === undefined ? null : data)),
@@ -541,8 +580,9 @@
   };
 
   return {
-    register(namespace, configJson) {
+    register(namespace, configJson, i18nJson) {
       config = Object.freeze(JSON.parse(configJson));
+      if (i18nJson) i18nData = JSON.parse(i18nJson);
       const exported = (name) => namespace[name] ?? namespace.default?.[name];
 
       // prompt(context, host)：这一轮追加到系统提示词后面的文本。
