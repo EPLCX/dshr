@@ -22,6 +22,7 @@ mod plugin_page;
 mod provider_form;
 mod reveal;
 mod schema_form;
+mod session_search;
 mod settings;
 pub mod single_instance;
 mod smooth_scroll;
@@ -268,6 +269,8 @@ actions!(
         FocusComposer,
         /// 收起或展开侧边栏。
         ToggleSidebar,
+        /// 按标题搜索会话。
+        SearchSessions,
     ]
 );
 
@@ -286,6 +289,7 @@ pub(crate) const EDITABLE_SHORTCUTS: &[EditableShortcut] = &[
     EditableShortcut { action: "settings", label: "shortcuts.settings", mac: "cmd-,", other: "ctrl-," },
     EditableShortcut { action: "focus_composer", label: "shortcuts.focus_composer", mac: "cmd-l", other: "ctrl-l" },
     EditableShortcut { action: "toggle_sidebar", label: "shortcuts.toggle_sidebar", mac: "cmd-b", other: "ctrl-b" },
+    EditableShortcut { action: "search_sessions", label: "shortcuts.search_sessions", mac: "cmd-k", other: "ctrl-k" },
 ];
 
 /// 生效中的按键：用户改过的（且写法有效）优先，否则用默认值。
@@ -303,7 +307,11 @@ pub(crate) fn bind_keys(bindings: &dshr_config::Keybindings, cx: &mut App) {
         .bindings()
         .filter(|binding| {
             let action = binding.action().as_any();
-            !(action.is::<NewSession>() || action.is::<ToggleSettings>() || action.is::<FocusComposer>() || action.is::<ToggleSidebar>())
+            !(action.is::<NewSession>()
+                || action.is::<ToggleSettings>()
+                || action.is::<FocusComposer>()
+                || action.is::<ToggleSidebar>()
+                || action.is::<SearchSessions>())
         })
         .cloned()
         .collect();
@@ -319,6 +327,7 @@ pub(crate) fn bind_keys(bindings: &dshr_config::Keybindings, cx: &mut App) {
         KeyBinding::new(key(1), ToggleSettings, None),
         KeyBinding::new(key(2), FocusComposer, None),
         KeyBinding::new(key(3), ToggleSidebar, None),
+        KeyBinding::new(key(4), SearchSessions, None),
     ]);
 }
 
@@ -723,6 +732,10 @@ pub struct WorkspaceView {
     sidebar_collapsed: bool,
     /// 侧边栏现在的宽度（收起、展开时有过渡）：每帧在 `render` 里算好，侧边栏视图按它画。
     sidebar_width: std::cell::Cell<f32>,
+    /// 打开着的“搜索会话”弹窗。
+    session_search: Option<(Entity<session_search::SessionSearchView>, Subscription)>,
+    /// 刚关上、还在播放退场的搜索弹窗。
+    session_search_leaving: Option<Entity<session_search::SessionSearchView>>,
     /// 点过“显示更多”的分组现在显示几个会话；没有记录的分组显示 [`SIDEBAR_PAGE`] 个。
     sidebar_limits: HashMap<Option<PathBuf>, usize>,
     /// 打开设置时存在；关闭时丢弃，下次打开重新读取配置。
@@ -819,6 +832,8 @@ impl WorkspaceView {
             collapsed: HashSet::new(),
             sidebar_collapsed,
             sidebar_width: std::cell::Cell::new(if sidebar_collapsed { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH }),
+            session_search: None,
+            session_search_leaving: None,
             sidebar_limits: HashMap::new(),
             settings: None,
             settings_leaving: None,
@@ -1375,6 +1390,14 @@ impl WorkspaceView {
         self.toggle_sidebar(cx);
     }
 
+    fn on_search_sessions(&mut self, _: &SearchSessions, window: &mut Window, cx: &mut Context<Self>) {
+        if self.session_search.is_some() {
+            self.close_session_search(window, cx);
+        } else {
+            self.open_session_search(window, cx);
+        }
+    }
+
     /// 收起或展开侧边栏，记进配置。
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
@@ -1384,6 +1407,35 @@ impl WorkspaceView {
         }
         self.session_menu = None;
         cx.notify();
+    }
+
+    /// 打开“搜索会话”弹窗：拿当前的会话列表，焦点移进输入框。
+    fn open_session_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.session_search.is_some() {
+            return;
+        }
+        let sessions = self.sessions.clone();
+        let view = cx.new(|cx| session_search::SessionSearchView::new(sessions, window, cx));
+        let subscription = cx.subscribe_in(&view, window, |this, _, event: &session_search::SessionSearchEvent, window, cx| match event {
+            session_search::SessionSearchEvent::Open(id) => {
+                let id = id.clone();
+                this.close_session_search(window, cx);
+                this.open_session(&id, window, cx);
+            }
+            session_search::SessionSearchEvent::Close => this.close_session_search(window, cx),
+        });
+        // 焦点等弹窗画出来再进搜索框（见 `SessionSearchView::focus_pending`）。
+        self.session_search_leaving = None;
+        self.session_search = Some((view, subscription));
+        cx.notify();
+    }
+
+    fn close_session_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((view, _)) = self.session_search.take() {
+            self.session_search_leaving = Some(view);
+            self.focus_active(window, cx);
+            cx.notify();
+        }
     }
 
     fn on_toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
@@ -1945,6 +1997,13 @@ impl WorkspaceView {
                 t!("sidebar.add_workspace").to_string(),
                 |this, window, cx| this.add_workspace(window, cx),
                 cx,
+            ))
+            .child(self.sidebar_icon_button(
+                "rail-search",
+                IconName::Search,
+                t!("sidebar.search").to_string(),
+                |this, window, cx| this.open_session_search(window, cx),
+                cx,
             ));
         let mut bottom: Vec<AnyElement> = Vec::new();
         for item in self.ui.sidebar_items().iter().filter(|item| !hidden.contains(&format!("sidebar:{}", item.id))) {
@@ -2091,6 +2150,9 @@ impl WorkspaceView {
 
         let new_session = list_item("new-session", Some(IconName::Plus), t!("sidebar.new_session").to_string(), false, &p)
             .on_click(cx.listener(|this, _, window, cx| this.new_session(None, window, cx)));
+        let search =
+            list_item("search-sessions", Some(IconName::Search), t!("sidebar.search").to_string(), self.session_search.is_some(), &p)
+                .on_click(cx.listener(|this, _, window, cx| this.open_session_search(window, cx)));
         let collapse = self.sidebar_icon_button(
             "sidebar-collapse",
             IconName::PanelLeftClose,
@@ -2129,6 +2191,7 @@ impl WorkspaceView {
                     .child(collapse),
             )
             .child(new_session)
+            .child(search)
             .child(
                 h_flex()
                     .pl(px(space::M))
@@ -2339,6 +2402,24 @@ impl Render for WorkspaceView {
                 }))
                 .child(centered().child(dialog))
         });
+        // 搜索会话：靠上居中，像命令面板。点遮罩关上。
+        let search_phase =
+            motion::presence("session-search-overlay", self.session_search.is_some(), motion::BASE, motion::FAST, window, cx);
+        if search_phase.is_none() {
+            self.session_search_leaving = None;
+        }
+        let shown_search = self.session_search.as_ref().map(|(view, _)| view.clone()).or_else(|| self.session_search_leaving.clone());
+        let search_overlay = search_phase.zip(shown_search).map(|(phase, view)| {
+            view.update(cx, |view, _| view.set_phase(phase));
+            title_bar::below(div().id("session-search-overlay").absolute())
+                .occlude()
+                .child(
+                    scrim(phase, &p)
+                        .id("session-search-scrim")
+                        .on_click(cx.listener(|this, _, window, cx| this.close_session_search(window, cx))),
+                )
+                .child(div().size_full().flex().justify_center().items_start().pt(relative(0.08)).child(view))
+        });
         // 安装确认盖在最上面（从设置页装插件时设置弹窗正开着）。点遮罩不关：要用户明确回答。
         let install_phase =
             motion::presence("install-dialog-overlay", self.install_dialog.is_some(), motion::SLOW, motion::FAST, window, cx);
@@ -2371,6 +2452,7 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(Self::on_toggle_settings))
             .on_action(cx.listener(Self::on_focus_composer))
             .on_action(cx.listener(Self::on_toggle_sidebar))
+            .on_action(cx.listener(Self::on_search_sessions))
             // 插件命令的快捷键（和内置快捷键冲突的不生效）。
             .on_key_down(cx.listener(Self::on_plugin_shortcut))
             .text_color(p.text)
@@ -2403,6 +2485,7 @@ impl Render for WorkspaceView {
             .child(self.render_skip_links(window, cx))
             .children(overlay)
             .children(plugin_page)
+            .children(search_overlay)
             .children(install_overlay)
             // 给读屏软件的播报（发送后“正在回复”、保存结果等），见 `announce`。
             .child(announce::live_region(cx))
