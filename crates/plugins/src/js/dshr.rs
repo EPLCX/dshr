@@ -258,7 +258,7 @@ impl Dshr<'_> {
         let mut events = Vec::new();
         while events.len() < last {
             let Some(line) = lines.next_line().map_err(failed)? else { break };
-            if let Ok(dshr_core::LogEntry::Known(event)) = serde_json::from_str::<dshr_core::LogEntry>(&line)
+            if let Ok(dshr_core::LogEntry::Known(event)) = dshr_core::LogEntry::parse(&line)
                 && let Ok(value) = serde_json::to_value(&event)
             {
                 events.push(value);

@@ -37,8 +37,39 @@ fn clip_line(line: &str) -> String {
 }
 
 fn walker(root: &Path) -> ignore::WalkParallel {
+    walker_under(root, None)
+}
+
+/// 同 [`walker`]；给了 `under`（相对 `root` 的目录）时只走进这个目录和通往它的那几层，其余目录整个跳过。
+/// 仍然从 `root` 开始走：忽略规则、跳过 `.git` 都和完整遍历一样，结果只是少了 `under` 以外的部分。
+fn walker_under(root: &Path, under: Option<PathBuf>) -> ignore::WalkParallel {
+    let root_owned = root.to_owned();
     // 隐藏文件也搜索（如 .github），但仍遵守 .gitignore，并总是跳过 .git 目录。
-    WalkBuilder::new(root).hidden(false).filter_entry(|entry| entry.file_name() != ".git").build_parallel()
+    WalkBuilder::new(root)
+        .hidden(false)
+        .filter_entry(move |entry| {
+            if entry.file_name() == ".git" {
+                return false;
+            }
+            let Some(under) = &under else { return true };
+            let relative = entry.path().strip_prefix(&root_owned).unwrap_or(entry.path());
+            // 通往 `under` 的目录、`under` 里面的一切。
+            under.starts_with(relative) || relative.starts_with(under)
+        })
+        .build_parallel()
+}
+
+/// glob 模式开头不含通配符的那几级目录（`src/ui/**/*.rs` → `src/ui`），遍历只需要进到这里面。
+/// 没有这样的前缀、或者前缀里有 `.`、`..` 这类不能按字面对照的部分时是 `None`。
+fn literal_dir_prefix(pattern: &str) -> Option<PathBuf> {
+    let mut parts: Vec<&str> = pattern.split('/').collect();
+    parts.pop(); // 最后一级是文件名部分。
+    let literal: Vec<&str> =
+        parts.into_iter().take_while(|part| !part.is_empty() && !part.contains(['*', '?', '[', ']', '{', '}', '\\'])).collect();
+    if literal.is_empty() || literal.iter().any(|part| matches!(*part, "." | "..") || part.contains(':')) {
+        return None;
+    }
+    Some(literal.iter().collect())
 }
 
 /// 显示用的相对路径，统一用 `/` 分隔。
@@ -274,10 +305,11 @@ impl Tool for Glob {
             Err(error) => return ToolOutput::error(format!("glob 无效: {error}")),
         };
         let root: PathBuf = ctx.resolve(input.path.as_deref().unwrap_or("."));
+        let under = literal_dir_prefix(&input.pattern);
         let (_stop_guard, stopped) = StopOnDrop::new();
         let result = tokio::task::spawn_blocking(move || {
             let found: Mutex<Vec<String>> = Mutex::default();
-            walker(&root).run(|| {
+            walker_under(&root, under).run(|| {
                 let (matcher, root, stopped, found) = (&matcher, &root, &stopped, &found);
                 Box::new(move |entry| {
                     if stopped.load(Ordering::Relaxed) {
@@ -392,6 +424,25 @@ mod tests {
         assert_eq!(out.content, "src/main.rs\nsrc/nested/lib.rs");
         let none = Glob.execute(json!({"pattern": "*.py"}), &ctx).await;
         assert_eq!(none.content, "没有匹配的文件");
+
+        // 有固定目录前缀时只走进那个目录，结果不变；忽略的目录、.git 照旧不算。
+        let nested = Glob.execute(json!({"pattern": "src/nested/*.rs"}), &ctx).await;
+        assert_eq!(nested.content, "src/nested/lib.rs");
+        let ignored = Glob.execute(json!({"pattern": "target/*.rs"}), &ctx).await;
+        assert_eq!(ignored.content, "没有匹配的文件");
+        std::fs::write(ctx.workspace.join(".git/HEAD"), "x").unwrap();
+        assert_eq!(Glob.execute(json!({"pattern": ".git/*"}), &ctx).await.content, "没有匹配的文件");
+        let braces = Glob.execute(json!({"pattern": "{src,docs}/*.rs"}), &ctx).await;
+        assert_eq!(braces.content, "src/main.rs");
+    }
+
+    #[test]
+    fn literal_prefixes() {
+        assert_eq!(literal_dir_prefix("src/ui/**/*.rs"), Some(PathBuf::from("src/ui")));
+        assert_eq!(literal_dir_prefix("src/main.rs"), Some(PathBuf::from("src")));
+        for pattern in ["*.rs", "**/x.rs", "{a,b}/x", "/abs/x", "./src/x", "../x/y", "a[bc]/x", "main.rs"] {
+            assert_eq!(literal_dir_prefix(pattern), None, "{pattern}");
+        }
     }
 
     #[test]

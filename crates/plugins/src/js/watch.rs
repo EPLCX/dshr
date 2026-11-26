@@ -47,6 +47,8 @@ fn workspaces() -> Vec<PathBuf> {
 struct Watched {
     _watcher: notify::RecommendedWatcher,
     ignore: ignore::gitignore::Gitignore,
+    /// 工作区的真实路径（开始监听时取一次）：有的平台报告的是解析过符号链接的路径。
+    canonical_root: PathBuf,
 }
 
 fn skipped(relative: &Path) -> bool {
@@ -125,22 +127,26 @@ pub(super) fn start(plugin: &'static str, manifest: &PluginManifest, instance: &
                         let mut builder = ignore::gitignore::GitignoreBuilder::new(&root);
                         builder.add(root.join(".gitignore"));
                         let ignore = builder.build().unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
-                        watched.insert(root, Watched { _watcher: watcher, ignore });
+                        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.clone());
+                        watched.insert(root, Watched { _watcher: watcher, ignore, canonical_root });
                     }
                 }
                 Some((root, path, kind)) = changes.recv() => {
                     let Some(watch) = watched.get(&root) else { continue };
                     // 编辑器保存时常是“写临时文件再改名”：只认还在工作区里的路径。
-                    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.clone());
-                    let relative = path.strip_prefix(&root).or_else(|_| path.strip_prefix(&canonical_root)).map(Path::to_path_buf);
+                    let relative = path.strip_prefix(&root).or_else(|_| path.strip_prefix(&watch.canonical_root)).map(Path::to_path_buf);
                     let Ok(relative) = relative else { continue };
                     if relative.as_os_str().is_empty() || skipped(&relative) {
                         continue;
                     }
-                    if watch.ignore.matched_path_or_any_parents(&relative, path.is_dir()).is_ignore() {
+                    // 先按插件声明的 glob 过滤（只是字符串匹配）：大多数变化（构建输出、缓存）没有插件关心，
+                    // 用不着再查忽略规则、stat 一下。
+                    let key = relative.to_string_lossy().replace('\\', "/");
+                    if !globs.iter().any(|(_, set)| set.is_match(&key)) {
                         continue;
                     }
-                    if path.is_dir() {
+                    let is_dir = path.is_dir();
+                    if is_dir || watch.ignore.matched_path_or_any_parents(&relative, is_dir).is_ignore() {
                         continue;
                     }
                     let entry = pending.entry(root.clone()).or_default();
@@ -149,7 +155,7 @@ pub(super) fn start(plugin: &'static str, manifest: &PluginManifest, instance: &
                             overflow.push(root.clone());
                         }
                     } else {
-                        entry.insert(relative.to_string_lossy().replace('\\', "/"), kind);
+                        entry.insert(key, kind);
                     }
                     flush_at.get_or_insert_with(|| tokio::time::Instant::now() + BATCH);
                 }
