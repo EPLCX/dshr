@@ -19,7 +19,7 @@ pub use builtin::{ListDir, ReadFile, RunShell, WriteFile};
 pub use edit::{EditFile, unified_diff};
 pub use plan::{Plan, PlanStep, StepStatus, UPDATE_PLAN, UpdatePlan};
 pub use plugins::{BuiltinTools, FsPlugin, PlanPlugin, SearchPlugin, ShellPlugin};
-pub use search::{Glob, Grep, find_files};
+pub use search::{Glob, Grep, LineSearch, RegexMatcher, find_files};
 
 /// 工具执行环境。
 #[derive(Debug, Clone)]

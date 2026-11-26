@@ -709,9 +709,7 @@ impl State {
         }
         self.require_read()?;
         let options: Options = serde_json::from_str(options).map_err(|error| format!("invalid grep options: {error}"))?;
-        let regex = regex::RegexBuilder::new(pattern)
-            .case_insensitive(options.ignore_case)
-            .build()
+        let matcher = dshr_tools::LineSearch::matcher(pattern, options.ignore_case)
             .map_err(|error| format!("invalid regular expression: {error}"))?;
         let filter = match &options.glob {
             Some(glob) => Some(
@@ -727,37 +725,16 @@ impl State {
         let root = self.with_call(|call| Ok(call.ctx.workspace.clone()))?;
         let work = async move {
             tokio::task::spawn_blocking(move || {
-                let mut matches = Vec::new();
-                // 按文件名排序遍历：目录项的原始顺序随文件系统而变，结果顺序要稳定。
-                let walker = ignore::WalkBuilder::new(&root).sort_by_file_name(|a, b| a.cmp(b)).build();
-                'files: for entry in walker.flatten() {
-                    if !entry.file_type().is_some_and(|kind| kind.is_file()) {
-                        continue;
-                    }
-                    let Ok(relative) = entry.path().strip_prefix(&root) else { continue };
-                    let relative = relative.to_string_lossy().replace('\\', "/");
-                    if filter.as_ref().is_some_and(|filter| !filter.is_match(&relative)) {
-                        continue;
-                    }
-                    if entry.metadata().map_or(true, |metadata| metadata.len() > MAX_FILE_BYTES) {
-                        continue;
-                    }
-                    let Ok(bytes) = std::fs::read(entry.path()) else { continue };
-                    // 二进制文件（开头有 NUL）跳过，和 tools 里的 grep 一样。
-                    if bytes.iter().take(8192).any(|byte| *byte == 0) {
-                        continue;
-                    }
-                    let Ok(text) = String::from_utf8(bytes) else { continue };
-                    for (index, line) in text.lines().enumerate() {
-                        if regex.is_match(line) {
-                            let line_text: String = line.chars().take(500).collect();
-                            matches.push(json!({ "path": relative, "line": index + 1, "text": line_text }));
-                            if matches.len() >= limit {
-                                break 'files;
-                            }
-                        }
-                    }
-                }
+                // 和 tools 里的 grep 同一套：并行遍历、ripgrep 内核整块搜索、跳过二进制和超过 2 MB 的文件。
+                // 不看隐藏文件（和以前一样）。找完按路径（逐级目录）和行号排序，结果顺序与遍历先后无关。
+                let search = dshr_tools::LineSearch { matcher: &matcher, hidden: false, per_file: limit, stop: None };
+                let keep = |relative: &str, _: &Path| filter.as_ref().is_none_or(|filter| filter.is_match(relative));
+                let clip = |line: &str| line.trim_end_matches(['\n', '\r']).chars().take(500).collect();
+                let mut found = search.run(&root, &root, &keep, clip);
+                found.sort_by(|a, b| Path::new(&a.0).cmp(Path::new(&b.0)).then(a.1.cmp(&b.1)));
+                found.truncate(limit);
+                let matches: Vec<Value> =
+                    found.into_iter().map(|(path, line, text)| json!({ "path": path, "line": line, "text": text })).collect();
                 Ok(Value::Array(matches).to_string())
             })
             .await
@@ -1326,7 +1303,7 @@ fn event_type(line: &str) -> Option<std::borrow::Cow<'_, str>> {
 /// 从文件末尾往前一行行读（跳过空行、不是 UTF-8 的行）。只读到调用方停下的位置为止。
 ///
 /// 先往前找换行符定出一行的起止，再一次读出整行：再长的行也只读、只分配一次。
-struct ReverseLines {
+pub(super) struct ReverseLines {
     file: std::fs::File,
     /// 下一行（往前数）的结束位置（不含换行符）；`None` 表示已经读到文件开头。
     end: Option<u64>,
@@ -1336,13 +1313,13 @@ struct ReverseLines {
 impl ReverseLines {
     const CHUNK: u64 = 64 * 1024;
 
-    fn open(path: &Path) -> std::io::Result<Self> {
+    pub(super) fn open(path: &Path) -> std::io::Result<Self> {
         let file = std::fs::File::open(path)?;
         let end = file.metadata()?.len();
         Ok(Self { file, end: Some(end), chunk: Vec::new() })
     }
 
-    fn next_line(&mut self) -> std::io::Result<Option<String>> {
+    pub(super) fn next_line(&mut self) -> std::io::Result<Option<String>> {
         use std::io::{Read as _, Seek as _, SeekFrom};
         while let Some(end) = self.end {
             let start = self.line_start(end)?;
