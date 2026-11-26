@@ -11,7 +11,7 @@ use dshr_agent::{Decision, PermissionMode, Preset, Session, SteerMessage, SteerQ
 use dshr_config::{ModelRef, ReasoningEffort};
 use dshr_core::TurnEndReason;
 use futures::FutureExt as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{IndentInline, InputEvent, OutdentInline, Textarea, TextareaState};
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::component::text::TextView;
@@ -1432,21 +1432,25 @@ impl ConversationView {
             .flex()
             .flex_shrink(1.)
             .min_w(px(OPTION_MIN_WIDTH))
-            .child(crate::design::framed_handle(
-                focus.clone(),
-                Button::new("workspace-chip")
-                    .track_focus(&focus)
-                    .ghost()
-                    .control_sm()
-                    .shrinkable(OPTION_MIN_WIDTH)
-                    .icon(IconName::Folder)
-                    .child(truncated(label))
-                    .accessibility_label(name)
-                    .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)).flex_none())
-                    .when_some(self.workspace.as_ref(), |button, path| button.tooltip(path.display().to_string()))
-                    .disabled(self.is_running())
-                    .on_click(cx.listener(|this, _, _, cx| this.choose_workspace(cx))),
-            ))
+            .child(
+                crate::design::framed_handle(
+                    focus.clone(),
+                    Button::new("workspace-chip")
+                        .track_focus(&focus)
+                        .subtle(cx)
+                        .control_sm()
+                        .shrinkable(OPTION_MIN_WIDTH)
+                        .icon(IconName::Folder)
+                        .child(truncated(label))
+                        .accessibility_label(name)
+                        .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)).flex_none())
+                        .when_some(self.workspace.as_ref(), |button, path| button.tooltip(path.display().to_string()))
+                        .disabled(self.is_running())
+                        .on_click(cx.listener(|this, _, _, cx| this.choose_workspace(cx))),
+                )
+                .tint("workspace-chip")
+                .inert(self.is_running()),
+            )
             .into_any_element()
     }
 
@@ -1457,10 +1461,11 @@ impl ConversationView {
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
         let trigger_focus = option_focus(OptionSlot::Permission, window, cx);
         let trigger = crate::design::framed_trigger_with(
+            "permission-trigger",
             trigger_focus.clone(),
             Button::new("permission-trigger")
                 .track_focus(&trigger_focus)
-                .ghost()
+                .subtle(cx)
                 .control_sm()
                 .shrinkable(OPTION_MIN_WIDTH)
                 .icon(permission_icon(current))
@@ -1546,10 +1551,11 @@ impl ConversationView {
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
         let trigger_focus = option_focus(OptionSlot::Preset, window, cx);
         let trigger = crate::design::framed_trigger_with(
+            "preset-trigger",
             trigger_focus.clone(),
             Button::new("preset-trigger")
                 .track_focus(&trigger_focus)
-                .ghost()
+                .subtle(cx)
                 .control_sm()
                 .shrinkable(OPTION_MIN_WIDTH)
                 .icon(preset_icon(current))
@@ -1751,7 +1757,7 @@ impl ConversationView {
                     .child(crate::design::framed(
                         ("remove-attachment", index),
                         Button::new(("remove-attachment", index))
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .icon(IconName::Close)
                             .accessibility_label(t!("conversation.remove_attachment", name = name).to_string())
@@ -1790,10 +1796,11 @@ impl ConversationView {
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
         let trigger_focus = crate::design::menu_trigger_focus("model-menu", window, cx);
         let trigger = crate::design::framed_trigger_with(
+            "model-trigger",
             trigger_focus.clone(),
             Button::new("model-trigger")
                 .track_focus(&trigger_focus)
-                .ghost()
+                .subtle(cx)
                 .control_sm()
                 .accessibility_label(t!("a11y.choice", group = t!("a11y.model_menu"), value = label).to_string())
                 .label(label)
@@ -2009,6 +2016,7 @@ impl ConversationView {
                     motion::highlight("send-state", transparent_black(), size::CONTROL_SM / 2., false)
                         .hover_color(white().opacity(0.14))
                         .pressed_color(black().opacity(0.14))
+                        .smooth()
                         .outset(2.),
                 )
             });
@@ -2146,7 +2154,7 @@ impl ConversationView {
                     .child(crate::design::framed(
                         ("unsteer", id as usize),
                         Button::new(("unsteer", id as usize))
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .icon(IconName::Close)
                             .tooltip(t!("conversation.unsteer").to_string())
@@ -2181,7 +2189,7 @@ impl ConversationView {
                         row.child(crate::design::framed(
                             ("steer", index),
                             Button::new(("steer", index))
-                                .ghost()
+                                .subtle(cx)
                                 .control_xs()
                                 .icon(gpui_kit::assets::IconName::CornerDownLeft)
                                 .label(t!("conversation.steer").to_string())
@@ -2193,7 +2201,7 @@ impl ConversationView {
                     .child(crate::design::framed(
                         ("unqueue", index),
                         Button::new(("unqueue", index))
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .icon(IconName::Close)
                             .accessibility_label(t!("conversation.unqueue").to_string())
@@ -2245,7 +2253,7 @@ impl ConversationView {
         let attach = crate::design::framed(
             "attach",
             Button::new("attach")
-                .ghost()
+                .subtle(cx)
                 .control_sm()
                 .icon(IconName::Plus)
                 .tooltip(t!("conversation.attach").to_string())
@@ -2639,7 +2647,7 @@ impl ConversationView {
         let p = palette(cx);
         let turn = footer.turn;
         let icon_button = |id: &'static str, icon: gpui_kit::assets::IconName, label: String| {
-            Button::new((id, index)).ghost().control_xs().icon(icon).tooltip(label.clone()).accessibility_label(label)
+            Button::new((id, index)).subtle(cx).control_xs().icon(icon).tooltip(label.clone()).accessibility_label(label)
         };
         let usage = (footer.tokens > 0).then(|| {
             h_flex()
@@ -2671,12 +2679,15 @@ impl ConversationView {
                 icon_button("share-turn", gpui_kit::assets::IconName::Share2, t!("conversation.share").to_string())
                     .on_click(cx.listener(move |this, _, _, cx| this.share_turn(index, cx))),
             ))
-            .child(crate::design::framed(
-                ("fork", index),
-                icon_button("fork", gpui_kit::assets::IconName::GitBranch, t!("conversation.fork").to_string())
-                    .disabled(self.is_running() || self.session_id.is_none())
-                    .on_click(cx.listener(move |this, _, _, cx| this.fork_at(turn, cx))),
-            ))
+            .child(
+                crate::design::framed(
+                    ("fork", index),
+                    icon_button("fork", gpui_kit::assets::IconName::GitBranch, t!("conversation.fork").to_string())
+                        .disabled(self.is_running() || self.session_id.is_none())
+                        .on_click(cx.listener(move |this, _, _, cx| this.fork_at(turn, cx))),
+                )
+                .inert(self.is_running() || self.session_id.is_none()),
+            )
             .children(usage)
             .children(time)
             .into_any_element()
@@ -2777,7 +2788,7 @@ impl ConversationView {
             .cursor_pointer()
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
             .relative()
-            .child(hover_fill(&p, size::CONTROL_MD / 2., false))
+            .child(hover_fill(&p, size::CONTROL_MD / 2., false).smooth())
             .child(Icon::new(IconName::ArrowDown).size(px(size::ICON_MD)))
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_latest(window, cx)));
         let row = div().absolute().left_0().right_0().bottom(px(space::L)).flex().justify_center().child(button);

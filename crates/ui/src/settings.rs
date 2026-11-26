@@ -894,7 +894,6 @@ impl SettingsView {
                 .child(crate::design::framed(
                     ("browse-install", index),
                     Button::new(("browse-install", index))
-                        .outline()
                         .control_xs()
                         .label(t!("settings.plugin_browse_install").to_string())
                         .accessibility_label(t!("settings.plugin_browse_install_named", id = entry.id).to_string())
@@ -916,7 +915,6 @@ impl SettingsView {
                     .child(crate::design::framed(
                         "browse-search",
                         Button::new("browse-search")
-                            .outline()
                             .label(t!("settings.plugin_browse_search").to_string())
                             .on_click(cx.listener(|this, _, _, cx| this.browse(cx))),
                     )),
@@ -1540,7 +1538,6 @@ impl SettingsView {
                             .child(crate::design::framed(
                                 SharedString::from(format!("{element_id}-save")),
                                 Button::new(SharedString::from(format!("{element_id}-save")))
-                                    .outline()
                                     .label(t!("settings.save").to_string())
                                     .accessibility_label(t!("settings.plugin_save_field", name = label).to_string())
                                     .on_click(cx.listener(move |this, _, _, cx| this.submit_plugin_field(row_index, field_index, cx))),
@@ -1570,7 +1567,6 @@ impl SettingsView {
                     crate::design::framed(
                         "open-instructions",
                         Button::new("open-instructions")
-                            .outline()
                             .control_sm()
                             .label(t!("settings.open_instructions").to_string())
                             .on_click(cx.listener(|this, _, _, cx| this.open_global_instructions(cx))),
@@ -1583,7 +1579,6 @@ impl SettingsView {
                     crate::design::framed(
                         "open-skills",
                         Button::new("open-skills")
-                            .outline()
                             .control_sm()
                             .label(t!("settings.open_skills").to_string())
                             .on_click(cx.listener(|this, _, _, cx| this.open_skills_dir(cx))),
@@ -1659,7 +1654,7 @@ impl SettingsView {
                                 crate::design::framed(
                                     "open-plugins-dir",
                                     Button::new("open-plugins-dir")
-                                        .ghost()
+                                        .subtle(cx)
                                         .control_sm()
                                         .flex_none()
                                         .icon(IconName::FolderOpen)
@@ -1715,7 +1710,7 @@ impl SettingsView {
                                 ("mcp-login", index),
                                 Button::new(("mcp-login", index))
                                     .control_xs()
-                                    .when(sign_out, |button| button.ghost())
+                                    .when(sign_out, |button| button.subtle(cx))
                                     .when(!sign_out, |button| button.primary())
                                     .label(if sign_out { t!("settings.mcp_logout") } else { t!("settings.mcp_login") }.to_string())
                                     .on_click(cx.listener(move |this, _, _, cx| this.mcp_sign_in(name.clone(), sign_out, cx))),
@@ -1724,7 +1719,7 @@ impl SettingsView {
                         .child(crate::design::framed(
                             ("mcp-reconnect", index),
                             Button::new(("mcp-reconnect", index))
-                                .ghost()
+                                .subtle(cx)
                                 .control_xs()
                                 .label(t!("settings.mcp_reconnect").to_string())
                                 .accessibility_label(t!("settings.mcp_reconnect_server", name = server.name).to_string())
@@ -1733,7 +1728,7 @@ impl SettingsView {
                         .child(crate::design::framed(
                             ("mcp-log", index),
                             Button::new(("mcp-log", index))
-                                .ghost()
+                                .subtle(cx)
                                 .control_xs()
                                 .label(if log_open { t!("settings.plugin_logs_hide") } else { t!("settings.plugin_logs") }.to_string())
                                 .accessibility_label(t!("settings.plugin_logs_named", name = server.name).to_string())
@@ -1782,7 +1777,7 @@ impl SettingsView {
                     .child(crate::design::framed(
                         ("remove-mcp", index),
                         Button::new(("remove-mcp", index))
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .label(t!("settings.mcp_remove").to_string())
                             .accessibility_label(t!("settings.mcp_remove_server", name = server.name).to_string())
@@ -1838,7 +1833,6 @@ impl SettingsView {
                                     crate::design::framed(
                                         "cancel-mcp",
                                         Button::new("cancel-mcp")
-                                            .outline()
                                             .label(t!("settings.cancel").to_string())
                                             .on_click(cx.listener(|this, _, window, cx| this.close_mcp_form(window, cx))),
                                     ),
@@ -1876,14 +1870,14 @@ impl SettingsView {
                             crate::design::framed_handle(
                                 (self.mcp_add_focus).clone(),
                                 Button::new("open-mcp-form")
-                                    .outline()
                                     .control_sm()
                                     .icon(IconName::Plus)
                                     .label(t!("a11y.mcp_add_server").to_string())
                                     .accessibility_label(in_section(&section, t!("a11y.mcp_add_server")))
                                     .track_focus(&self.mcp_add_focus)
                                     .on_click(cx.listener(|this, _, window, cx| this.open_mcp_form(window, cx))),
-                            ),
+                            )
+                            .tint("open-mcp-form"),
                         ))
                     },
                 ))
@@ -2120,7 +2114,6 @@ impl SettingsView {
                     .child(crate::design::framed(
                         ("update-plugin", index),
                         Button::new(("update-plugin", index))
-                            .outline()
                             .control_xs()
                             .label(t!("settings.plugin_update").to_string())
                             .on_click(cx.listener(move |this, _, window, cx| this.update_plugin(id, window, cx))),
@@ -2131,7 +2124,7 @@ impl SettingsView {
                 h_flex().child(crate::design::framed(
                     ("rollback-plugin", index),
                     Button::new(("rollback-plugin", index))
-                        .ghost()
+                        .subtle(cx)
                         .control_xs()
                         .label(t!("settings.plugin_rollback", version = version).to_string())
                         .on_click(cx.listener(move |this, _, window, cx| this.rollback_plugin(id, window, cx))),
@@ -2170,7 +2163,7 @@ impl SettingsView {
                     .child(crate::design::framed(
                         ("unlink-plugin", index),
                         Button::new(("unlink-plugin", index))
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .label(t!("settings.plugin_unlink").to_string())
                             .on_click(cx.listener(move |this, _, _, cx| this.unlink_plugin(id, cx))),
@@ -2186,7 +2179,7 @@ impl SettingsView {
                     crate::design::framed(
                         ("plugin-details", index),
                         Button::new(("plugin-details", index))
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .icon(if expanded { IconName::ChevronUp } else { IconName::ChevronDown })
                             .label(if expanded { t!("settings.details_hide") } else { t!("settings.details_show") }.to_string())
@@ -2224,7 +2217,6 @@ impl SettingsView {
                                 SharedString::from(format!("plugin-{index}-secret-save-{secret_index}")),
                                 Button::new(SharedString::from(format!("plugin-{index}-secret-save-{secret_index}")))
                                     .control_sm()
-                                    .outline()
                                     .label(t!("settings.save").to_string())
                                     .on_click(
                                         cx.listener(move |this, _, window, cx| this.save_plugin_secret(index, secret_index, window, cx)),
@@ -2257,7 +2249,7 @@ impl SettingsView {
             crate::design::framed(
                 ("plugin-log", index),
                 Button::new(("plugin-log", index))
-                    .ghost()
+                    .subtle(cx)
                     .control_xs()
                     .label(if open { t!("settings.plugin_logs_hide") } else { t!("settings.plugin_logs") }.to_string())
                     .accessibility_label(t!("settings.plugin_logs_named", name = id).to_string())
@@ -2304,21 +2296,18 @@ impl SettingsView {
                 .child(crate::design::framed(
                     "create-plugin",
                     Button::new("create-plugin")
-                        .outline()
                         .label(t!("settings.plugin_create").to_string())
                         .on_click(cx.listener(|this, _, window, cx| this.create_plugin(window, cx))),
                 ))
                 .child(crate::design::framed(
                     "install-plugin-package",
                     Button::new("install-plugin-package")
-                        .outline()
                         .label(t!("settings.plugin_install_package").to_string())
                         .on_click(cx.listener(|this, _, window, cx| this.install_plugin(InstallSource::Package, window, cx))),
                 ))
                 .child(crate::design::framed(
                     "install-plugin-folder",
                     Button::new("install-plugin-folder")
-                        .outline()
                         .label(t!("settings.plugin_install_folder").to_string())
                         .on_click(cx.listener(|this, _, window, cx| this.install_plugin(InstallSource::Folder, window, cx))),
                 )),
@@ -2358,7 +2347,6 @@ impl SettingsView {
                 .child(crate::design::framed(
                     ("edit-shortcut", index),
                     Button::new(("edit-shortcut", index))
-                        .outline()
                         .control_xs()
                         .label(if recording { t!("settings.cancel") } else { t!("settings.change") }.to_string())
                         // 读出现在的按键：只听“修改快捷键”不知道它现在是什么。
@@ -2445,18 +2433,22 @@ impl SettingsView {
                     .children(
                         self.shortcut_error.clone().map(|error| motion::fade_in(hint(error, Tone::Danger, &p), "shortcut-error-enter")),
                     )
-                    .child(h_flex().child(reveal(
-                        "reveal-reset-shortcuts",
-                        crate::design::framed(
-                            "reset-shortcuts",
-                            Button::new("reset-shortcuts").ghost().control_sm().label(t!("settings.reset_shortcuts").to_string()).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.recording = None;
-                                    this.save_shortcut(|bindings| bindings.bindings.clear(), cx);
-                                }),
+                    .child(
+                        h_flex().child(reveal(
+                            "reveal-reset-shortcuts",
+                            crate::design::framed(
+                                "reset-shortcuts",
+                                Button::new("reset-shortcuts")
+                                    .subtle(cx)
+                                    .control_sm()
+                                    .label(t!("settings.reset_shortcuts").to_string())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.recording = None;
+                                        this.save_shortcut(|bindings| bindings.bindings.clear(), cx);
+                                    })),
                             ),
-                        ),
-                    ))),
+                        )),
+                    ),
             )
             .into_any_element()
     }
@@ -2677,7 +2669,6 @@ impl SettingsView {
                                         ("edit-provider", index),
                                         edit_focus.clone(),
                                         Button::new(("edit-provider", index))
-                                            .outline()
                                             .control_sm()
                                             .label(t!("settings.edit").to_string())
                                             // 名称里带上状态：Tab 到按钮上就知道这个提供商能不能用。
@@ -2724,13 +2715,13 @@ impl SettingsView {
                                 crate::design::framed_handle(
                                     (self.add_provider_focus).clone(),
                                     Button::new("add-provider")
-                                        .outline()
                                         .control_sm()
                                         .icon(IconName::Plus)
                                         .label(t!("settings.add_provider").to_string())
                                         .track_focus(&self.add_provider_focus)
                                         .on_click(cx.listener(|this, _, window, cx| this.add_provider(window, cx))),
-                                ),
+                                )
+                                .tint("add-provider"),
                             ))
                         },
                     ))
@@ -2762,7 +2753,6 @@ impl SettingsView {
                         crate::design::framed(
                             ("add-plugin-provider", index),
                             Button::new(("add-plugin-provider", index))
-                                .outline()
                                 .control_sm()
                                 .label(t!("settings.add_provider").to_string())
                                 .accessibility_label(t!("settings.plugin_provider_add_named", name = name).to_string())
@@ -2955,7 +2945,6 @@ impl Render for SettingsView {
             .child(crate::design::framed(
                 "open-config",
                 Button::new("open-config")
-                    .outline()
                     .control_sm()
                     .label(t!("settings.open_config").to_string())
                     .on_click(cx.listener(|this, _, _, cx| this.open_config_file(cx))),
@@ -2963,7 +2952,7 @@ impl Render for SettingsView {
             .child(crate::design::framed(
                 "close-settings",
                 Button::new("close-settings")
-                    .ghost()
+                    .subtle(cx)
                     .control_sm()
                     .icon(IconName::Close)
                     .accessibility_label(t!("settings.close").to_string())

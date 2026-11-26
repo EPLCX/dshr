@@ -1,6 +1,7 @@
 //! 动效。规则见 `docs/design.md` §5.5；这里是唯一的实现位置，视图不直接写时长、缓动和位移。
 //!
-//! 基调：动效只服务于控件反馈和浮层出现。导航、换页、布局变化即时完成；悬停、按下即时生效；
+//! 基调：动效只服务于控件反馈和浮层出现。导航、换页、布局变化即时完成；按钮的悬停、按下以 `FAST` 渐变，
+//! 列表项即时；
 //! 任何动画都不推迟内容出现（没有延迟、没有错峰），不用过冲；浮层关上时立即移除，不挡输入。
 //! 任何信息都不能只靠动画表达。
 //! 开启“减少动态效果”时没有动画：元素直接以最终状态出现、消失；循环动画停在起始帧。
@@ -171,11 +172,142 @@ pub fn pop<E: Styled>(element: E, from: Edge, distance: f32, phase: Phase, shado
 
 // ---- 悬停、按下、选中的底色 ----
 
+/// 一个 0–1 的值朝目标过渡（标准曲线）。没有时长（或减少动态效果）时直接到目标。
+#[derive(Debug, Clone, Copy)]
+struct Fade {
+    from: f32,
+    to: f32,
+    started: Instant,
+}
+
+impl Fade {
+    fn at(value: f32, now: Instant) -> Self {
+        Self { from: value, to: value, started: now }
+    }
+
+    fn value(&self, now: Instant, duration: Option<Duration>) -> f32 {
+        let Some(duration) = duration.filter(|duration| !duration.is_zero()) else { return self.to };
+        let t = now.saturating_duration_since(self.started).as_secs_f32() / duration.as_secs_f32();
+        self.from + (self.to - self.from) * standard(t)
+    }
+
+    /// 换目标（从当前值接着走），返回现在的值。
+    fn toward(&mut self, target: f32, now: Instant, duration: Option<Duration>) -> f32 {
+        if self.to != target {
+            self.from = self.value(now, duration);
+            self.to = target;
+            self.started = now;
+        }
+        self.value(now, duration)
+    }
+}
+
+/// 悬停层、按下层（叠在控件上的半透明底色）跨帧的状态：指针是否在上面、是否按着，以及两层各自的过渡。
+/// [`Highlight`] 和组件库按钮外面的 `FocusFrame` 共用。克隆共享同一份状态。
+#[derive(Debug, Clone, Default)]
+pub struct Tint(Rc<TintInner>);
+
+#[derive(Debug)]
+struct TintInner {
+    hovered: Cell<bool>,
+    pressed: Cell<bool>,
+    hover: Cell<Fade>,
+    press: Cell<Fade>,
+}
+
+impl Default for TintInner {
+    fn default() -> Self {
+        let now = Instant::now();
+        Self {
+            hovered: Cell::new(false),
+            pressed: Cell::new(false),
+            hover: Cell::new(Fade::at(0., now)),
+            press: Cell::new(Fade::at(0., now)),
+        }
+    }
+}
+
+impl Tint {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// paint 里调用（指针是否在上面要到 paint 时才准）：按指针现在的状态推进两层的过渡，画悬停层、按下层
+    /// （按下层逐渐盖过悬停层），并登记指针进出、按下松开时重画所在视图。
+    /// `smooth` 时两层以 [`FAST`] 渐变（减少动态效果时即时），过渡中每帧重画，结束即停。
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint(
+        &self,
+        bounds: Bounds<Pixels>,
+        radius: Pixels,
+        smooth: bool,
+        (hover_color, pressed_color): (Option<Hsla>, Option<Hsla>),
+        hitbox: &Hitbox,
+        window: &mut Window,
+        cx: &App,
+    ) {
+        let state = &self.0;
+        // 触屏上没有悬停：点过之后 GPUI 记的指针位置还留在手指离开的地方，不能让底色一直亮着。
+        let over = hitbox.is_hovered(window) && !window.last_input_was_touch();
+        state.hovered.set(over);
+        let down = over && state.pressed.get() && pressed_color.is_some();
+        let duration = (smooth && !cx.reduce_motion()).then_some(FAST);
+        let now = Instant::now();
+        let step = |cell: &Cell<Fade>, target: f32| {
+            let mut fade = cell.get();
+            let value = fade.toward(target, now, duration);
+            cell.set(fade);
+            (value, fade.to)
+        };
+        let (hover, hover_to) = step(&state.hover, if over { 1. } else { 0. });
+        let (press, press_to) = step(&state.press, if down { 1. } else { 0. });
+        if hover != hover_to || press != press_to {
+            window.request_animation_frame();
+        }
+        let hover_strength = if pressed_color.is_some() { hover * (1. - press) } else { hover };
+        if let Some(color) = hover_color.filter(|_| hover_strength > 0.) {
+            window.paint_quad(fill(bounds, color.opacity(hover_strength)).corner_radii(radius));
+        }
+        if let Some(color) = pressed_color.filter(|_| press > 0.) {
+            window.paint_quad(fill(bounds, color.opacity(press)).corner_radii(radius));
+        }
+        let view = window.current_view();
+        {
+            let (hitbox, tint) = (hitbox.clone(), self.clone());
+            window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture {
+                    let now = hitbox.is_hovered(window) && !window.last_input_was_touch();
+                    if now != tint.0.hovered.get() {
+                        tint.0.hovered.set(now);
+                        cx.notify(view);
+                    }
+                }
+            });
+        }
+        if pressed_color.is_some() {
+            let (hitbox, tint) = (hitbox.clone(), self.clone());
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left && hitbox.is_hovered(window) {
+                    tint.0.pressed.set(true);
+                    cx.notify(view);
+                }
+            });
+            let tint = self.clone();
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left && tint.0.pressed.get() {
+                    tint.0.pressed.set(false);
+                    cx.notify(view);
+                }
+            });
+        }
+    }
+}
+
 /// 悬停、按下、选中时的底色，画在控件的最底层。放在控件的第一个子元素（铺满控件），控件本身不再设
 /// `bg` / `hover`。悬停按这一层自己的范围判断，被别的浮层盖住时不算悬停。
 ///
-/// 悬停、按下即时生效（与 Chrome、VS Code 一致，也不会因为一次悬停让整个视图连续重绘）；
-/// 选中状态的切换可以用 [`Highlight::animate`] 要求过渡（如发送与停止之间的底色交替）。
+/// 悬停、按下默认即时生效（列表行、菜单项：键盘上下移动时不拖影）；按钮用 [`Highlight::smooth`]
+/// 以 [`FAST`] 渐变。选中状态的切换可以用 [`Highlight::animate`] 要求过渡（如发送与停止之间的底色交替）。
 pub struct Highlight {
     id: ElementId,
     /// 选中（`active`）时的底色。
@@ -188,11 +320,22 @@ pub struct Highlight {
     active: bool,
     outset: Pixels,
     transition: Option<Duration>,
+    smooth: bool,
 }
 
 /// 见 [`Highlight`]。`active` 时（选中、菜单打开）一直显示 `color`；悬停时也铺 `color`。
 pub fn highlight(id: impl Into<ElementId>, color: Hsla, radius: f32, active: bool) -> Highlight {
-    Highlight { id: id.into(), color, hover: Some(color), pressed: None, radius: px(radius), active, outset: px(0.), transition: None }
+    Highlight {
+        id: id.into(),
+        color,
+        hover: Some(color),
+        pressed: None,
+        radius: px(radius),
+        active,
+        outset: px(0.),
+        transition: None,
+        smooth: false,
+    }
 }
 
 impl Highlight {
@@ -220,6 +363,12 @@ impl Highlight {
         self
     }
 
+    /// 悬停、按下的底色以 [`FAST`] 渐变（按钮用；列表行、菜单项保持即时）。
+    pub fn smooth(mut self) -> Self {
+        self.smooth = true;
+        self
+    }
+
     /// 向外多铺这么宽：绝对定位从边框内侧算起，控件有边框（如焦点框）时用它铺满整个控件。
     pub fn outset(mut self, outset: f32) -> Self {
         self.outset = px(outset);
@@ -227,30 +376,18 @@ impl Highlight {
     }
 }
 
-/// [`Highlight`] 跨帧的状态：选中色的过渡进度，指针是否在上面、是否按着。
+/// [`Highlight`] 跨帧的状态：选中色的过渡，悬停层、按下层。
 #[derive(Debug, Clone)]
 struct HighlightState {
-    from: f32,
-    to: f32,
-    started: Instant,
-    hovered: Rc<Cell<bool>>,
-    pressed: Rc<Cell<bool>>,
-}
-
-impl HighlightState {
-    fn value(&self, now: Instant, duration: Option<Duration>) -> f32 {
-        let Some(duration) = duration.filter(|duration| !duration.is_zero()) else { return self.to };
-        let t = now.saturating_duration_since(self.started).as_secs_f32() / duration.as_secs_f32();
-        self.from + (self.to - self.from) * standard(t)
-    }
+    active: Fade,
+    tint: Tint,
 }
 
 /// [`Highlight`] 在 prepaint 和 paint 之间传的东西。
 pub struct HighlightPaint {
     hitbox: Hitbox,
     value: f32,
-    hovered: Rc<Cell<bool>>,
-    pressed: Rc<Cell<bool>>,
+    tint: Tint,
 }
 
 impl IntoElement for Highlight {
@@ -296,28 +433,16 @@ impl Element for Highlight {
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let target = if self.active { 1. } else { 0. };
         let transition = if cx.reduce_motion() { None } else { self.transition };
-        let (value, hovered, pressed) =
-            window.with_element_state(global_id.expect("Highlight 总有 id"), |state: Option<HighlightState>, window| {
-                let now = Instant::now();
-                let mut state = state.unwrap_or_else(|| HighlightState {
-                    from: target,
-                    to: target,
-                    started: now,
-                    hovered: Rc::default(),
-                    pressed: Rc::default(),
-                });
-                if state.to != target {
-                    state.from = state.value(now, transition);
-                    state.to = target;
-                    state.started = now;
-                }
-                let value = state.value(now, transition);
-                if value != target {
-                    window.request_animation_frame();
-                }
-                ((value, state.hovered.clone(), state.pressed.clone()), state)
-            });
-        HighlightPaint { hitbox, value, hovered, pressed }
+        let (value, tint) = window.with_element_state(global_id.expect("Highlight 总有 id"), |state: Option<HighlightState>, window| {
+            let now = Instant::now();
+            let mut state = state.unwrap_or_else(|| HighlightState { active: Fade::at(target, now), tint: Tint::new() });
+            let value = state.active.toward(target, now, transition);
+            if value != target {
+                window.request_animation_frame();
+            }
+            ((value, state.tint.clone()), state)
+        });
+        HighlightPaint { hitbox, value, tint }
     }
 
     fn paint(
@@ -328,54 +453,14 @@ impl Element for Highlight {
         _: &mut (),
         state: &mut HighlightPaint,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
-        let HighlightPaint { hitbox, value, hovered, pressed } = state;
+        let HighlightPaint { hitbox, value, tint } = state;
         if *value > 0. {
             window.paint_quad(fill(bounds, self.color.opacity(*value)).corner_radii(self.radius));
         }
-        // 触屏上没有悬停：点过之后 GPUI 记的指针位置还留在手指离开的地方，不能让底色一直亮着。
-        let over = hitbox.is_hovered(window) && !window.last_input_was_touch();
         if self.hover.is_some() || self.pressed.is_some() {
-            hovered.set(over);
-            let overlay = match (pressed.get() && over, self.pressed, self.hover) {
-                (true, Some(color), _) => Some(color),
-                (_, _, Some(color)) if over => Some(color),
-                _ => None,
-            };
-            if let Some(color) = overlay {
-                window.paint_quad(fill(bounds, color).corner_radii(self.radius));
-            }
-            // 指针进出这一块、按下松开时重画所在的视图（缓存的视图不会自己重画）。
-            let view = window.current_view();
-            {
-                let (hitbox, hovered) = (hitbox.clone(), hovered.clone());
-                window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
-                    if phase == DispatchPhase::Capture {
-                        let now = hitbox.is_hovered(window) && !window.last_input_was_touch();
-                        if now != hovered.get() {
-                            hovered.set(now);
-                            cx.notify(view);
-                        }
-                    }
-                });
-            }
-            if self.pressed.is_some() {
-                let (hitbox, down) = (hitbox.clone(), pressed.clone());
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left && hitbox.is_hovered(window) {
-                        down.set(true);
-                        cx.notify(view);
-                    }
-                });
-                let up = pressed.clone();
-                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left && up.get() {
-                        up.set(false);
-                        cx.notify(view);
-                    }
-                });
-            }
+            tint.paint(bounds, self.radius, self.smooth, (self.hover, self.pressed), hitbox, window, cx);
         }
     }
 }
@@ -617,6 +702,23 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
+    }
+
+    /// 按钮的悬停层：有时长时从当前值渐变，`FAST` 后到达目标；中途换目标从当前值接着走；没有时长时直接到目标。
+    #[test]
+    fn tint_fades_toward_its_target() {
+        let start = std::time::Instant::now();
+        let mut fade = super::Fade::at(0., start);
+        assert_eq!(fade.toward(1., start, Some(FAST)), 0.);
+        let halfway = fade.toward(1., start + FAST / 2, Some(FAST));
+        assert!(halfway > 0. && halfway < 1., "{halfway}");
+        // 鼠标中途移出：从现在的值往回走，不跳。
+        let back = fade.toward(0., start + FAST / 2, Some(FAST));
+        assert!((back - halfway).abs() < 1e-6, "{back} {halfway}");
+        assert_eq!(fade.toward(0., start + FAST / 2 + FAST, Some(FAST)), 0.);
+        // 列表行、减少动态效果：即时。
+        let mut instant = super::Fade::at(0., start);
+        assert_eq!(instant.toward(1., start, None), 1.);
     }
 
     #[test]

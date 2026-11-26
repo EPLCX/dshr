@@ -551,8 +551,8 @@ impl InstallDialog {
                 h_flex()
                     .gap(px(space::S))
                     .justify_end()
-                    .child(crate::design::framed_handle(self.cancel_focus.clone(), cancel))
-                    .child(crate::design::framed("install-allow", install)),
+                    .child(crate::design::framed_handle(self.cancel_focus.clone(), cancel).tint("install-deny"))
+                    .child(crate::design::framed("install-allow", install).inert(locked.is_some() || blocked)),
             )
     }
 }

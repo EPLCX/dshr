@@ -1,5 +1,6 @@
 //! 欢迎窗（600×700）：首次启动、还没有可用凭据时显示，完成后才打开工作区窗口。
 
+use crate::design::ControlSize as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -161,15 +162,17 @@ impl Render for WelcomeView {
                 "reveal-welcome-sign-in",
                 v_flex()
                     .gap(px(space::S))
-                    .child(crate::design::framed(
-                        "welcome-sign-in",
-                        Button::new("welcome-sign-in")
-                            .w_full()
-                            .outline()
-                            .label(t!("welcome.sign_in").to_string())
-                            .disabled(self.sign_in.is_some())
-                            .on_click(cx.listener(|this, _, window, cx| this.sign_in_with_account(window, cx))),
-                    ))
+                    .child(
+                        crate::design::framed(
+                            "welcome-sign-in",
+                            Button::new("welcome-sign-in")
+                                .w_full()
+                                .label(t!("welcome.sign_in").to_string())
+                                .disabled(self.sign_in.is_some())
+                                .on_click(cx.listener(|this, _, window, cx| this.sign_in_with_account(window, cx))),
+                        )
+                        .inert(self.sign_in.is_some()),
+                    )
                     .children(
                         self.sign_in
                             .is_some()
@@ -222,7 +225,7 @@ impl Render for WelcomeView {
                     .child(crate::design::framed(
                         "welcome-later",
                         Button::new("welcome-later")
-                            .ghost()
+                            .subtle(cx)
                             .w_full()
                             .label(t!("welcome.later").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.set_up_later(window, cx))),

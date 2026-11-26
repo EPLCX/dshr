@@ -42,7 +42,7 @@ use std::sync::Arc;
 use dshr_agent::SessionSummary;
 use dshr_config::{MotionPreference, ThemePreference};
 use gpui_kit::base::FocusTrapElement as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -1640,10 +1640,11 @@ impl WorkspaceView {
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
         let trigger_focus = crate::design::menu_trigger_focus(("session-menu", index), window, cx);
         let trigger = crate::design::framed_trigger_with(
+            ("session-more", index),
             trigger_focus.clone(),
             Button::new(("session-more", index))
                 .track_focus(&trigger_focus)
-                .ghost()
+                .subtle(cx)
                 .control_xs()
                 .icon(IconName::Ellipsis)
                 .accessibility_label(t!("sidebar.session_actions", title = session.title).to_string()),
@@ -1848,7 +1849,7 @@ impl WorkspaceView {
             row = row.child(crate::design::framed(
                 ("workspace-new", index),
                 Button::new(("workspace-new", index))
-                    .ghost()
+                    .subtle(cx)
                     .control_xs()
                     .icon(IconName::Plus)
                     .tooltip(path.display().to_string())
@@ -1859,7 +1860,7 @@ impl WorkspaceView {
                 row = row.child(crate::design::framed(
                     ("workspace-remove", index),
                     Button::new(("workspace-remove", index))
-                        .ghost()
+                        .subtle(cx)
                         .control_xs()
                         .icon(IconName::Close)
                         .accessibility_label(t!("sidebar.remove_workspace", name = name).to_string())
@@ -1959,7 +1960,7 @@ impl WorkspaceView {
         crate::design::framed(
             id,
             Button::new(id)
-                .ghost()
+                .subtle(cx)
                 .icon(icon)
                 .tooltip(label.clone())
                 .accessibility_label(label)
@@ -2020,7 +2021,7 @@ impl WorkspaceView {
                 crate::design::framed(
                     item.id,
                     Button::new(item.id)
-                        .ghost()
+                        .subtle(cx)
                         .icon(item.icon.clone())
                         .tooltip((item.label)())
                         .accessibility_label((item.label)())
@@ -2038,7 +2039,7 @@ impl WorkspaceView {
                 crate::design::framed(
                     id.clone(),
                     Button::new(id)
-                        .ghost()
+                        .subtle(cx)
                         .icon(plugin_page::entry_icon(entry.entry.icon.as_deref()))
                         .tooltip(entry.entry.label.clone())
                         .accessibility_label(entry.entry.label.clone())
@@ -2240,7 +2241,7 @@ impl WorkspaceView {
                     .child(crate::design::framed(
                         "add-workspace",
                         Button::new("add-workspace")
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .icon(IconName::FolderOpen)
                             .tooltip(t!("sidebar.add_workspace").to_string())
@@ -2415,7 +2416,7 @@ impl Render for WorkspaceView {
                         .child(crate::design::framed(
                             "close-plugin-page",
                             Button::new("close-plugin-page")
-                                .ghost()
+                                .subtle(cx)
                                 .control_sm()
                                 .icon(IconName::Close)
                                 .accessibility_label(t!("settings.close").to_string())

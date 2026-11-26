@@ -555,7 +555,10 @@ impl Render for DropdownState {
             .when(self.disabled.is_none(), |trigger| {
                 // 悬停、按下时叠一层底色（画在内容下面），和按钮一样即时生效。
                 trigger.cursor_pointer().child(
-                    motion::highlight("trigger-fill", transparent_black(), radius::MD, false).hover_color(p.hover).pressed_color(p.pressed),
+                    motion::highlight("trigger-fill", transparent_black(), radius::MD, false)
+                        .hover_color(p.hover)
+                        .pressed_color(p.pressed)
+                        .smooth(),
                 )
             })
             .when(self.open, |trigger| trigger.border_color(ring))

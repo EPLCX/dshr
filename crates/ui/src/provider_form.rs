@@ -575,7 +575,7 @@ impl ProviderForm {
                         crate::design::framed(
                             "sign-out",
                             Button::new("sign-out")
-                                .ghost()
+                                .subtle(cx)
                                 .control_xs()
                                 .label(t!("settings.sign_out").to_string())
                                 .on_click(cx.listener(|this, _, window, cx| this.sign_out_account(window, cx))),
@@ -590,12 +590,12 @@ impl ProviderForm {
                         crate::design::framed(
                             "sign-in",
                             Button::new("sign-in")
-                                .outline()
                                 .control_sm()
                                 .label(t!("settings.sign_in_with_account").to_string())
                                 .disabled(signing_in)
                                 .on_click(cx.listener(|this, _, window, cx| this.sign_in_account(window, cx))),
-                        ),
+                        )
+                        .inert(signing_in),
                     ))
                     .children(signing_in.then(|| hint(t!("settings.signing_in").to_string(), Tone::Neutral, &p)))
                     .into_any_element()
@@ -631,7 +631,7 @@ impl ProviderForm {
                     crate::design::framed(
                         "clear-key",
                         Button::new("clear-key")
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .label(t!("settings.clear_key").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.clear_key(window, cx))),
@@ -721,7 +721,7 @@ impl ProviderForm {
                             .child(crate::design::framed(
                                 ("remove-model", index),
                                 Button::new(("remove-model", index))
-                                    .ghost()
+                                    .subtle(cx)
                                     .control_sm()
                                     .icon(IconName::Close)
                                     .accessibility_label(row_label(t!("settings.remove_model").to_string()))
@@ -753,13 +753,14 @@ impl ProviderForm {
                         crate::design::framed(
                             "fetch-models",
                             Button::new("fetch-models")
-                                .ghost()
+                                .subtle(cx)
                                 .control_sm()
                                 .icon(IconName::RefreshCw)
                                 .label(fetch_label.to_string())
                                 .disabled(matches!(self.fetch, Fetch::Running))
                                 .on_click(cx.listener(|this, _, window, cx| this.fetch_models(window, cx))),
-                        ),
+                        )
+                        .inert(matches!(self.fetch, Fetch::Running)),
                     )),
             )
             .children(fetch_status)
@@ -770,7 +771,6 @@ impl ProviderForm {
                     crate::design::framed(
                         "add-model",
                         Button::new("add-model")
-                            .outline()
                             .control_sm()
                             .icon(IconName::Plus)
                             .label(t!("settings.add_model").to_string())
@@ -895,7 +895,7 @@ impl Render for ProviderForm {
                 footer.child(crate::design::framed(
                     "remove-provider",
                     Button::new("remove-provider")
-                        .ghost()
+                        .subtle(cx)
                         .icon(IconName::Delete)
                         .label(t!("settings.delete_provider").to_string())
                         .on_click(cx.listener(|this, _, _, cx| this.remove_provider(cx))),
@@ -909,20 +909,22 @@ impl Render for ProviderForm {
                 footer.child(crate::design::framed(
                     "cancel-provider",
                     Button::new("cancel-provider")
-                        .outline()
                         .label(t!("settings.cancel").to_string())
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(FormEvent::Cancelled))),
                 ))
             })
-            .child(crate::design::framed_handle(
-                (self.save_focus).clone(),
-                Button::new("save-provider")
-                    .primary()
-                    .label(t!("settings.save").to_string())
-                    .accessibility_label(self.label(t!("settings.save")))
-                    .track_focus(&self.save_focus)
-                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
-            ));
+            .child(
+                crate::design::framed_handle(
+                    (self.save_focus).clone(),
+                    Button::new("save-provider")
+                        .primary()
+                        .label(t!("settings.save").to_string())
+                        .accessibility_label(self.label(t!("settings.save")))
+                        .track_focus(&self.save_focus)
+                        .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                )
+                .tint("save-provider"),
+            );
         // 表单里按 Esc 收起表单（编辑时、自定义时有“取消”），而不是关掉整个设置弹窗。
         div()
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {

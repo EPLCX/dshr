@@ -327,15 +327,20 @@ impl PluginPageView {
                 let button = Button::new(id("")).control_sm().label(string("label")).disabled(self.busy);
                 let button = match node.get("variant").and_then(Value::as_str) {
                     Some("primary") => button.primary(),
-                    Some("ghost") => button.ghost(),
+                    Some("ghost") => button.subtle(cx),
                     Some("danger") => button.danger(),
-                    _ => button.outline(),
+                    _ => button,
                 };
                 div()
-                    .child(crate::design::framed(
-                        id(""),
-                        button.on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx))),
-                    ))
+                    .child(
+                        crate::design::framed(
+                            id(""),
+                            button.on_click(
+                                cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)),
+                            ),
+                        )
+                        .inert(self.busy),
+                    )
                     .into_any_element()
             }
             "input" => {
@@ -442,7 +447,7 @@ impl PluginPageView {
                     let value = option.as_str().or_else(|| option.get("value").and_then(Value::as_str)).unwrap_or_default().to_owned();
                     let text = option.get("label").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| value.clone());
                     let button = Button::new(id(&format!("-option-{index}"))).control_sm().label(text).disabled(self.busy);
-                    let button = if value == current { button.primary() } else { button.outline() };
+                    let button = if value == current { button.primary() } else { button };
                     let (select, action) = (select.clone(), action.clone());
                     crate::design::framed(
                         id(&format!("-option-{index}")),
@@ -456,6 +461,7 @@ impl PluginPageView {
                             }
                         })),
                     )
+                    .inert(self.busy)
                 });
                 v_flex()
                     .gap(px(space::XS))
@@ -472,7 +478,7 @@ impl PluginPageView {
                     id(""),
                     Button::new(id(""))
                         .control_sm()
-                        .ghost()
+                        .subtle(cx)
                         .icon(IconName::ExternalLink)
                         .label(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1054,7 +1060,7 @@ impl Render for PluginPageView {
                     crate::design::framed(
                         "plugin-page-retry",
                         Button::new("plugin-page-retry")
-                            .ghost()
+                            .subtle(cx)
                             .control_xs()
                             .label(t!("plugin_page.retry").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))),

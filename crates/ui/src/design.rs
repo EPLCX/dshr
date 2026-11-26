@@ -782,18 +782,56 @@ impl Element for OutlineLayer {
 /// - 组件库按钮：[`framed`]，传和 `Button::new` 一样的 id。按钮按这个 id 在元素状态里存焦点句柄（在 GPUI 给无状态
 ///   组件加的、以类型名为 id 的那一层里），这一层不占 id，在同样的作用域按同一个 id 取到的就是同一个句柄；
 /// - 输入框和给了 `track_focus` 的按钮：[`framed_handle`]，直接给句柄。
+///
+/// 包着的是按钮时，这一层还在按钮上面叠悬停层、按下层，以 `FAST` 渐变（见 [`motion::Tint`]）：组件库按钮自己的
+/// 悬停、按下是即时换色，没法改成渐变，所以 [`control_theme`] 把它们设成与常态相同、ghost 按钮改用 [`ControlSize::subtle`]，
+/// 变色都由这一层画。[`framed`]、[`framed_with`]、菜单触发按钮默认叠；[`framed_handle`] 包的多是输入框，要叠时调 [`FocusFrame::tint`]。
 pub struct FocusFrame {
     key: Option<ElementId>,
     handle: Option<FocusHandle>,
     child: AnyElement,
+    /// 悬停层、按下层的状态存在哪个 id 下；`None` 表示不叠。
+    tint: Option<ElementId>,
+    /// 按钮不可用：不叠悬停层、按下层。
+    inert: bool,
+    /// 菜单打开着：一直铺一层按下色，表示“展开中”。
+    open: bool,
+    tint_state: Option<Entity<motion::Tint>>,
+}
+
+fn tint_id(id: &ElementId) -> ElementId {
+    ElementId::NamedChild(std::sync::Arc::new(id.clone()), "tint".into())
 }
 
 pub fn framed(id: impl Into<ElementId>, child: impl IntoElement) -> FocusFrame {
-    FocusFrame { key: Some(id.into()), handle: None, child: child.into_any_element() }
+    let id = id.into();
+    FocusFrame {
+        tint: Some(tint_id(&id)),
+        key: Some(id),
+        handle: None,
+        child: child.into_any_element(),
+        inert: false,
+        open: false,
+        tint_state: None,
+    }
 }
 
 pub fn framed_handle(handle: FocusHandle, child: impl IntoElement) -> FocusFrame {
-    FocusFrame { key: None, handle: Some(handle), child: child.into_any_element() }
+    FocusFrame { key: None, handle: Some(handle), child: child.into_any_element(), tint: None, inert: false, open: false, tint_state: None }
+}
+
+impl FocusFrame {
+    /// 包着的是按钮：叠悬停层、按下层，状态存在 `id` 下（同一视图里不能重复）。
+    pub fn tint(mut self, id: impl Into<ElementId>) -> Self {
+        self.tint = Some(tint_id(&id.into()));
+        self
+    }
+
+    /// 按钮不可用时调用：不叠悬停层、按下层（和按钮的 `.disabled(..)` 传同一个值）。
+    pub fn inert(mut self, inert: bool) -> Self {
+        self.inert = inert;
+        self
+    }
 }
 
 /// 弹出菜单的触发按钮用的 [`framed`]：菜单（`menu_popover` / 组件库的 `Popover`）要求触发器实现 `Selectable`，
@@ -805,25 +843,30 @@ pub fn framed_trigger<E: gpui_kit::component::Selectable + IntoElement + 'static
     id: impl Into<ElementId>,
     trigger: E,
 ) -> FramedTrigger<E> {
-    FramedTrigger { id: id.into(), handle: None, trigger }
+    FramedTrigger { id: id.into(), handle: None, trigger, open: false }
 }
 
 /// 同 [`framed_trigger`]，按钮用的是自己给的焦点句柄（`Button::track_focus`，如 [`menu_trigger_focus`]）。
+/// `id` 只用来存悬停层、按下层的状态，同一视图里不能重复。
 pub fn framed_trigger_with<E: gpui_kit::component::Selectable + IntoElement + 'static>(
+    id: impl Into<ElementId>,
     handle: FocusHandle,
     trigger: E,
 ) -> FramedTrigger<E> {
-    FramedTrigger { id: ElementId::from("framed-trigger"), handle: Some(handle), trigger }
+    FramedTrigger { id: id.into(), handle: Some(handle), trigger, open: false }
 }
 
 pub struct FramedTrigger<E> {
     id: ElementId,
     handle: Option<FocusHandle>,
     trigger: E,
+    /// 菜单打开着（`Popover` 通过 `Selectable::selected` 告诉触发器）。
+    open: bool,
 }
 
 impl<E: gpui_kit::component::Selectable + IntoElement + 'static> gpui_kit::component::Selectable for FramedTrigger<E> {
     fn selected(mut self, selected: bool) -> Self {
+        self.open |= selected;
         self.trigger = self.trigger.selected(selected);
         self
     }
@@ -838,6 +881,7 @@ impl<E: gpui_kit::component::Selectable + IntoElement + 'static> gpui_kit::compo
     }
 
     fn open(mut self, open: bool) -> Self {
+        self.open |= open;
         self.trigger = self.trigger.open(open);
         self
     }
@@ -851,14 +895,18 @@ impl<E: IntoElement + 'static> IntoElement for FramedTrigger<E> {
     type Element = FocusFrame;
 
     fn into_element(self) -> FocusFrame {
-        framed_with(self.id, self.handle, self.trigger)
+        let mut frame = framed_with(self.id, self.handle, self.trigger);
+        frame.open = self.open;
+        frame
     }
 }
 
 /// 按钮可能给了 `track_focus`（`Some`），也可能没有（按 id 取）。
+/// 包的总是按钮，都叠悬停层、按下层（状态存在 `id` 下）。
 pub fn framed_with(id: impl Into<ElementId>, handle: Option<FocusHandle>, child: impl IntoElement) -> FocusFrame {
+    let id = id.into();
     match handle {
-        Some(handle) => framed_handle(handle, child),
+        Some(handle) => framed_handle(handle, child).tint(id),
         None => framed(id, child),
     }
 }
@@ -871,10 +919,17 @@ impl IntoElement for FocusFrame {
     }
 }
 
+/// [`FocusFrame`] 在 prepaint 和 paint 之间传的东西。
+pub struct FramePaint {
+    /// 高可见性轮廓开启时：控件所在的点击区域（点下去时把焦点给控件，见 `paint`）。
+    focus_hitbox: Option<Hitbox>,
+    /// 叠悬停层、按下层时：它们的点击区域（判断悬停、按下）。
+    tint: Option<Hitbox>,
+}
+
 impl Element for FocusFrame {
     type RequestLayoutState = ();
-    /// 高可见性轮廓开启时：控件所在的点击区域（点下去时把焦点给控件，见 `paint`）。
-    type PrepaintState = Option<Hitbox>;
+    type PrepaintState = FramePaint;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -898,6 +953,9 @@ impl Element for FocusFrame {
             let handle = window.with_id(scope, |window| window.use_keyed_state(key, cx, |_, cx| cx.focus_handle()).read(cx).clone());
             self.handle = Some(handle);
         }
+        if let Some(id) = self.tint.clone().filter(|_| !self.inert) {
+            self.tint_state = Some(window.use_keyed_state(id, cx, |_, _| motion::Tint::new()));
+        }
         (self.child.request_layout(window, cx), ())
     }
 
@@ -909,28 +967,42 @@ impl Element for FocusFrame {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<Hitbox> {
+    ) -> FramePaint {
         // 先于控件插入：在控件的点击区域下面，不挡控件自己的悬停、点击。
-        let hitbox = (high_visibility_outlines() && self.handle.is_some()).then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
+        let focus_hitbox =
+            (high_visibility_outlines() && self.handle.is_some()).then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
         self.child.prepaint(window, cx);
+        // 悬停层的点击区域插在按钮之后（上面）：组件库按钮挡住下面的点击区域，插在下面就永远不算悬停。
+        // 这一块不挡任何东西，按钮照常收到悬停和点击。
+        let tint = self.tint_state.is_some().then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
         if high_visibility_outlines() && self.handle.as_ref().is_some_and(|handle| handle.is_focused(window)) {
             let radius = cx.theme().radius;
             defer_outline(bounds, Corners::all(radius), window, cx);
         }
-        hitbox
+        FramePaint { focus_hitbox, tint }
     }
 
     fn paint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
-        hitbox: &mut Option<Hitbox>,
+        state: &mut FramePaint,
         window: &mut Window,
         cx: &mut App,
     ) {
         self.child.paint(window, cx);
+        // 悬停层、按下层叠在按钮上面（半透明，文字仍清楚）：常态、悬停、按下之间渐变。
+        let radius = cx.theme().radius;
+        let p = palette(cx);
+        if self.open {
+            window.paint_quad(fill(bounds, p.pressed).corner_radii(radius));
+        }
+        if let (Some(hitbox), Some(tint)) = (state.tint.as_ref(), self.tint_state.as_ref()) {
+            tint.read(cx).clone().paint(bounds, radius, true, (Some(p.hover), Some(p.pressed)), hitbox, window, cx);
+        }
+        let hitbox = &mut state.focus_hitbox;
         // 组件库的按钮按下鼠标时 `prevent_default`，点了也不拿焦点（为了不把焦点从输入框抢走）：
         // 所以 Tab 过去有外圈，鼠标点了却没有。高可见性轮廓开启时说好了“键盘、鼠标聚焦都显示”，
         // 这里在按下时直接把焦点给它（`focus` 不看 `prevent_default`）。
@@ -1021,7 +1093,12 @@ pub fn switch(id: impl Into<ElementId>, checked: bool, p: &Palette) -> Pressable
             inset: px(INSET),
         })
         // 悬停、按下时在轨道上叠一层（画在轨道上面，轨道是实色）。
-        .child(motion::highlight("switch-state", transparent_black(), TRACK_H / 2., false).hover_color(p.hover).pressed_color(p.pressed))
+        .child(
+            motion::highlight("switch-state", transparent_black(), TRACK_H / 2., false)
+                .hover_color(p.hover)
+                .pressed_color(p.pressed)
+                .smooth(),
+        )
 }
 
 /// 自己画焦点框的元素（不是 [`pressable`]，如会话消息、下拉框）用：按是否聚焦给它加上焦点框。
@@ -1314,8 +1391,8 @@ pub fn menu_item(
 /// 组件库按钮的尺寸，取自控件高度阶梯（见规范 §2.5）。都是最小高度：文字放大时按钮跟着变高。
 /// 不设尺寸就是 `CONTROL_MD`（32，组件库的默认尺寸），用于表单与弹窗里的主要操作。
 ///
-/// 只改尺寸；变体（`.ghost()` / `.outline()` / `.primary()` / `.danger()`）照常用组件库的，
-/// 它们的悬停、按下颜色由 [`control_theme`] 统一设好。
+/// 变体：工具栏、行内操作用 [`ControlSize::subtle`]，其余用组件库的默认（带描边）/ `.primary()` / `.danger()`。
+/// 组件库自己不换悬停、按下色（见 [`control_theme`]），渐变由外面的 [`FocusFrame`] 画。
 pub trait ControlSize: gpui_kit::component::Sizable + Styled + Sized {
     /// 24：列表行、卡片标题里的行内操作。
     fn control_xs(self) -> Self {
@@ -1325,6 +1402,9 @@ pub trait ControlSize: gpui_kit::component::Sizable + Styled + Sized {
     fn control_sm(self) -> Self {
         self.small().min_h(px(size::CONTROL_SM)).min_w(px(size::CONTROL_SM))
     }
+    /// 安静的按钮（工具栏、列表行内的操作）：常态透明，悬停、按下由外面的 [`FocusFrame`] 叠层渐变。
+    /// 代替组件库的 `.ghost()`：它的悬停读组件库共用的 `accent`（Markdown 行内代码、组件库菜单也用），没法单独设成不变色。
+    fn subtle(self, cx: &App) -> Self;
     /// 空间不够时允许收缩，最窄到 `min_width`（组件库按钮默认不收缩）。标签要放进 [`truncated`]，
     /// 才会显示省略号而不是被截断。
     fn shrinkable(self, min_width: f32) -> Self {
@@ -1337,7 +1417,14 @@ pub fn truncated(label: impl Into<SharedString>) -> Div {
     div().flex_shrink(1.).min_w(px(0.)).truncate().child(label.into())
 }
 
-impl ControlSize for gpui_kit::component::button::Button {}
+impl ControlSize for gpui_kit::component::button::Button {
+    fn subtle(self, cx: &App) -> Self {
+        use gpui_kit::component::button::{ButtonCustomVariant, ButtonVariants as _};
+        let text = palette(cx).text;
+        let clear = text.opacity(0.);
+        self.custom(ButtonCustomVariant::new(cx).color(clear).foreground(text).hover(clear).active(clear))
+    }
+}
 
 /// 把调色板套到组件库控件（按钮、输入框、工具提示、Markdown 里的代码块）上：圆角取本规范的阶梯，
 /// 悬停、按下、选中的颜色由调色板派生。浅色、深色、配色方案、高对比度都调用它（见 `sync_theme`）。
@@ -1355,20 +1442,24 @@ pub fn control_theme(p: &Palette, theme: &mut gpui_kit::component::Theme) {
     c.accent = if dark { p.text.opacity(0.10) } else { p.hover };
     c.accent_foreground = p.text;
     c.secondary_active = p.selected;
+    // 按钮的悬停、按下不由组件库换色（它是即时的），而由外面的 `FocusFrame` 叠半透明层渐变：
+    // 这里把各变体的悬停、按下色设成与常态相同。
     c.button = p.surface;
-    c.button_hover = p.surface.blend(p.hover);
-    c.button_active = p.pressed;
+    c.button_hover = p.surface;
+    c.button_active = p.surface;
     c.button_foreground = p.text;
-    // 主要按钮：浅色、深色都用强调色，悬停提亮、按下压暗。
-    let (hover, active) = (shade(p.accent, 0.06), shade(p.accent, -0.06));
+    // 主要按钮：浅色、深色都用强调色。
     c.primary = p.accent;
-    c.primary_hover = hover;
-    c.primary_active = active;
+    c.primary_hover = shade(p.accent, 0.06);
+    c.primary_active = shade(p.accent, -0.06);
     c.primary_foreground = p.on_accent;
     c.button_primary = p.accent;
-    c.button_primary_hover = hover;
-    c.button_primary_active = active;
+    c.button_primary_hover = p.accent;
+    c.button_primary_active = p.accent;
     c.button_primary_foreground = p.on_accent;
+    let danger = c.button_danger;
+    c.button_danger_hover = danger;
+    c.button_danger_active = danger;
 }
 
 /// [`control_theme`] 写的值现在是不是都已经在主题上（`sync_theme` 据此决定要不要更新主题）。
@@ -1385,6 +1476,8 @@ pub fn control_theme_applied(p: &Palette, theme: &gpui_kit::component::Theme) ->
         && a.button_active == b.button_active
         && a.button_foreground == b.button_foreground
         && a.button_primary == b.button_primary
+        && a.button_primary_hover == b.button_primary_hover
+        && a.button_danger_hover == b.button_danger_hover
         && a.primary == b.primary
 }
 
@@ -1910,6 +2003,7 @@ mod tests {
                 let trigger_focus = super::menu_trigger_focus("menu", window, cx);
                 self.seen.borrow_mut().trigger = Some(trigger_focus.clone());
                 let trigger = super::framed_trigger_with(
+                    "trigger",
                     trigger_focus.clone(),
                     Button::new("trigger").track_focus(&trigger_focus).ghost().label("menu"),
                 );
@@ -2015,11 +2109,14 @@ mod tests {
                     Theme::update(cx, |theme| super::control_theme(&p, theme));
                     let colors = &gpui_kit::component::ActiveTheme::theme(cx).colors;
                     let label = format!("{name} / {mode:?}");
-                    assert_ne!(colors.button_primary, colors.button_primary_hover, "{label}: primary hover");
-                    assert_ne!(colors.button_primary, colors.button_primary_active, "{label}: primary pressed");
-                    assert_ne!(colors.button_primary_hover, colors.button_primary_active, "{label}: primary hover vs pressed");
-                    assert_ne!(colors.accent, colors.button_active, "{label}: ghost hover vs pressed");
-                    assert!(colors.accent.a > 0. && colors.button_active.a > colors.accent.a / 2., "{label}: ghost states visible");
+                    // 组件库自己不换色（即时的），悬停、按下由 `FocusFrame` 叠的半透明层渐变。
+                    assert_eq!(colors.button_primary, colors.button_primary_hover, "{label}: primary hover");
+                    assert_eq!(colors.button_primary, colors.button_primary_active, "{label}: primary pressed");
+                    assert_eq!(colors.button, colors.button_hover, "{label}: default hover");
+                    assert_eq!(colors.button, colors.button_active, "{label}: default pressed");
+                    assert_eq!(colors.button_danger, colors.button_danger_hover, "{label}: danger hover");
+                    // 叠层：悬停、按下两两不同，且都看得见，按下比悬停深。
+                    assert!(p.hover.a > 0. && p.pressed.a > p.hover.a, "{label}: tint layers visible");
                     assert_ne!(p.hover, p.pressed, "{label}: hover vs pressed");
                     assert_ne!(p.selected, p.hover, "{label}: selected vs hover");
                 }

@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use dshr_agent::SessionSummary;
 use gpui_kit::base::FocusTrapElement as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -371,7 +371,7 @@ impl Render for SessionSearchView {
                     .child(crate::design::framed(
                         "close-session-search",
                         Button::new("close-session-search")
-                            .ghost()
+                            .subtle(cx)
                             .control_sm()
                             .icon(IconName::Close)
                             .accessibility_label(t!("search.hint_close").to_string())
