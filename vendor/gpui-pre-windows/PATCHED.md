@@ -32,22 +32,28 @@ resize 里没有用 `ClearState()`：它会清掉初始化时只设置一次的�
 
 不打补丁时，窗口平时约 20MB，拖动一次之后会一直停在约 60MB。
 
-### Windows 10 上自绘标题栏时去掉左、右、下三边的边框线
+### Windows 10 上自绘标题栏时补上顶边
 
-`src/events.rs` 的 `handle_calc_client_size`：隐藏系统标题栏（`appears_transparent`）时，客户区向上延伸到
-窗口顶端，左、右、下仍保留 `DefWindowProcW` 算出的边框。Windows 10 上这段边框外侧是看不见的调整大小区域，
-最里面 1 像素是 DWM 画的窗口边框线（约 `#707070`）。顶上那条被客户区盖住了，于是只剩左、右、下三条线，
-看着不对称。
+移植自上游还没合并的 zed-industries/zed#63821（修复 zed-industries/zed#63812）。隐藏系统标题栏后，客户区
+延伸到窗口顶端，Windows 10 的 DWM 只在窗口自己的边框区域里画顶边，于是左、右、下三边有 1 像素边框线，顶上没有。
+Windows 11 的 DWM 在单独的一层上画边框，四边都有，不受影响。
 
-补丁：窗口不是最大化、并且系统是 Windows 10（内部版本号 < 22000，`is_windows_10`，只查一次）时，客户区在左、右、
-下各多延伸边框线的宽度，把这条线也盖住，四边都只剩 DWM 的阴影。调整大小的命中区域从 8 像素变成 7 像素
-（96 DPI），仍由 `DefWindowProcW` 处理。
+- `src/events.rs`：Windows 10 上、窗口不是最大化或全屏时，`DwmExtendFrameIntoClientArea` 把 DWM 边框往客户区
+  延伸 1 像素（`update_frame_margins`，在 `WM_CREATE`、`WM_SIZE` 时更新）。前台时 DWM 自己在这一行画顶边
+  （跟随“在标题栏和窗口边框上显示主题色”）；后台时 DWM 不画，由下面的边框 visual 补上（`update_top_border`，
+  在 `WM_ACTIVATE`、`WM_SIZE` 时切换）。顶上留 1 像素非客户区的做法上游试过：DWM 会连整个原生标题栏一起画出来。
+- `src/directx_renderer.rs`：DirectComposition 加一个根 visual，场景 visual 上面叠一个只有 1 像素的边框 visual，
+  按窗口宽度拉伸（`TopBorderVisual`），切换前台 / 后台只需提交一次合成，不用重绘一帧。每帧渲染后把最上面一行清成
+  透明（`draw_top_border`），让 DWM 画的边框透出来。只在 DirectComposition 的预乘 alpha 交换链上生效。
+- `src/util.rs`：`is_windows_10`（内部版本号 < 22000）；后台顶边颜色 `INACTIVE_BORDER_PREMULTIPLIED`
+  （预乘后 `43,43,43,128`，在 19045 版本上实测拟合，不随系统设置变化）；这类窗口在 Windows 10 上不管主题都请求
+  深色边框（`configure_dwm_dark_mode` 的 `force_dark_frame`），否则浅色主题下 DWM 把伸进客户区的边框画成纯白。
+- `src/window.rs`：`active` 状态、绘制时传入顶边高度、创建窗口时的深色边框参数。
 
-边框线的宽度由 `windows_10_border` 按边量出来：`DefWindowProcW` 留的边框宽度减去看不见的部分，看不见的部分是
-`GetWindowRect` 和 `DWMWA_EXTENDED_FRAME_BOUNDS`（DWM 的可见边界）之差。窗口刚创建时（DWM 还没有边界）和刚
-移到 DPI 不同的显示器时（量到的还是旧 DPI 下的值），量出来的结果不可信；结果不在 1 像素到“每满或不满 100%
-缩放 1 像素”之间时就按 1 像素算，Windows 10 在各种缩放下画的都是 1 像素。Windows 11 的边框由 DWM 画在客户区上面、四边都有，
-不受影响，所以不改。
+和上游 PR 的差异：vendor 里 `CreateTargetForHwnd` 本来用 `false`，保留不变；`draw_top_border` 的文档注释在 PR 里
+错位到了 `set_top_border_visible` 上，这里放回原处并改正。
+
+上游合并 #63821 后（以合并后的版本为准），升级 gpui-pre 时删掉这一节对应的改动。
 
 ## 升级 gpui-pre 时
 

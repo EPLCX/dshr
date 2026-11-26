@@ -5,7 +5,7 @@ use gpui_util::ResultExt;
 use windows::{
     Win32::{
         Foundation::*,
-        Graphics::Gdi::*,
+        Graphics::{Dwm::DwmExtendFrameIntoClientArea, Gdi::*},
         System::SystemServices::*,
         UI::{
             Controls::*,
@@ -30,6 +30,10 @@ pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_DISPLAYS_CHANGED: u32 = WM_USER + 10;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
+
+/// Height of the border DWM draws along the top edge of a window. It is one
+/// physical pixel at every DPI, which is why this is not scaled.
+const TOP_BORDER_HEIGHT: u32 = 1;
 /// Fires once the window has stopped changing size; see `trim_after_resize`.
 /// (dshr patch, see PATCHED.md)
 const TRIM_AFTER_RESIZE_TIMER_ID: usize = 2;
@@ -254,6 +258,14 @@ impl WindowsWindowInner {
                 .set(self.state.callbacks.request_frame.take());
             return Some(0);
         }
+
+        // Maximizing or restoring changes whether there is a border at all.
+        self.update_frame_margins(handle);
+        self.update_top_border();
+
+        // Maximizing or restoring changes whether there is a border at all.
+        self.update_frame_margins(handle);
+        self.update_top_border();
 
         let width = lparam.loword().max(1) as i32;
         let height = lparam.hiword().max(1) as i32;
@@ -847,38 +859,111 @@ impl WindowsWindowInner {
 
         unsafe {
             let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
-            let window_rect = (*params).rgrc[0];
-            let saved_top = window_rect.top;
+            let saved_top = (*params).rgrc[0].top;
             let result = DefWindowProcW(handle, WM_NCCALCSIZE, wparam, lparam);
             (*params).rgrc[0].top = saved_top;
             if self.state.is_maximized() {
                 let dpi = GetDpiForWindow(handle);
                 (*params).rgrc[0].top += get_frame_thicknessx(dpi);
-            } else if is_windows_10() {
-                // dshr patch: on Windows 10 the DWM draws a 1px window border in the innermost pixels of
-                // the left/right/bottom frame (the rest of the frame is the invisible resize area). The
-                // top frame now belongs to the client area, so the top border is gone while the other
-                // three remain. Extend the client area over the border on the other sides too, so the
-                // window has no border on any side (only the DWM shadow). Windows 11 draws its border
-                // over the client area on all four sides, so it is left alone there.
-                let rect = &mut (*params).rgrc[0];
-                let insets = [
-                    rect.left - window_rect.left,
-                    window_rect.right - rect.right,
-                    window_rect.bottom - rect.bottom,
-                ];
-                let [left, right, bottom] =
-                    windows_10_border(handle, GetDpiForWindow(handle), insets);
-                rect.left -= left;
-                rect.right += right;
-                rect.bottom += bottom;
             }
             Some(result.0 as isize)
         }
     }
 
+    /// Height, in physical pixels, of the system border along the top edge of
+    /// the client area. Zero when the window does not need one.
+    ///
+    /// [`Self::handle_calc_client_size`] gives the whole top edge of the window
+    /// rect to the client area so that the system title bar disappears. The
+    /// left, right and bottom borders survive that, because `DefWindowProc`
+    /// still insets the client rect by the resize frame on those sides, leaving
+    /// room for DWM to draw them in. The top edge has no such room left.
+    ///
+    /// On Windows 11 that costs nothing: DWM paints the border in its own frame
+    /// layer, composited over the top edge of the window (the same layer that
+    /// gives every window rounded corners without the application taking part),
+    /// so it does not care what the client rect says. On Windows 10 DWM only
+    /// paints a top border where the window has frame area of its own, so the
+    /// border disappears entirely.
+    ///
+    /// Windows 10 needs the border put back by hand. [`Self::update_frame_margins`]
+    /// extends the DWM frame exactly this far into the client area and the
+    /// renderer leaves that row alone ([`Self::top_border_color`]), so DWM
+    /// draws the real border into it.
+    ///
+    /// The one alternative, leaving a pixel of *non-client* area for it
+    /// (`rgrc[0].top + 1`), was measured and rejected: DWM does draw a correct
+    /// border, and a full native caption above the window along with it, which
+    /// is the thing the pixel is there to get rid of. DWM draws either the
+    /// whole top frame or none of it.
+    pub(crate) fn top_border_height(&self) -> u32 {
+        if !self.needs_win10_top_border() {
+            return 0;
+        }
+        // A maximized or fullscreen window has no visible border: its resize
+        // frame hangs off the edges of the monitor and is clipped away.
+        if self.state.is_maximized() || self.state.is_fullscreen() {
+            return 0;
+        }
+        TOP_BORDER_HEIGHT
+    }
+
+    /// Whether this window has to put its top border back by hand, which only
+    /// windows that hide the system title bar need, and only on Windows 10.
+    pub(crate) fn needs_win10_top_border(&self) -> bool {
+        self.hide_title_bar && is_windows_10()
+    }
+
+    /// Show the inactive top border, or hide it and let DWM draw the active one.
+    ///
+    /// Deliberately not part of the rendered frame: the border changes on every
+    /// focus change, GPUI does not redraw a window whose scene has not changed,
+    /// and forcing a redraw costs a whole frame - measured at 45-60ms - during
+    /// which the row still shows the previous state while DWM has already
+    /// switched, which reads as a flash. Swapping a composition visual instead
+    /// takes a commit and lands with DWM's own change.
+    pub(crate) fn update_top_border(&self) {
+        if !self.needs_win10_top_border() {
+            return;
+        }
+        let visible = !self.state.active.get() && self.top_border_height() > 0;
+        // A draw may be in flight when activation changes; the next one applies
+        // the same state anyway, so there is nothing to retry.
+        if let Ok(renderer) = self.state.renderer.try_borrow() {
+            renderer.set_top_border_visible(visible).log_err();
+        }
+    }
+
+    /// Extend the DWM frame exactly [`TOP_BORDER_HEIGHT`] pixels into the client
+    /// area, so that DWM draws its own border there and the renderer can leave
+    /// that row transparent for it to show through.
+    ///
+    /// The margin has to be exactly the border height. Extending by the whole
+    /// top frame instead (as an app that keeps `WS_CAPTION` would) makes DWM
+    /// fill it with caption rather than border. Extending at all also makes DWM
+    /// render the border of a light-themed window pure white, which is why
+    /// these windows ask for a dark frame regardless of theme; see
+    /// [`configure_dwm_dark_mode`].
+    pub(crate) fn update_frame_margins(&self, handle: HWND) {
+        if !self.needs_win10_top_border() {
+            return;
+        }
+        // Retracts to nothing while maximized or fullscreen, where
+        // `top_border_height` is zero because there is no visible border.
+        let margins = MARGINS {
+            cxLeftWidth: 0,
+            cxRightWidth: 0,
+            cyTopHeight: self.top_border_height() as i32,
+            cyBottomHeight: 0,
+        };
+        unsafe { DwmExtendFrameIntoClientArea(handle, &margins).log_err() };
+    }
+
     fn handle_activate_msg(self: &Rc<Self>, wparam: WPARAM) -> Option<isize> {
         let activated = wparam.loword() > 0;
+
+        self.state.active.set(activated);
+        self.update_top_border();
 
         let events = self
             .state
@@ -945,6 +1030,7 @@ impl WindowsWindowInner {
 
     fn handle_create_msg(&self, handle: HWND) -> Option<isize> {
         if self.hide_title_bar {
+            self.update_frame_margins(handle);
             notify_frame_changed(handle);
             Some(0)
         } else {
@@ -1330,7 +1416,7 @@ impl WindowsWindowInner {
 
                     callback();
                     self.state.callbacks.appearance_changed.set(Some(callback));
-                    configure_dwm_dark_mode(handle, new_appearance);
+                    configure_dwm_dark_mode(handle, new_appearance, self.needs_win10_top_border());
                 }
             }
         }
@@ -1876,64 +1962,6 @@ pub(crate) fn current_modifiers() -> Modifiers {
 pub(crate) fn current_capslock() -> Capslock {
     let on = unsafe { GetKeyState(VK_CAPITAL.0 as i32) & 1 } > 0;
     Capslock { on }
-}
-
-/// Thickness of the window border the DWM draws on Windows 10 inside the left, right and bottom frame,
-/// in physical pixels. `insets` are the frame widths `DefWindowProcW` just reserved on those sides.
-///
-/// The frame is the invisible resize area plus the visible border, so the border is the inset minus the
-/// invisible part, which is the gap between the window rectangle and the DWM's visible frame bounds
-/// (`DWMWA_EXTENDED_FRAME_BOUNDS`). Both are measured on the window as it is now. They can disagree with
-/// `insets` when the frame is about to change: when the window is being created (the DWM bounds aren't
-/// available yet, or equal the window rectangle) or has just moved to a monitor with a different DPI (the
-/// measurement is still at the old DPI). A result that isn't between 1 px and 1 px per started 100% of
-/// scale is therefore not trusted and 1 px is used instead, which is what Windows 10 draws at every scale.
-fn windows_10_border(handle: HWND, dpi: u32, insets: [i32; 3]) -> [i32; 3] {
-    use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
-    const FALLBACK: i32 = 1;
-    let invisible = unsafe {
-        let mut window = RECT::default();
-        let mut visible = RECT::default();
-        GetWindowRect(handle, &mut window).ok().and_then(|_| {
-            DwmGetWindowAttribute(
-                handle,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
-                &mut visible as *mut RECT as *mut _,
-                std::mem::size_of::<RECT>() as u32,
-            )
-            .ok()
-        })
-        .map(|_| {
-            [
-                visible.left - window.left,
-                window.right - visible.right,
-                window.bottom - visible.bottom,
-            ]
-        })
-    };
-    let Some(invisible) = invisible else {
-        return [FALLBACK; 3];
-    };
-    // 1 px per started 100% of scale: 1 px at 100%, 2 px at 125% to 200%, ...
-    let max = ((dpi + USER_DEFAULT_SCREEN_DPI - 1) / USER_DEFAULT_SCREEN_DPI).max(1) as i32;
-    std::array::from_fn(|side| {
-        let border = insets[side] - invisible[side];
-        if (1..=max).contains(&border) { border } else { FALLBACK }
-    })
-}
-
-/// Windows 10 (build < 22000); Windows 11 draws the window border differently (see `handle_calc_client_size`).
-fn is_windows_10() -> bool {
-    static IS_WINDOWS_10: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *IS_WINDOWS_10.get_or_init(|| {
-        use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
-        let mut version = OSVERSIONINFOW {
-            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
-            ..Default::default()
-        };
-        let status = unsafe { windows::Wdk::System::SystemServices::RtlGetVersion(&mut version) };
-        status.is_ok() && version.dwBuildNumber < 22000
-    })
 }
 
 // there is some additional non-visible space when talking about window
