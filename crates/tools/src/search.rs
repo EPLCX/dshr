@@ -37,8 +37,39 @@ fn clip_line(line: &str) -> String {
 }
 
 fn walker(root: &Path) -> ignore::WalkParallel {
+    walker_under(root, None)
+}
+
+/// 同 [`walker`]；给了 `under`（相对 `root` 的目录）时只走进这个目录和通往它的那几层，其余目录整个跳过。
+/// 仍然从 `root` 开始走：忽略规则、跳过 `.git` 都和完整遍历一样，结果只是少了 `under` 以外的部分。
+fn walker_under(root: &Path, under: Option<PathBuf>) -> ignore::WalkParallel {
+    let root_owned = root.to_owned();
     // 隐藏文件也搜索（如 .github），但仍遵守 .gitignore，并总是跳过 .git 目录。
-    WalkBuilder::new(root).hidden(false).filter_entry(|entry| entry.file_name() != ".git").build_parallel()
+    WalkBuilder::new(root)
+        .hidden(false)
+        .filter_entry(move |entry| {
+            if entry.file_name() == ".git" {
+                return false;
+            }
+            let Some(under) = &under else { return true };
+            let relative = entry.path().strip_prefix(&root_owned).unwrap_or(entry.path());
+            // 通往 `under` 的目录、`under` 里面的一切。
+            under.starts_with(relative) || relative.starts_with(under)
+        })
+        .build_parallel()
+}
+
+/// glob 模式开头不含通配符的那几级目录（`src/ui/**/*.rs` → `src/ui`），遍历只需要进到这里面。
+/// 没有这样的前缀、或者前缀里有 `.`、`..` 这类不能按字面对照的部分时是 `None`。
+fn literal_dir_prefix(pattern: &str) -> Option<PathBuf> {
+    let mut parts: Vec<&str> = pattern.split('/').collect();
+    parts.pop(); // 最后一级是文件名部分。
+    let literal: Vec<&str> =
+        parts.into_iter().take_while(|part| !part.is_empty() && !part.contains(['*', '?', '[', ']', '{', '}', '\\'])).collect();
+    if literal.is_empty() || literal.iter().any(|part| matches!(*part, "." | "..") || part.contains(':')) {
+        return None;
+    }
+    Some(literal.iter().collect())
 }
 
 /// 显示用的相对路径，统一用 `/` 分隔。
@@ -115,11 +146,10 @@ impl Tool for Grep {
             Err(error) => return error,
         };
         // 设了行结束符：匹配不会跨行（如 `\s` 不匹配换行），和逐行匹配的语义一致。
-        let matcher =
-            match RegexMatcherBuilder::new().case_insensitive(input.case_insensitive).line_terminator(Some(b'\n')).build(&input.pattern) {
-                Ok(matcher) => matcher,
-                Err(error) => return ToolOutput::error(format!("正则表达式无效: {error}")),
-            };
+        let matcher = match LineSearch::matcher(&input.pattern, input.case_insensitive) {
+            Ok(matcher) => matcher,
+            Err(error) => return ToolOutput::error(format!("正则表达式无效: {error}")),
+        };
         let filter = match input.glob.as_deref().map(globset::Glob::new).transpose() {
             Ok(glob) => glob.map(|glob| glob.compile_matcher()),
             Err(error) => return ToolOutput::error(format!("glob 无效: {error}")),
@@ -130,50 +160,12 @@ impl Tool for Grep {
 
         let (_stop_guard, stopped) = StopOnDrop::new();
         let result = tokio::task::spawn_blocking(move || {
-            // （路径，行号，内容）。不在凑够 `max` 条时就停：并行遍历的先后不固定，要全部找完、排序后
-            // 取前 `max` 条，输出才稳定。只在命中多得离谱（超过 COLLECT_LIMIT）时提前停下。
-            let found: Mutex<Vec<(String, u64, String)>> = Mutex::default();
-            let count = AtomicUsize::new(0);
-            walker(&root).run(|| {
-                let (matcher, filter, workspace, stopped, found, count) = (&matcher, &filter, &workspace, &stopped, &found, &count);
-                let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(0)).line_number(true).build();
-                Box::new(move |entry| {
-                    if stopped.load(Ordering::Relaxed) || count.load(Ordering::Relaxed) > max.max(COLLECT_LIMIT) {
-                        return WalkState::Quit;
-                    }
-                    let Ok(entry) = entry else { return WalkState::Continue };
-                    if !entry.file_type().is_some_and(|kind| kind.is_file()) {
-                        return WalkState::Continue;
-                    }
-                    let path = entry.path();
-                    let relative = display_path(path, workspace);
-                    if let Some(filter) = filter
-                        && !filter.is_match(&relative)
-                        && !path.file_name().is_some_and(|name| filter.is_match(name))
-                    {
-                        return WalkState::Continue;
-                    }
-                    if entry.metadata().is_ok_and(|meta| meta.len() > MAX_FILE_BYTES) {
-                        return WalkState::Continue;
-                    }
-                    let mut local = Vec::new();
-                    // 读不了的文件、半路发现是二进制的文件都跳过（已经找到的行保留）。
-                    let _ = searcher.search_path(
-                        matcher,
-                        path,
-                        Lossy(|number, line| {
-                            local.push((relative.clone(), number, clip_line(line)));
-                            Ok(local.len() <= max)
-                        }),
-                    );
-                    if !local.is_empty() {
-                        count.fetch_add(local.len(), Ordering::Relaxed);
-                        found.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(local);
-                    }
-                    WalkState::Continue
-                })
-            });
-            let mut found = found.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let search = LineSearch { matcher: &matcher, hidden: true, per_file: max, stop: Some(&stopped) };
+            let keep = |relative: &str, path: &Path| match &filter {
+                Some(filter) => filter.is_match(relative) || path.file_name().is_some_and(|name| filter.is_match(name)),
+                None => true,
+            };
+            let mut found = search.run(&root, &workspace, &keep, clip_line);
             found.sort();
             let truncated = found.len() > max;
             found.truncate(max);
@@ -187,6 +179,83 @@ impl Tool for Grep {
             Ok((lines, truncated)) => ToolOutput::ok(truncate(lines.join("\n") + &limit_note(lines.len(), truncated))),
             Err(error) => ToolOutput::error(format!("搜索失败: {error}")),
         }
+    }
+}
+
+/// 按正则逐行搜索一个目录（`grep` 工具和插件的 `host.grep` 共用）。
+///
+/// 并行遍历（遵守 `.gitignore`，总是跳过 `.git`），每个文件用 ripgrep 的内核（`grep-searcher`）整块搜索，
+/// 跳过二进制文件和超过 2 MB 的文件。返回的结果没有排序：调用方按自己的规则排好再截断。
+pub struct LineSearch<'a> {
+    pub matcher: &'a RegexMatcher,
+    /// 也搜隐藏文件（`.github` 之类）。
+    pub hidden: bool,
+    /// 一个文件里最多收集多少行。
+    pub per_file: usize,
+    /// 置位后尽快停下（工具调用被取消）。
+    pub stop: Option<&'a AtomicBool>,
+}
+
+pub use grep_regex::RegexMatcher;
+
+impl LineSearch<'_> {
+    /// 按 `grep` 工具的规则建正则：不区分大小写可选，匹配不跨行。
+    pub fn matcher(pattern: &str, case_insensitive: bool) -> Result<RegexMatcher, String> {
+        RegexMatcherBuilder::new()
+            .case_insensitive(case_insensitive)
+            .line_terminator(Some(b'\n'))
+            .build(pattern)
+            .map_err(|error| error.to_string())
+    }
+
+    /// 在 `root` 下搜索：（相对 `base` 的路径（`/` 分隔），行号，`clip` 处理过的行）。`keep(相对路径, 完整路径)`
+    /// 为 `false` 的文件不搜。最多收集约 [`COLLECT_LIMIT`] 条就提前结束（这时不保证是排序后最前面的那些）。
+    pub fn run(
+        &self,
+        root: &Path,
+        base: &Path,
+        keep: &(dyn Fn(&str, &Path) -> bool + Sync),
+        clip: fn(&str) -> String,
+    ) -> Vec<(String, u64, String)> {
+        // 不在凑够条数时就停：并行遍历的先后不固定，要全部找完、排序后取前面的，输出才稳定。
+        let found: Mutex<Vec<(String, u64, String)>> = Mutex::default();
+        let count = AtomicUsize::new(0);
+        let limit = self.per_file.max(COLLECT_LIMIT);
+        let (matcher, per_file, stop) = (self.matcher, self.per_file, self.stop);
+        WalkBuilder::new(root).hidden(!self.hidden).filter_entry(|entry| entry.file_name() != ".git").build_parallel().run(|| {
+            let (found, count) = (&found, &count);
+            let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(0)).line_number(true).build();
+            Box::new(move |entry| {
+                if stop.is_some_and(|stop| stop.load(Ordering::Relaxed)) || count.load(Ordering::Relaxed) > limit {
+                    return WalkState::Quit;
+                }
+                let Ok(entry) = entry else { return WalkState::Continue };
+                if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                    return WalkState::Continue;
+                }
+                let path = entry.path();
+                let relative = display_path(path, base);
+                if !keep(&relative, path) || entry.metadata().is_ok_and(|meta| meta.len() > MAX_FILE_BYTES) {
+                    return WalkState::Continue;
+                }
+                let mut local = Vec::new();
+                // 读不了的文件、半路发现是二进制的文件都跳过（已经找到的行保留）。
+                let _ = searcher.search_path(
+                    matcher,
+                    path,
+                    Lossy(|number, line| {
+                        local.push((relative.clone(), number, clip(line)));
+                        Ok(local.len() <= per_file)
+                    }),
+                );
+                if !local.is_empty() {
+                    count.fetch_add(local.len(), Ordering::Relaxed);
+                    found.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(local);
+                }
+                WalkState::Continue
+            })
+        });
+        found.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -236,10 +305,11 @@ impl Tool for Glob {
             Err(error) => return ToolOutput::error(format!("glob 无效: {error}")),
         };
         let root: PathBuf = ctx.resolve(input.path.as_deref().unwrap_or("."));
+        let under = literal_dir_prefix(&input.pattern);
         let (_stop_guard, stopped) = StopOnDrop::new();
         let result = tokio::task::spawn_blocking(move || {
             let found: Mutex<Vec<String>> = Mutex::default();
-            walker(&root).run(|| {
+            walker_under(&root, under).run(|| {
                 let (matcher, root, stopped, found) = (&matcher, &root, &stopped, &found);
                 Box::new(move |entry| {
                     if stopped.load(Ordering::Relaxed) {
@@ -354,36 +424,143 @@ mod tests {
         assert_eq!(out.content, "src/main.rs\nsrc/nested/lib.rs");
         let none = Glob.execute(json!({"pattern": "*.py"}), &ctx).await;
         assert_eq!(none.content, "没有匹配的文件");
+
+        // 有固定目录前缀时只走进那个目录，结果不变；忽略的目录、.git 照旧不算。
+        let nested = Glob.execute(json!({"pattern": "src/nested/*.rs"}), &ctx).await;
+        assert_eq!(nested.content, "src/nested/lib.rs");
+        let ignored = Glob.execute(json!({"pattern": "target/*.rs"}), &ctx).await;
+        assert_eq!(ignored.content, "没有匹配的文件");
+        std::fs::write(ctx.workspace.join(".git/HEAD"), "x").unwrap();
+        assert_eq!(Glob.execute(json!({"pattern": ".git/*"}), &ctx).await.content, "没有匹配的文件");
+        let braces = Glob.execute(json!({"pattern": "{src,docs}/*.rs"}), &ctx).await;
+        assert_eq!(braces.content, "src/main.rs");
+    }
+
+    #[test]
+    fn literal_prefixes() {
+        assert_eq!(literal_dir_prefix("src/ui/**/*.rs"), Some(PathBuf::from("src/ui")));
+        assert_eq!(literal_dir_prefix("src/main.rs"), Some(PathBuf::from("src")));
+        for pattern in ["*.rs", "**/x.rs", "{a,b}/x", "/abs/x", "./src/x", "../x/y", "a[bc]/x", "main.rs"] {
+            assert_eq!(literal_dir_prefix(pattern), None, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn line_search_respects_hidden_filter_and_per_file_limit() {
+        let (dir, _ctx) = workspace();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".github")).unwrap();
+        std::fs::write(root.join(".github/ci.yml"), "hello: ci\n").unwrap();
+        std::fs::write(root.join("src/many.txt"), "hello 1\nhello 2\nhello 3\n").unwrap();
+        let matcher = LineSearch::matcher("HELLO", true).unwrap();
+        let run = |hidden: bool, per_file: usize, keep: &(dyn Fn(&str, &Path) -> bool + Sync)| {
+            let mut found = LineSearch { matcher: &matcher, hidden, per_file, stop: None }.run(root, root, keep, str::to_owned);
+            found.sort();
+            found.into_iter().map(|(path, line, _)| format!("{path}:{line}")).collect::<Vec<_>>()
+        };
+        let all = |_: &str, _: &Path| true;
+        // 隐藏文件按选项决定；.gitignore 忽略的 target/ 总不搜。
+        assert_eq!(
+            run(true, 10, &all),
+            [
+                ".github/ci.yml:1",
+                "README.md:1",
+                "src/main.rs:2",
+                "src/many.txt:1",
+                "src/many.txt:2",
+                "src/many.txt:3",
+                "src/nested/lib.rs:1"
+            ]
+        );
+        assert!(!run(false, 10, &all).iter().any(|hit| hit.starts_with(".github")));
+        // 过滤按相对路径；一个文件里收集到上限多一条就停。
+        let txt = |relative: &str, _: &Path| relative.ends_with(".txt");
+        assert_eq!(run(true, 1, &txt), ["src/many.txt:1", "src/many.txt:2"]);
+        assert!(LineSearch::matcher("(", false).is_err());
     }
 }
 
 /// 输入框 `@` 提及里找工作区文件：遵守 `.gitignore`，跳过 `.git`。`query` 按不区分大小写的子序列匹配路径，
-/// 文件名里连续出现的排在前面，其次是路径里连续出现的，再其次是按顺序出现的；最多看 20000 个文件，返回前 `limit` 个。
+/// 文件名里连续出现的排在前面，其次是路径里连续出现的，再其次是按顺序出现的；返回前 `limit` 个。
+///
+/// 每打一个字都要找一次：工作区的文件列表遍历一次后缓存 [`FILE_INDEX_TTL`]，这期间的查询只在内存里过滤，
+/// 不再每次把整个工作区走一遍。
 pub fn find_files(root: &Path, query: &str, limit: usize) -> Vec<String> {
-    const MAX_SCANNED: usize = 20_000;
+    let index = FileIndex::cached(root);
     let query = query.to_lowercase();
-    let mut scored: Vec<(u8, usize, String)> = Vec::new();
-    let walk = WalkBuilder::new(root).hidden(false).filter_entry(|entry| entry.file_name() != ".git").build();
-    for entry in walk.flatten().take(MAX_SCANNED) {
-        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
-            continue;
-        }
-        let path = display_path(entry.path(), root);
-        let lower = path.to_lowercase();
-        let name = lower.rsplit('/').next().unwrap_or(&lower);
+    let mut scored: Vec<(u8, usize, &str)> = Vec::new();
+    for (path, lower) in &index.files {
+        let name = lower.rsplit('/').next().unwrap_or(lower);
         let rank = if query.is_empty() || name.contains(&query) {
             0
         } else if lower.contains(&query) {
             1
-        } else if is_subsequence(&query, &lower) {
+        } else if is_subsequence(&query, lower) {
             2
         } else {
             continue;
         };
         scored.push((rank, path.len(), path));
     }
-    scored.sort();
-    scored.into_iter().take(limit).map(|(_, _, path)| path).collect()
+    scored.sort_unstable();
+    scored.into_iter().take(limit).map(|(_, _, path)| path.to_owned()).collect()
+}
+
+/// 文件列表缓存多久。新建的文件最多晚这么久出现在 `@` 菜单里。
+const FILE_INDEX_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+/// 一个工作区最多记这么多个文件（只数文件，不数目录）。
+const MAX_INDEXED_FILES: usize = 200_000;
+/// 最多缓存几个工作区的文件列表。
+const MAX_CACHED_INDEXES: usize = 8;
+
+/// 一个工作区的文件：（显示用的相对路径，它的小写形式）。
+struct FileIndex {
+    built: std::time::Instant,
+    files: Vec<(String, String)>,
+}
+
+impl FileIndex {
+    /// 这个工作区的文件列表：没有或过期了就重新遍历（不持锁遍历，同时来的查询各自等自己的结果）。
+    fn cached(root: &Path) -> Arc<Self> {
+        static INDEXES: std::sync::LazyLock<Mutex<std::collections::HashMap<PathBuf, Arc<FileIndex>>>> =
+            std::sync::LazyLock::new(Default::default);
+        let lock = || INDEXES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(index) = lock().get(root).filter(|index| index.built.elapsed() < FILE_INDEX_TTL) {
+            return index.clone();
+        }
+        let index = Arc::new(Self::build(root));
+        let mut indexes = lock();
+        indexes.retain(|_, index| index.built.elapsed() < FILE_INDEX_TTL);
+        if indexes.len() >= MAX_CACHED_INDEXES {
+            indexes.clear();
+        }
+        indexes.insert(root.to_owned(), index.clone());
+        index
+    }
+
+    fn build(root: &Path) -> Self {
+        let found: Mutex<Vec<(String, String)>> = Mutex::default();
+        let count = AtomicUsize::new(0);
+        walker(root).run(|| {
+            let (found, count) = (&found, &count);
+            Box::new(move |entry| {
+                if count.load(Ordering::Relaxed) >= MAX_INDEXED_FILES {
+                    return WalkState::Quit;
+                }
+                let Ok(entry) = entry else { return WalkState::Continue };
+                if entry.file_type().is_some_and(|kind| kind.is_file()) {
+                    let path = display_path(entry.path(), root);
+                    let lower = path.to_lowercase();
+                    count.fetch_add(1, Ordering::Relaxed);
+                    found.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((path, lower));
+                }
+                WalkState::Continue
+            })
+        });
+        let mut files = found.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+        files.truncate(MAX_INDEXED_FILES);
+        Self { built: std::time::Instant::now(), files }
+    }
 }
 
 fn is_subsequence(needle: &str, haystack: &str) -> bool {
