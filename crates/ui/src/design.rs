@@ -1219,6 +1219,8 @@ pub fn nav_item(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Int
         .min_h(px(size::NAV_ITEM))
         .px(px(10.))
         .flex()
+        // 无样式按钮默认把内容居中；导航项和侧边栏的列表项一样靠左。
+        .justify_start()
         .items_center()
         .gap(px(space::S))
         .rounded(px(radius::MD))

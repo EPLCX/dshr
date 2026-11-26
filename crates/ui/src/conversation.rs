@@ -2272,7 +2272,6 @@ impl ConversationView {
             // 走不到发送、菜单和侧边栏。消息里用不到缩进：在外层先截住这两个动作，改成移动焦点。
             .child(
                 div()
-                    .px(px(space::S))
                     .capture_action(|_: &IndentInline, window, cx| {
                         cx.stop_propagation();
                         window.focus_next(cx);
