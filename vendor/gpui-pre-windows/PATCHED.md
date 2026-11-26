@@ -40,8 +40,13 @@ resize 里没有用 `ClearState()`：它会清掉初始化时只设置一次的�
 看着不对称。
 
 补丁：窗口不是最大化、并且系统是 Windows 10（内部版本号 < 22000，`is_windows_10`，只查一次）时，客户区在左、右、
-下各多延伸 1 物理像素（`WINDOWS_10_BORDER`），把这条线也盖住，四边都只剩 DWM 的阴影。调整大小的命中区域从
-8 像素变成 7 像素（96 DPI），仍由 `DefWindowProcW` 处理。Windows 11 的边框由 DWM 画在客户区上面、四边都有，
+下各多延伸边框线的宽度，把这条线也盖住，四边都只剩 DWM 的阴影。调整大小的命中区域从 8 像素变成 7 像素
+（96 DPI），仍由 `DefWindowProcW` 处理。
+
+边框线的宽度由 `windows_10_border` 按边量出来：`DefWindowProcW` 留的边框宽度减去看不见的部分，看不见的部分是
+`GetWindowRect` 和 `DWMWA_EXTENDED_FRAME_BOUNDS`（DWM 的可见边界）之差。窗口刚创建时（DWM 还没有边界）和刚
+移到 DPI 不同的显示器时（量到的还是旧 DPI 下的值），量出来的结果不可信；结果不在 1 像素到“每满或不满 100%
+缩放 1 像素”之间时就按 1 像素算，Windows 10 在各种缩放下画的都是 1 像素。Windows 11 的边框由 DWM 画在客户区上面、四边都有，
 不受影响，所以不改。
 
 ## 升级 gpui-pre 时
