@@ -847,12 +847,31 @@ impl WindowsWindowInner {
 
         unsafe {
             let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
-            let saved_top = (*params).rgrc[0].top;
+            let window_rect = (*params).rgrc[0];
+            let saved_top = window_rect.top;
             let result = DefWindowProcW(handle, WM_NCCALCSIZE, wparam, lparam);
             (*params).rgrc[0].top = saved_top;
             if self.state.is_maximized() {
                 let dpi = GetDpiForWindow(handle);
                 (*params).rgrc[0].top += get_frame_thicknessx(dpi);
+            } else if is_windows_10() {
+                // dshr patch: on Windows 10 the DWM draws a 1px window border in the innermost pixels of
+                // the left/right/bottom frame (the rest of the frame is the invisible resize area). The
+                // top frame now belongs to the client area, so the top border is gone while the other
+                // three remain. Extend the client area over the border on the other sides too, so the
+                // window has no border on any side (only the DWM shadow). Windows 11 draws its border
+                // over the client area on all four sides, so it is left alone there.
+                let rect = &mut (*params).rgrc[0];
+                let insets = [
+                    rect.left - window_rect.left,
+                    window_rect.right - rect.right,
+                    window_rect.bottom - rect.bottom,
+                ];
+                let [left, right, bottom] =
+                    windows_10_border(handle, GetDpiForWindow(handle), insets);
+                rect.left -= left;
+                rect.right += right;
+                rect.bottom += bottom;
             }
             Some(result.0 as isize)
         }
@@ -1857,6 +1876,64 @@ pub(crate) fn current_modifiers() -> Modifiers {
 pub(crate) fn current_capslock() -> Capslock {
     let on = unsafe { GetKeyState(VK_CAPITAL.0 as i32) & 1 } > 0;
     Capslock { on }
+}
+
+/// Thickness of the window border the DWM draws on Windows 10 inside the left, right and bottom frame,
+/// in physical pixels. `insets` are the frame widths `DefWindowProcW` just reserved on those sides.
+///
+/// The frame is the invisible resize area plus the visible border, so the border is the inset minus the
+/// invisible part, which is the gap between the window rectangle and the DWM's visible frame bounds
+/// (`DWMWA_EXTENDED_FRAME_BOUNDS`). Both are measured on the window as it is now. They can disagree with
+/// `insets` when the frame is about to change: when the window is being created (the DWM bounds aren't
+/// available yet, or equal the window rectangle) or has just moved to a monitor with a different DPI (the
+/// measurement is still at the old DPI). A result that isn't between 1 px and 1 px per started 100% of
+/// scale is therefore not trusted and 1 px is used instead, which is what Windows 10 draws at every scale.
+fn windows_10_border(handle: HWND, dpi: u32, insets: [i32; 3]) -> [i32; 3] {
+    use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+    const FALLBACK: i32 = 1;
+    let invisible = unsafe {
+        let mut window = RECT::default();
+        let mut visible = RECT::default();
+        GetWindowRect(handle, &mut window).ok().and_then(|_| {
+            DwmGetWindowAttribute(
+                handle,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut visible as *mut RECT as *mut _,
+                std::mem::size_of::<RECT>() as u32,
+            )
+            .ok()
+        })
+        .map(|_| {
+            [
+                visible.left - window.left,
+                window.right - visible.right,
+                window.bottom - visible.bottom,
+            ]
+        })
+    };
+    let Some(invisible) = invisible else {
+        return [FALLBACK; 3];
+    };
+    // 1 px per started 100% of scale: 1 px at 100%, 2 px at 125% to 200%, ...
+    let max = ((dpi + USER_DEFAULT_SCREEN_DPI - 1) / USER_DEFAULT_SCREEN_DPI).max(1) as i32;
+    std::array::from_fn(|side| {
+        let border = insets[side] - invisible[side];
+        if (1..=max).contains(&border) { border } else { FALLBACK }
+    })
+}
+
+/// Windows 10 (build < 22000); Windows 11 draws the window border differently (see `handle_calc_client_size`).
+fn is_windows_10() -> bool {
+    static IS_WINDOWS_10: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IS_WINDOWS_10.get_or_init(|| {
+        use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+        let mut version = OSVERSIONINFOW {
+            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
+            ..Default::default()
+        };
+        let status = unsafe { windows::Wdk::System::SystemServices::RtlGetVersion(&mut version) };
+        status.is_ok() && version.dwBuildNumber < 22000
+    })
 }
 
 // there is some additional non-visible space when talking about window
