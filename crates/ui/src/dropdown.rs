@@ -390,7 +390,7 @@ impl DropdownState {
         window.focus_prev(cx);
     }
 
-    /// 展开的列表。`phase` 是展开、收起的进度：从展开的方向带一点过冲地滑出，收起时退回去淡出。
+    /// 展开的列表。`phase` 是进场进度：从展开的方向淡入并移过来一点；收起时立即移除。
     fn render_list(&self, phase: motion::Phase, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette(cx);
         let count = self.items.len();
@@ -496,7 +496,7 @@ impl DropdownState {
                     .border_color(p.border)
                     .bg(p.raised)
                     .text_color(p.text)
-                    .map(|list| motion::pop(list, if down { Edge::Top } else { Edge::Bottom }, motion::SHORT, phase, shadow::menu()))
+                    .map(|list| motion::pop(list, if down { Edge::Top } else { Edge::Bottom }, motion::NUDGE, phase, shadow::menu()))
                     .on_action(cx.listener(Self::on_up))
                     .on_action(cx.listener(Self::on_down))
                     .on_action(cx.listener(Self::on_first))
@@ -514,9 +514,7 @@ impl DropdownState {
                     .child({
                         let bounds = self.list_bounds.clone();
                         canvas(move |area, _, _| bounds.set(Some(area)), |_, _, _, _| {}).absolute().top_0().left_0().size_full()
-                    })
-                    // 收起途中只是残影：不响应操作。
-                    .map(|list| if phase.leaving { motion::inert(list).into_any_element() } else { list.into_any_element() }),
+                    }),
             ),
         )
         .with_priority(1)
@@ -602,8 +600,8 @@ impl Render for DropdownState {
         // 记下触发框的位置（不触发重绘：只在下次展开时用）。
         let trigger =
             trigger.child(canvas(move |area, _, _| bounds.set(Some(area)), |_, _, _, _| {}).absolute().top_0().left_0().size_full());
-        // 收起后列表还要画一小段退场。
-        let phase = motion::presence("dropdown-list-presence", self.open, motion::BASE, motion::FAST, window, cx);
+        // 展开时淡入；收起时立即移除。
+        let phase = motion::presence("dropdown-list-presence", self.open, motion::BASE, window, cx);
         v_flex().child(trigger).children(phase.map(|phase| self.render_list(phase, window, cx)))
     }
 }

@@ -193,7 +193,7 @@ impl Render for WelcomeView {
                         Input::new(&self.api_key).aria_label(t!("settings.api_key").to_string()),
                     ))
                     .child(hint(t!("welcome.api_key_hint").to_string(), Tone::Neutral, &p))
-                    .children(self.error.clone().map(|error| motion::error_in(hint(error, Tone::Danger, &p), "welcome-error-enter"))),
+                    .children(self.error.clone().map(|error| motion::fade_in(hint(error, Tone::Danger, &p), "welcome-error-enter"))),
             ));
         crate::design::track_focus_source(v_flex())
             .size_full()
@@ -203,8 +203,7 @@ impl Render for WelcomeView {
             .children(crate::title_bar::title_bar(false, None, window, cx))
             // 平滑滚动层放在最前，先于各滚动容器拿到滚轮事件（见 `smooth_scroll`）。
             .child(self.scroll.layer(cx))
-            // 窗口打开时内容浮上来；底部按钮固定不动。
-            .child(motion::Entrance::new(motion::SLOW).from(motion::Edge::Bottom, motion::PAGE).play(body, "welcome-enter"))
+            .child(body)
             .child(
                 v_flex()
                     .flex_none()

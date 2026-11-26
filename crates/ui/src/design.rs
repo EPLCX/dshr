@@ -69,6 +69,10 @@ pub struct Palette {
     pub scrim: Hsla,
     /// 键盘焦点框。
     pub focus_ring: Hsla,
+    /// 悬停时叠在控件上的底色（正文色 5%，半透明，任何底色上都看得出来）。由其他颜色派生，配色方案不能直接改。
+    pub hover: Hsla,
+    /// 按住时叠在控件上的底色（正文色 9%）。由其他颜色派生。
+    pub pressed: Hsla,
 }
 
 pub fn palette(cx: &App) -> Palette {
@@ -78,7 +82,14 @@ pub fn palette(cx: &App) -> Palette {
     if let Some(over) = cx.try_global::<PaletteOverride>() {
         over.apply(&mut palette, dark);
     }
+    derive_roles(&mut palette);
     palette
+}
+
+/// 由其他颜色算出来的角色：配色方案（包括高对比度）改了正文色，它们跟着变。
+fn derive_roles(p: &mut Palette) {
+    p.hover = p.text.opacity(0.05);
+    p.pressed = p.text.opacity(0.09);
 }
 
 /// 最近一次输入是不是来自触摸屏，由窗口的根视图每帧开头按 `Window::last_input_was_touch` 更新
@@ -271,6 +282,9 @@ fn base_palette(cx: &App, dark: bool) -> Palette {
         danger: theme.danger,
         scrim: black().opacity(if dark { 0.55 } else { 0.35 }),
         focus_ring: accent,
+        // 由 `derive_roles` 算出。
+        hover: transparent_black(),
+        pressed: transparent_black(),
     }
 }
 
@@ -1150,10 +1164,16 @@ impl gpui_kit::component::Selectable for Pressable {
     }
 }
 
-/// 基于 [`pressable`] 的控件的悬停、选中底色（带过渡）。作为控件的第一个子元素，控件本身不再设
-/// `bg` / `hover`；铺满整个控件（含 2px 透明焦点框），和直接设 `bg` 一样大。`active` 时一直显示（选中、菜单打开）。
-pub fn hover_fill(color: Hsla, corner: f32, active: bool) -> motion::Highlight {
-    motion::highlight("hover-fill", color, corner, active).outset(FOCUS_BORDER)
+/// 基于 [`pressable`] 的控件的悬停、按下、选中底色。作为控件的第一个子元素，控件本身不再设
+/// `bg` / `hover`；铺满整个控件（含 2px 透明焦点框），和直接设 `bg` 一样大。
+/// 悬停叠 `hover`、按住叠 `pressed`（都即时生效）；`selected` 时一直铺 `selected`（选中、菜单打开）。
+pub fn hover_fill(p: &Palette, corner: f32, selected: bool) -> motion::Highlight {
+    hover_fill_with(p.selected, p, corner, selected)
+}
+
+/// 同 [`hover_fill`]，选中时的底色另给（如侧边栏里正在看的会话用强调色的浅底）。
+pub fn hover_fill_with(selected_fill: Hsla, p: &Palette, corner: f32, selected: bool) -> motion::Highlight {
+    motion::highlight("hover-fill", selected_fill, corner, selected).hover_color(p.hover).pressed_color(p.pressed).outset(FOCUS_BORDER)
 }
 
 /// 导航项（设置弹窗左侧）。调用方再加 `on_click`。
@@ -1161,7 +1181,6 @@ pub fn hover_fill(color: Hsla, corner: f32, active: bool) -> motion::Highlight {
 /// 读屏软件上是一组标签页（外层用 [`Role::TabList`]），当前页读作“已选择”。
 /// `Pressable::selected` 只管样式，选中状态要另外用 `aria_selected` 告诉读屏软件。
 pub fn nav_item(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Into<SharedString>, selected: bool, p: &Palette) -> Pressable {
-    let selected_bg = p.selected;
     let label = label.into();
     pressable(id, p)
         .role(Role::Tab)
@@ -1178,7 +1197,7 @@ pub fn nav_item(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Int
         .text_label()
         .relative()
         .when(!selected, |item| item.font_weight(FontWeight::NORMAL))
-        .child(hover_fill(selected_bg, radius::MD, selected))
+        .child(hover_fill(p, radius::MD, selected))
         .child(Icon::new(icon).size(px(size::ICON_MD)))
         .child(label)
 }
@@ -1207,7 +1226,6 @@ pub fn list_item_with_fill(
     selected_fill: Hsla,
     p: &Palette,
 ) -> Pressable {
-    let selected_bg = if selected { selected_fill } else { p.selected };
     let label = label.into();
     pressable(id, p)
         .accessibility_label(label.clone())
@@ -1222,7 +1240,7 @@ pub fn list_item_with_fill(
         .text_body()
         .relative()
         .when(selected, |item| item.font_weight(FontWeight::MEDIUM))
-        .child(hover_fill(selected_bg, radius::MD, selected))
+        .child(hover_fill_with(selected_fill, p, radius::MD, selected))
         .when_some(icon, |item, icon| item.child(Icon::new(icon).size(px(size::ICON_MD))))
         .child(div().flex_1().min_w(px(0.)).truncate().child(label))
 }
@@ -1422,15 +1440,12 @@ pub fn menu_trigger_focus(id: impl Into<ElementId>, window: &mut Window, cx: &mu
 
 /// 弹出菜单（权限、预设、模型、会话的“…”）。
 ///
-/// 打开、关闭、焦点、Esc 和点外面关闭都交给组件库的 `Popover`；外观和动画在这里画：
-/// 菜单从触发按钮那一侧带一点过冲地浮出来，阴影随之渐显；里面的选项错峰出现（`body` 的第二个参数为
-/// `true` 时由调用方套上 [`menu_item_enter`]）。
+/// 打开、关闭、焦点、Esc 和点外面关闭都交给组件库的 `Popover`；外观和进场在这里画：
+/// 菜单从触发按钮那一侧淡入并移过来一点（`BASE`），阴影随之渐显；选项和菜单一起出现，不错峰。
+/// 关上时立即移除（`Popover` 本来就不再画内容，焦点也已经回到触发按钮）。
 ///
 /// 键盘：打开时焦点落在第 `initial` 项（当前选中的那一项），↑ / ↓ / Home / End 在各项之间移动，
 /// Enter / 空格选中。`body` 用第一个参数（[`MenuFocus`]）给每一项取焦点句柄，见那里的说明。
-///
-/// 关上时 `Popover` 立刻不再画内容（焦点也已经回到触发按钮），这里在同一位置再画一小段不响应操作的
-/// “残影”退场。不能让 `Popover` 多开一会儿：它重新打开会把焦点抢回菜单，读屏软件会再报一次。
 #[allow(clippy::too_many_arguments)] // 和 `Popover` 的构造一一对应，拆成结构体反而不好读。
 pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
     id: impl Into<ElementId>,
@@ -1439,14 +1454,13 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
     trigger: T,
     on_open_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
     initial: usize,
-    body: impl Fn(&MenuFocus, bool, &mut Window, &mut App) -> AnyElement + 'static,
+    body: impl Fn(&MenuFocus, &mut Window, &mut App) -> AnyElement + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     use gpui_kit::component::popover::Popover;
 
     let id = id.into();
-    let body = std::rc::Rc::new(body);
     let menu = MenuFocus::new(&id, window, cx);
     // 打开的那一刻不把焦点交给菜单项：组件库的 `Popover` 在按下鼠标（或 Enter）的同一个事件里就移焦点，
     // 那时菜单还没画出来，无障碍树里没有这一项，讲述人的焦点落到窗口上，把窗口标题再读一遍。
@@ -1455,22 +1469,12 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
     if !open {
         menu.0.update(cx, |state, _| state.initial_given = false);
     }
-    let phase = motion::presence((id.clone(), "presence"), open, motion::BASE, motion::FAST, window, cx);
+    let phase = motion::presence((id.clone(), "presence"), open, motion::BASE, window, cx).unwrap_or(motion::Phase::SETTLED);
     // 向上展开的菜单从下面浮上来，向下展开的从上面落下来。
     let from = match anchor {
         Anchor::BottomLeft | Anchor::BottomRight | Anchor::BottomCenter => motion::Edge::Bottom,
         _ => motion::Edge::Top,
     };
-    let surface = move |content: AnyElement, phase: motion::Phase, p: &Palette| {
-        motion::pop(
-            div().rounded(px(radius::LG)).border_1().border_color(p.border).bg(p.raised).text_color(p.text).child(content),
-            from,
-            motion::SHORT,
-            phase,
-            shadow::menu(),
-        )
-    };
-    let entering = phase.filter(|phase| !phase.leaving).unwrap_or(motion::Phase::SETTLED);
     let popover = Popover::new(id)
         .anchor(anchor)
         .appearance(false)
@@ -1479,51 +1483,33 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
         .track_focus(&hold_focus)
         .on_open_change(on_open_change)
         .trigger(trigger)
-        .content({
-            let (body, menu) = (body.clone(), menu.clone());
-            move |_, window, cx| {
-                let p = palette(cx);
-                menu.begin(cx);
-                let content = body(&menu, true, window, cx);
-                let give_initial = !menu.0.read(cx).initial_given;
-                let content = menu.container(content).when(give_initial, |container| {
-                    let (menu, hold) = (menu.clone(), hold_focus.clone());
-                    container.child(focus_after_paint(move |window, cx| {
-                        if menu.0.read(cx).initial_given {
-                            return;
-                        }
-                        menu.0.update(cx, |state, _| state.initial_given = true);
-                        // 这期间焦点被别的操作移走了（比如鼠标已经移到了另一项上）：不抢。
-                        if hold.is_focused(window) {
-                            menu.focus(initial, window, cx);
-                        }
-                    }))
-                });
-                surface(content.into_any_element(), entering, &p)
-            }
-        });
-    let ghost = phase.filter(|phase| phase.leaving).map(|phase| {
-        let p = palette(cx);
-        // 和 `Popover` 一样：贴着触发按钮的对应角，留 0.25rem 的空隙。
-        let gap = window.rem_size() * 0.25;
-        let (corner, offset) = match anchor {
-            Anchor::BottomLeft => (div().top_0().left_0(), -gap),
-            Anchor::BottomRight => (div().top_0().right_0(), -gap),
-            Anchor::TopRight => (div().bottom_0().right_0(), gap),
-            _ => (div().bottom_0().left_0(), gap),
-        };
-        corner.absolute().child(
-            deferred(
-                anchored()
-                    .anchor(anchor)
-                    .offset(point(px(0.), offset))
-                    .snap_to_window_with_margin(px(space::S))
-                    .child(motion::inert(surface(body(&menu, false, window, cx), phase, &p))),
+        .content(move |_, window, cx| {
+            let p = palette(cx);
+            menu.begin(cx);
+            let content = body(&menu, window, cx);
+            let give_initial = !menu.0.read(cx).initial_given;
+            let content = menu.container(content).when(give_initial, |container| {
+                let (menu, hold) = (menu.clone(), hold_focus.clone());
+                container.child(focus_after_paint(move |window, cx| {
+                    if menu.0.read(cx).initial_given {
+                        return;
+                    }
+                    menu.0.update(cx, |state, _| state.initial_given = true);
+                    // 这期间焦点被别的操作移走了（比如鼠标已经移到了另一项上）：不抢。
+                    if hold.is_focused(window) {
+                        menu.focus(initial, window, cx);
+                    }
+                }))
+            });
+            motion::pop(
+                div().rounded(px(radius::LG)).border_1().border_color(p.border).bg(p.raised).text_color(p.text).child(content),
+                from,
+                motion::NUDGE,
+                phase,
+                shadow::menu(),
             )
-            .with_priority(1),
-        )
-    });
-    div().relative().flex_none().child(popover).children(ghost).into_any_element()
+        });
+    div().relative().flex_none().child(popover).into_any_element()
 }
 
 /// 一个不占位置的元素：它画出来之后（这一帧画完）调用一次 `then`。用来把焦点交给刚出现的东西——
@@ -1542,25 +1528,13 @@ pub fn focus_after_paint(then: impl FnOnce(&mut Window, &mut App) + 'static) -> 
     .size_0()
 }
 
-/// 弹出菜单里第 `index` 个选项的进场（错峰、从菜单展开的方向轻轻移入）。见 [`menu_popover`]。
-pub fn menu_item_enter<E: IntoElement + Styled + 'static>(item: E, id: impl Into<ElementId>, index: usize, animate: bool) -> AnyElement {
-    if !animate {
-        return item.into_any_element();
-    }
-    motion::Entrance::new(motion::BASE)
-        .from(motion::Edge::Bottom, motion::NUDGE)
-        .stagger(index, motion::STAGGER_ITEM)
-        .play(item, id)
-        .into_any_element()
-}
-
 /// 单选菜单里的一项（权限、预设、模型）：读屏软件读作“单选菜单项，已勾选 / 未勾选”。
 /// 只设语义，样式由调用方决定。
 pub fn menu_choice(item: Pressable, checked: bool) -> Pressable {
     item.role(Role::MenuItemRadio).aria_toggled(if checked { Toggled::True } else { Toggled::False })
 }
 
-/// 动效：时长、缓动、进场与退场、展开、悬停过渡、加载指示。见 `design/motion.rs`。
+/// 动效：时长、缓动、浮层进场、悬停与按下、加载指示。见 `design/motion.rs`。
 pub mod motion;
 
 /// 浮层的阴影。按层级取（见规范 2.5）；动画里由 [`motion::pop`] 按不透明度渐显。
@@ -1754,7 +1728,7 @@ mod tests {
                         .ok();
                     },
                     1,
-                    move |menu, _, _, cx| {
+                    move |menu, _, cx| {
                         let p = super::palette(cx);
                         let items: Vec<FocusHandle> = (0..3).map(|index| menu.item(index, cx)).collect();
                         let mut seen = seen.borrow_mut();

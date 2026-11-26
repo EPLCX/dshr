@@ -589,7 +589,7 @@ impl Render for InstallDialog {
             .border_color(p.border)
             .text_color(p.text)
             .overflow_hidden()
-            .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::MEDIUM, self.phase, shadow::modal()))
+            .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::SHORT, self.phase, shadow::modal()))
             .child(div().px(px(space::XXL)).pt(px(space::XL)).pb(px(space::M)).child(header))
             .child(
                 v_flex()

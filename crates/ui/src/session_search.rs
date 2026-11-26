@@ -348,7 +348,7 @@ impl Render for SessionSearchView {
             .border_color(p.border)
             .text_color(p.text)
             .overflow_hidden()
-            .map(|dialog| motion::pop(dialog, motion::Edge::Top, motion::MEDIUM, self.phase, shadow::modal()))
+            .map(|dialog| motion::pop(dialog, motion::Edge::Top, 0., self.phase, shadow::modal()))
             .child(
                 h_flex()
                     .flex_none()

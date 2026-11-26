@@ -211,15 +211,8 @@ pub struct SettingsView {
     mcp_open_log: Option<String>,
     /// “添加服务器”表单是否展开。
     mcp_form_open: bool,
-    /// 弹窗卡片的进场、退场进度（由工作区按弹窗的状态设）。
+    /// 弹窗卡片的进场进度（由工作区按弹窗的状态设）。
     phase: motion::Phase,
-    /// 上一次切换页面的方向：新页从这一边滑进来。刚打开时为 `None`。
-    page_from: Option<Edge>,
-    /// 表单的展开、收起进度。页面函数拿不到 `window`，在 `render` 里先算好。
-    mcp_form_phase: Option<motion::Phase>,
-    provider_form_phase: Option<motion::Phase>,
-    /// 提供商表单最近一次展开在哪里（`form_open` 的值）：收起的动画画在原处。
-    provider_form_at: Option<Option<String>>,
     /// “添加服务器”按钮的焦点：表单收起、服务器被移除后焦点回到这里。
     mcp_add_focus: FocusHandle,
     mcp_name: Entity<InputState>,
@@ -398,10 +391,6 @@ impl SettingsView {
             mcp_open_log: None,
             mcp_form_open: false,
             phase: motion::Phase::SETTLED,
-            page_from: None,
-            mcp_form_phase: None,
-            provider_form_phase: None,
-            provider_form_at: None,
             mcp_add_focus: cx.focus_handle(),
             mcp_name: cx.new(|cx| InputState::new(window, cx)),
             mcp_command: cx.new(|cx| InputState::new(window, cx)),
@@ -1234,7 +1223,7 @@ impl SettingsView {
         cx.open_with_system(&dir);
     }
 
-    /// 弹窗卡片的进场、退场进度。工作区每帧按弹窗的状态设，卡片据此画出浮上来、下沉的样子。
+    /// 弹窗卡片的进场进度。工作区每帧按弹窗的状态设，卡片据此画出淡入、上浮的样子。
     pub(crate) fn set_phase(&mut self, phase: motion::Phase) {
         self.phase = phase;
     }
@@ -1443,8 +1432,6 @@ impl SettingsView {
                 nav_item(("settings-nav", index), page.icon.clone(), (page.label)(), self.page == index, &p).on_click(cx.listener(
                     move |this, _, _, cx| {
                         if this.page != index {
-                            // 往下切换时新页从下面来，往上切换时从上面来。
-                            this.page_from = Some(if index > this.page { Edge::Bottom } else { Edge::Top });
                             this.page = index;
                         }
                         cx.notify();
@@ -1787,83 +1774,75 @@ impl SettingsView {
             .collect();
         let no_servers = servers.is_empty().then(|| hint(t!("settings.mcp_empty").to_string(), Tone::Neutral, &p));
 
-        // 表单展开时高度展开，收起时先收起再移除。
-        let form = self.mcp_form_phase.map(|phase| {
+        // 表单展开、收起即时完成。
+        let form = self.mcp_form_open.then(|| {
             let name_label = t!("settings.mcp_name").to_string();
             let command_label = t!("settings.mcp_command").to_string();
-            motion::reveal(
-                "mcp-form-reveal",
-                phase,
-                div().pt(px(space::M)).child(
-                    panel(&p).child(
-                        v_flex()
-                            .id("mcp-form")
-                            .role(Role::Group)
-                            .aria_label(t!("a11y.mcp_new").to_string())
-                            .gap(px(space::L))
-                            .child(heading(t!("a11y.mcp_new").to_string(), 3).text_label())
-                            .child(field(
-                                name_label.clone(),
+            div().pt(px(space::M)).child(
+                panel(&p).child(
+                    v_flex()
+                        .id("mcp-form")
+                        .role(Role::Group)
+                        .aria_label(t!("a11y.mcp_new").to_string())
+                        .gap(px(space::L))
+                        .child(heading(t!("a11y.mcp_new").to_string(), 3).text_label())
+                        .child(field(
+                            name_label.clone(),
+                            crate::design::framed_handle(
+                                gpui_kit::Focusable::focus_handle(self.mcp_name.read(cx), cx),
+                                Input::new(&self.mcp_name).w(px(240.)).aria_label(in_section(&section, &name_label)),
+                            ),
+                        ))
+                        .child(
+                            field(
+                                command_label.clone(),
+                                // 命令的格式说明直接写进名称：读屏软件在这个输入框上就能听到，不用再去找下面的提示。
                                 crate::design::framed_handle(
-                                    gpui_kit::Focusable::focus_handle(self.mcp_name.read(cx), cx),
-                                    Input::new(&self.mcp_name).w(px(240.)).aria_label(in_section(&section, &name_label)),
+                                    gpui_kit::Focusable::focus_handle(self.mcp_command.read(cx), cx),
+                                    Input::new(&self.mcp_command)
+                                        .aria_label(in_section(in_section(&section, &command_label), t!("settings.mcp_command_hint"))),
                                 ),
-                            ))
-                            .child(
-                                field(
-                                    command_label.clone(),
-                                    // 命令的格式说明直接写进名称：读屏软件在这个输入框上就能听到，不用再去找下面的提示。
-                                    crate::design::framed_handle(
-                                        gpui_kit::Focusable::focus_handle(self.mcp_command.read(cx), cx),
-                                        Input::new(&self.mcp_command)
-                                            .aria_label(in_section(in_section(&section, &command_label), t!("settings.mcp_command_hint"))),
-                                    ),
+                            )
+                            .child(hint(t!("settings.mcp_command_hint").to_string(), Tone::Neutral, &p)),
+                        )
+                        .child(
+                            h_flex()
+                                .gap(px(space::S))
+                                .children(
+                                    self.extension_error
+                                        .clone()
+                                        .map(|error| motion::fade_in(hint(error, Tone::Danger, &p), "extension-error-enter")),
                                 )
-                                .child(hint(
-                                    t!("settings.mcp_command_hint").to_string(),
-                                    Tone::Neutral,
-                                    &p,
+                                .child(div().flex_1())
+                                .child(reveal(
+                                    "reveal-cancel-mcp",
+                                    crate::design::framed(
+                                        "cancel-mcp",
+                                        Button::new("cancel-mcp")
+                                            .outline()
+                                            .label(t!("settings.cancel").to_string())
+                                            .on_click(cx.listener(|this, _, window, cx| this.close_mcp_form(window, cx))),
+                                    ),
+                                ))
+                                .child(reveal(
+                                    "reveal-add-mcp",
+                                    crate::design::framed(
+                                        "add-mcp",
+                                        Button::new("add-mcp")
+                                            .primary()
+                                            .label(t!("settings.mcp_add").to_string())
+                                            .accessibility_label(in_section(&section, t!("settings.mcp_add")))
+                                            .on_click(cx.listener(|this, _, window, cx| this.add_mcp_server(window, cx))),
+                                    ),
                                 )),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap(px(space::S))
-                                    .children(
-                                        self.extension_error
-                                            .clone()
-                                            .map(|error| motion::error_in(hint(error, Tone::Danger, &p), "extension-error-enter")),
-                                    )
-                                    .child(div().flex_1())
-                                    .child(reveal(
-                                        "reveal-cancel-mcp",
-                                        crate::design::framed(
-                                            "cancel-mcp",
-                                            Button::new("cancel-mcp")
-                                                .outline()
-                                                .label(t!("settings.cancel").to_string())
-                                                .on_click(cx.listener(|this, _, window, cx| this.close_mcp_form(window, cx))),
-                                        ),
-                                    ))
-                                    .child(reveal(
-                                        "reveal-add-mcp",
-                                        crate::design::framed(
-                                            "add-mcp",
-                                            Button::new("add-mcp")
-                                                .primary()
-                                                .label(t!("settings.mcp_add").to_string())
-                                                .accessibility_label(in_section(&section, t!("settings.mcp_add")))
-                                                .on_click(cx.listener(|this, _, window, cx| this.add_mcp_server(window, cx))),
-                                        ),
-                                    )),
-                            )
-                            // 表单里按 Esc 收起表单，而不是关掉整个设置弹窗。
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if event.keystroke.key == "escape" {
-                                    cx.stop_propagation();
-                                    this.close_mcp_form(window, cx);
-                                }
-                            })),
-                    ),
+                        )
+                        // 表单里按 Esc 收起表单，而不是关掉整个设置弹窗。
+                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                            if event.keystroke.key == "escape" {
+                                cx.stop_propagation();
+                                this.close_mcp_form(window, cx);
+                            }
+                        })),
                 ),
             )
         });
@@ -1894,9 +1873,11 @@ impl SettingsView {
                 .children(form)
                 // 表单收起时的错误（比如移除失败）显示在列表下面。
                 .when(!self.mcp_form_open, |column| {
-                    column.children(self.extension_error.clone().map(|error| {
-                        motion::error_in(div().pt(px(space::S)).child(hint(error, Tone::Danger, &p)), "extension-error-enter")
-                    }))
+                    column.children(
+                        self.extension_error.clone().map(|error| {
+                            motion::fade_in(div().pt(px(space::S)).child(hint(error, Tone::Danger, &p)), "extension-error-enter")
+                        }),
+                    )
                 }),
         )
     }
@@ -2069,7 +2050,7 @@ impl SettingsView {
                 ),
         );
         if !row.grant.is_empty() {
-            body = body.child(motion::nudge_in(
+            body = body.child(
                 h_flex()
                     .gap(px(space::S))
                     .items_center()
@@ -2096,8 +2077,7 @@ impl SettingsView {
                                 .on_click(cx.listener(move |this, _, _, cx| this.grant_plugin(index, cx))),
                         ),
                     )),
-                ("plugin-grant-enter", index),
-            ));
+            );
         }
         body = body
             .children(
@@ -2179,7 +2159,7 @@ impl SettingsView {
                     ))
             }))
             .children(row.message.clone().map(|(text, error)| {
-                motion::message_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), ("plugin-message-enter", index), error)
+                motion::fade_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), ("plugin-message-enter", index))
             }));
         if has_details {
             body = body.child(
@@ -2272,22 +2252,19 @@ impl SettingsView {
         let mut column = v_flex().pl(px(space::XL)).gap(px(space::XS)).child(div().child(toggle));
         if open {
             let lines = self.backend.plugin_logs(id);
-            // 展开的日志浮上来。
-            let enter_id = ("plugin-log-enter", index);
             if lines.is_empty() {
-                column = column.child(motion::nudge_in(hint(t!("settings.plugin_logs_empty").to_string(), Tone::Neutral, &p), enter_id));
+                column = column.child(hint(t!("settings.plugin_logs_empty").to_string(), Tone::Neutral, &p));
             } else {
                 let start = lines.len().saturating_sub(40);
                 let text: String =
                     lines[start..].iter().map(|line| format!("[{}] {}", line.level, line.text)).collect::<Vec<_>>().join("\n");
-                column = column.child(motion::rise_in(
+                column = column.child(
                     div()
                         .text_caption()
                         .text_mono(mono_font(cx))
                         .text_color(p.text_secondary)
                         .child(readable_with_id(("plugin-log-text", index), text)),
-                    enter_id,
-                ));
+                );
             }
         }
         column.into_any_element()
@@ -2330,7 +2307,7 @@ impl SettingsView {
         )
         .child(hint(t!("settings.plugin_new_hint").to_string(), Tone::Neutral, &p))
         .children(self.new_plugin_message.clone().map(|(text, error)| {
-            motion::message_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), "new-plugin-message-enter", error)
+            motion::fade_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), "new-plugin-message-enter")
         }))
         .children(self.render_browse(cx))
         .into_any_element()
@@ -2448,7 +2425,7 @@ impl SettingsView {
                     .child(section_header(shortcuts_title, None, &p))
                     .child(card(&p).p(px(space::XL)).child(shortcuts))
                     .children(
-                        self.shortcut_error.clone().map(|error| motion::error_in(hint(error, Tone::Danger, &p), "shortcut-error-enter")),
+                        self.shortcut_error.clone().map(|error| motion::fade_in(hint(error, Tone::Danger, &p), "shortcut-error-enter")),
                     )
                     .child(h_flex().child(reveal(
                         "reveal-reset-shortcuts",
@@ -2640,17 +2617,12 @@ impl SettingsView {
                 &p,
             ))
             .children(self.defaults_message.clone().map(|(text, error)| {
-                motion::message_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), "defaults-message-enter", error)
+                motion::fade_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), "defaults-message-enter")
             }));
 
-        // 表单展开时高度展开、收起时收起，都画在它展开的位置（`provider_form_at`）。
-        // 里面的内容按位置给 id 浮上来：直接换一个提供商编辑时也有一下过渡。
-        let form_phase = self.provider_form_phase;
-        let form = |at: Option<String>, enter_id: ElementId| {
-            form_phase.filter(|_| self.provider_form_at.as_ref() == Some(&at)).map(|phase| {
-                let content = motion::rise_in(div().pt(px(space::M)).child(panel(&p).child(self.form.clone())), enter_id);
-                motion::reveal("provider-form-reveal", phase, content)
-            })
+        // 表单画在它展开的位置（`form_open`），展开、收起即时完成。
+        let form = |at: Option<String>| {
+            (self.form_open.as_ref() == Some(&at)).then(|| div().pt(px(space::M)).child(panel(&p).child(self.form.clone())))
         };
         let mut rows: Vec<AnyElement> = Vec::new();
         for (index, provider) in self.providers.iter().enumerate() {
@@ -2699,13 +2671,13 @@ impl SettingsView {
                                     ))
                                 }),
                         )
-                        .children(form(Some(provider.config.id.clone()), ("provider-form-enter", index).into())),
+                        .children(form(Some(provider.config.id.clone()))),
                 )
                 .into_any_element(),
             );
         }
         let adding = self.form_open == Some(None);
-        let add_form = form(None, "provider-form-enter-new".into());
+        let add_form = form(None);
         let empty = self.providers.is_empty().then(|| hint(t!("settings.providers_empty").to_string(), Tone::Neutral, &p));
         let providers_title = t!("settings.providers").to_string();
         // “添加”表单展开在标题正下方、按钮原来的位置附近，而不是列表末尾：看的人不用去找，
@@ -2953,11 +2925,6 @@ fn field_error_text(error: &FieldError) -> String {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::reveal::follow_focus_in(&self.body_scroll, cx);
-        self.mcp_form_phase = motion::expansion("mcp-form-reveal", self.mcp_form_open, window, cx);
-        if self.form_open.is_some() {
-            self.provider_form_at = self.form_open.clone();
-        }
-        self.provider_form_phase = motion::expansion("provider-form-reveal", self.form_open.is_some(), window, cx);
         let nav = self.render_nav(cx);
         let body = self.render_page(window, cx);
         let p = palette(cx);
@@ -3014,8 +2981,8 @@ impl Render for SettingsView {
             .border_1()
             .border_color(p.border)
             .text_color(p.text)
-            // 卡片带一点过冲地浮上来、关上时下沉淡出，阴影跟着渐显（见 `motion::pop`）。
-            .map(|card| motion::pop(card, Edge::Bottom, motion::MEDIUM, self.phase, shadow::modal()))
+            // 卡片淡入并上浮一点，阴影跟着渐显（见 `motion::pop`）；关上时立即移除。
+            .map(|card| motion::pop(card, Edge::Bottom, motion::SHORT, self.phase, shadow::modal()))
             .overflow_hidden()
             .child(header)
             .child(
@@ -3030,16 +2997,8 @@ impl Render for SettingsView {
                         .pl(px(space::L))
                         .pr(px(space::XXL + space::L))
                         .pb(px(space::XXL))
-                        // 切换页面时新页面按切换的方向滑进来；刚打开时内容比卡片晚一步浮上来。
-                        // id 跟着页变。导航在这一层外面，键盘焦点不受影响。
-                        .child({
-                            let page = div().w_full().max_w(px(size::MODAL_CONTENT_MAX_WIDTH)).child(body);
-                            let entrance = match self.page_from {
-                                Some(from) => motion::Entrance::new(motion::BASE).from(from, motion::PAGE),
-                                None => motion::Entrance::new(motion::BASE).from(Edge::Bottom, motion::SHORT).delay(motion::STAGGER_HERO),
-                            };
-                            entrance.play(page, ("settings-page-enter", self.page))
-                        }),
+                        // 切换页面即时显示（导航不做动画）。
+                        .child(div().w_full().max_w(px(size::MODAL_CONTENT_MAX_WIDTH)).child(body)),
                 ),
             )
             .focus_trap("settings-trap", &self.focus_handle)
