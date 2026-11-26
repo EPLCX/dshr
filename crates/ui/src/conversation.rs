@@ -841,7 +841,6 @@ impl ConversationView {
             return None;
         }
         let p = palette(cx);
-        let selected_bg = p.selected;
         let rows = self.mention_results.iter().take(MENTION_ITEMS).enumerate().map(|(index, row)| {
             let source = match row.source.id() {
                 "file" => t!("conversation.mention_files").to_string(),
@@ -855,18 +854,19 @@ impl ConversationView {
                 .aria_description(detail.clone())
                 .flex()
                 .items_center()
+                .relative()
                 .gap(px(space::M))
-                .px(px(space::M))
-                .py(px(space::XS))
-                .rounded(px(radius::MD))
+                .min_h(px(size::LIST_ITEM))
+                .px(px(space::S))
+                .rounded(px(radius::SM))
                 .cursor_pointer()
-                .hover(move |style| style.bg(selected_bg))
+                .child(hover_fill(&p, radius::SM, false))
                 .child(div().flex_none().text_caption().text_color(p.text_secondary).child(source))
                 .child(div().flex_none().text_label().child(row.item.title.clone()))
                 .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(detail))
                 .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(picked.clone(), window, cx)))
         });
-        Some(card(&p).p(px(space::XS)).child(v_flex().gap(px(2.)).children(rows)).into_any_element())
+        Some(suggestion_list("mention-menu", rows.collect(), &p))
     }
 
     /// 斜杠菜单：输入框以 `/` 开头、还在打名字时列出匹配的命令，点一下执行（有参数的先补全名字）。
@@ -882,7 +882,6 @@ impl ConversationView {
             return None;
         }
         let p = palette(cx);
-        let selected_bg = p.selected;
         let rows = items.into_iter().enumerate().map(|(index, item)| {
             let label = format!("/{}", item.trigger);
             let picked = item.clone();
@@ -892,12 +891,13 @@ impl ConversationView {
                 .aria_description(item.description.clone())
                 .flex()
                 .items_center()
+                .relative()
                 .gap(px(space::M))
-                .px(px(space::M))
-                .py(px(space::XS))
-                .rounded(px(radius::MD))
+                .min_h(px(size::LIST_ITEM))
+                .px(px(space::S))
+                .rounded(px(radius::SM))
                 .cursor_pointer()
-                .hover(move |style| style.bg(selected_bg))
+                .child(hover_fill(&p, radius::SM, false))
                 .child(div().flex_none().text_label().text_mono(mono_font(cx)).child(label))
                 .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(item.description.clone()))
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -905,7 +905,7 @@ impl ConversationView {
                     this.run_plugin_command(picked.clone(), String::new(), window, cx);
                 }))
         });
-        Some(card(&p).p(px(space::XS)).child(v_flex().gap(px(2.)).children(rows)).into_any_element())
+        Some(suggestion_list("slash-menu", rows.collect(), &p))
     }
 
     /// 输入框里现在的字（插件的 `host.composer.get`）。
@@ -1377,6 +1377,12 @@ impl ConversationView {
         cx.notify();
     }
 
+    /// 画首页（标题和居中的输入卡片）：还没有任何消息，而且不是正在载入已有会话的日志。
+    /// 载入期间画对话页的布局（空的消息列表 + 底部的输入卡片），首页不会先闪一下再被换掉。
+    fn shows_home(&self) -> bool {
+        self.transcript.rows.is_empty() && !self.loading
+    }
+
     /// 首页标题：品牌标记 + 标语 + “预览版”徽标。
     fn render_hero(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette(cx);
@@ -1388,18 +1394,18 @@ impl ConversationView {
             .child(badge(t!("conversation.preview").to_string(), &p))
     }
 
-    /// 输入卡片上方的工作区选择。
+    /// 输入卡片第一行左边的工作区选择（和附件标签同一行）。
     fn render_context_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let label = match &self.workspace {
             Some(path) => path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned()),
             None => t!("conversation.choose_workspace").to_string(),
         };
         let name = t!("a11y.choice", group = t!("a11y.workspace_chip"), value = label).to_string();
-        h_flex().gap(px(space::S)).child(crate::design::framed(
+        h_flex().child(crate::design::framed(
             "workspace-chip",
             Button::new("workspace-chip")
                 .ghost()
-                .control_sm()
+                .control_xs()
                 .icon(IconName::Folder)
                 .label(label)
                 .accessibility_label(name)
@@ -1684,42 +1690,43 @@ impl ConversationView {
     }
 
     /// 已选附件的标签，每个带移除按钮。
-    fn render_attachment_chips(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.attachments.is_empty() {
-            return None;
-        }
+    fn render_attachment_chips(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = palette(cx);
-        let chips = self.attachments.iter().enumerate().map(|(index, attachment)| {
-            let name = attachment.label();
-            let is_image = match attachment {
-                PendingAttachment::Path(path) => dshr_core::image_media_type(path).is_some(),
-                PendingAttachment::Screenshot { .. } => true,
-                PendingAttachment::Mention { .. } => false,
-            };
-            h_flex()
-                .gap(px(space::XS))
-                .pl(px(space::S))
-                .rounded(px(radius::MD))
-                .bg(p.sunken)
-                .text_caption()
-                .child(Icon::new(if is_image { IMAGE_ICON } else { IconName::File.into() }).size(px(size::ICON_SM)))
-                .child(readable_with_id(("attachment", index), name.clone()))
-                .child(crate::design::framed(
-                    ("remove-attachment", index),
-                    Button::new(("remove-attachment", index))
-                        .ghost()
-                        .control_xs()
-                        .icon(IconName::Close)
-                        .accessibility_label(t!("conversation.remove_attachment", name = name).to_string())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if index < this.attachments.len() {
-                                this.attachments.remove(index);
-                                cx.notify();
-                            }
-                        })),
-                ))
-        });
-        Some(h_flex().flex_wrap().gap(px(space::XS)).children(chips).into_any_element())
+        self.attachments
+            .iter()
+            .enumerate()
+            .map(|(index, attachment)| {
+                let name = attachment.label();
+                let is_image = match attachment {
+                    PendingAttachment::Path(path) => dshr_core::image_media_type(path).is_some(),
+                    PendingAttachment::Screenshot { .. } => true,
+                    PendingAttachment::Mention { .. } => false,
+                };
+                h_flex()
+                    .gap(px(space::XS))
+                    .pl(px(space::S))
+                    .rounded(px(radius::MD))
+                    .bg(p.sunken)
+                    .text_caption()
+                    .child(Icon::new(if is_image { IMAGE_ICON } else { IconName::File.into() }).size(px(size::ICON_SM)))
+                    .child(readable_with_id(("attachment", index), name.clone()))
+                    .child(crate::design::framed(
+                        ("remove-attachment", index),
+                        Button::new(("remove-attachment", index))
+                            .ghost()
+                            .control_xs()
+                            .icon(IconName::Close)
+                            .accessibility_label(t!("conversation.remove_attachment", name = name).to_string())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if index < this.attachments.len() {
+                                    this.attachments.remove(index);
+                                    cx.notify();
+                                }
+                            })),
+                    ))
+                    .into_any_element()
+            })
+            .collect()
     }
 
     /// 模型与思考菜单（对应原版的“模型和推理”菜单）。
@@ -1943,7 +1950,7 @@ impl ConversationView {
         let icon_enter =
             |icon: Icon, id: &'static str| motion::Entrance::new(motion::FAST).from(Edge::Bottom, motion::NUDGE).play(icon, id);
         let base = pressable("send", &p)
-            .size(px(size::CONTROL_MD))
+            .size(px(size::CONTROL_SM))
             .flex_none()
             .rounded_full()
             .flex()
@@ -1956,12 +1963,12 @@ impl ConversationView {
             // 盖过“正在回复”；用键盘 Tab 到这个按钮上照常能按。
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .child(
-                motion::highlight("send-stop-fill", p.text, size::CONTROL_MD / 2., stop).without_hover().animate(motion::FAST).outset(2.),
+                motion::highlight("send-stop-fill", p.text, size::CONTROL_SM / 2., stop).without_hover().animate(motion::FAST).outset(2.),
             )
             // 悬停提亮、按住压暗（可用时才有）。
             .when(enabled, |button| {
                 button.child(
-                    motion::highlight("send-state", transparent_black(), size::CONTROL_MD / 2., false)
+                    motion::highlight("send-state", transparent_black(), size::CONTROL_SM / 2., false)
                         .hover_color(white().opacity(0.14))
                         .pressed_color(black().opacity(0.14))
                         .outset(2.),
@@ -2199,7 +2206,7 @@ impl ConversationView {
         let send = self.render_send_button(window, cx);
         let p = palette(cx);
 
-        let mut column = v_flex().w_full().gap(px(space::S)).child(context_bar);
+        let mut column = v_flex().w_full().gap(px(space::S));
         if let Some(error) = &self.error {
             // 需要立即处理的错误才用带描边的块。
             // 出错时淡入；原因写在文字里。
@@ -2224,72 +2231,80 @@ impl ConversationView {
             return column.children(panels).child(queue).child(approval);
         }
         let drag_border = self.file_drag;
-        column.children(panels).children(slash_menu).child(queue).child(
-            v_flex()
-                .w_full()
-                .rounded(px(radius::XL))
-                .border_1()
-                // 文件拖进窗口时用高亮色提示：松手就加为附件。
-                .border_color(if drag_border { p.accent } else { p.border })
-                .bg(p.surface)
-                .shadow(crate::design::shadow::composer(&p))
-                .p(px(space::M))
-                .gap(px(space::XS))
-                // 文件拖放（GPUI 把它翻译成内部拖拽）：悬停时高亮，松手把路径加进附件。
-                .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                    this.file_drag = false;
-                    this.add_paths(paths.paths().to_vec(), cx);
-                }))
-                .on_drag_move(cx.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, cx| {
-                    if !this.file_drag {
-                        this.file_drag = true;
-                        cx.notify();
-                    }
-                }))
-                .on_file_drop_exit(cx.listener(|this, _, _, cx| {
-                    this.file_drag = false;
+        let typing = gpui_kit::Focusable::focus_handle(self.input.read(cx), cx).is_focused(window);
+        // 文件拖进窗口时描边用强调色（松手就加为附件）；输入框有焦点时描边略深一点。
+        let border = if drag_border {
+            p.accent
+        } else if typing {
+            p.text.opacity(0.25)
+        } else {
+            p.border
+        };
+        // `/`、`@` 的候选列表浮在卡片上沿之上，不把卡片往下推。
+        let suggestions = slash_menu.map(|menu| div().absolute().left_0().right_0().bottom_full().pb(px(space::XS)).occlude().child(menu));
+        let card = v_flex()
+            .w_full()
+            .rounded(px(radius::XL))
+            .border_1()
+            .border_color(border)
+            .bg(p.surface)
+            .shadow(crate::design::shadow::composer(&p))
+            .p(px(space::S))
+            .gap(px(space::XS))
+            // 文件拖放（GPUI 把它翻译成内部拖拽）：悬停时高亮，松手把路径加进附件。
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                this.file_drag = false;
+                this.add_paths(paths.paths().to_vec(), cx);
+            }))
+            .on_drag_move(cx.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, cx| {
+                if !this.file_drag {
+                    this.file_drag = true;
                     cx.notify();
-                }))
-                // 没选工作区时也能先输入，发送按钮在选好之前不可用。
-                .children(chips)
-                // 多行输入框默认把 Tab / Shift+Tab 当缩进、反缩进，键盘焦点就困在输入框里，
-                // 走不到发送、菜单和侧边栏。消息里用不到缩进：在外层先截住这两个动作，改成移动焦点。
-                .child(
-                    div()
-                        .capture_action(|_: &IndentInline, window, cx| {
+                }
+            }))
+            .on_file_drop_exit(cx.listener(|this, _, _, cx| {
+                this.file_drag = false;
+                cx.notify();
+            }))
+            // 第一行：工作区、附件。没选工作区时也能先输入，发送按钮在选好之前不可用。
+            .child(h_flex().flex_wrap().items_center().gap(px(space::XS)).child(context_bar).children(chips))
+            // 多行输入框默认把 Tab / Shift+Tab 当缩进、反缩进，键盘焦点就困在输入框里，
+            // 走不到发送、菜单和侧边栏。消息里用不到缩进：在外层先截住这两个动作，改成移动焦点。
+            .child(
+                div()
+                    .px(px(space::S))
+                    .capture_action(|_: &IndentInline, window, cx| {
+                        cx.stop_propagation();
+                        window.focus_next(cx);
+                    })
+                    .capture_action(|_: &OutdentInline, window, cx| {
+                        cx.stop_propagation();
+                        window.focus_prev(cx);
+                    })
+                    // Ctrl+V 先问剪贴板：是图片或文件（比如截图、从文件管理器复制的文件）
+                    // 就加为附件，不让输入框当成纯文本处理。
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        let paste = event.keystroke.key == "v"
+                            && event.keystroke.modifiers.platform
+                            && !event.keystroke.modifiers.shift
+                            && !event.keystroke.modifiers.alt;
+                        if paste && this.paste_clipboard(window, cx) {
                             cx.stop_propagation();
-                            window.focus_next(cx);
-                        })
-                        .capture_action(|_: &OutdentInline, window, cx| {
-                            cx.stop_propagation();
-                            window.focus_prev(cx);
-                        })
-                        // Ctrl+V 先问剪贴板：是图片或文件（比如截图、从文件管理器复制的文件）
-                        // 就加为附件，不让输入框当成纯文本处理。
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                            let paste = event.keystroke.key == "v"
-                                && event.keystroke.modifiers.platform
-                                && !event.keystroke.modifiers.shift
-                                && !event.keystroke.modifiers.alt;
-                            if paste && this.paste_clipboard(window, cx) {
-                                cx.stop_propagation();
-                            }
-                        }))
-                        .child(
-                            Textarea::new(&self.input).appearance(false).aria_label(t!("a11y.message_input").to_string()).text_content(),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap(px(space::XS))
-                        .child(attach)
-                        .children(preset_menu)
-                        .children(permission_menu)
-                        .child(div().flex_1())
-                        .child(model_menu)
-                        .child(send),
-                ),
-        )
+                        }
+                    }))
+                    .child(Textarea::new(&self.input).appearance(false).aria_label(t!("a11y.message_input").to_string()).text_content()),
+            )
+            .child(
+                h_flex()
+                    .gap(px(space::XS))
+                    .child(attach)
+                    .children(preset_menu)
+                    .children(permission_menu)
+                    .child(div().flex_1())
+                    .child(model_menu)
+                    .child(send),
+            );
+        column.children(panels).child(queue).child(div().relative().w_full().child(card).children(suggestions))
     }
 
     /// 审批面板：在输入卡片的位置问用户是否允许这次工具调用。出现时焦点落在“允许”上；
@@ -2333,7 +2348,8 @@ impl ConversationView {
                         .items_center()
                         .gap(px(space::S))
                         .px(px(space::M))
-                        .py(px(space::S))
+                        .py(px(6.))
+                        .min_h(px(size::LIST_ITEM))
                         .rounded(px(radius::MD))
                         .cursor_pointer()
                         .when(active, |item| item.bg(p.selected))
@@ -2424,7 +2440,7 @@ impl ConversationView {
             .border_color(p.warning)
             .bg(p.surface)
             .shadow(crate::design::shadow::composer(&p))
-            .p(px(space::M))
+            .p(px(space::S))
             .gap(px(space::S))
             .child(
                 h_flex()
@@ -2943,11 +2959,12 @@ impl ConversationView {
                     .aria_label(label)
                     // 操作说明只在第一次进入消息列表时读：之后每条都读一遍太吵。
                     .when(self.current_message.is_none(), |message| message.aria_description(t!("a11y.message_help").to_string()))
-                    .rounded(px(radius::MD))
+                    // 焦点框的圆角和用户气泡一样（不比里面的气泡小）。
+                    .rounded(px(radius::XL))
                     .border_2()
                     .border_color(transparent_black())
                     .relative()
-                    .map(|message| with_focus_ring(message, focused, radius::MD, window, &p))
+                    .map(|message| with_focus_ring(message, focused, radius::XL, window, &p))
                     // 点在消息的任何地方都让它获得焦点（读屏软件读出全文）。回复正文是可选择文字的 Markdown，
                     // 文字选择会把按下事件拿走，消息自己的“按下就聚焦”轮不到，以前只有点在思考那一段才行。
                     // 在捕获阶段登记、等这次按下处理完再聚焦：不打断文字选择，也不会被别的处理再抢走。
@@ -3060,7 +3077,7 @@ impl ConversationView {
                 .child(
                     div()
                         .max_w(px(size::CONTENT_MAX_WIDTH * 0.75))
-                        .px(px(space::L))
+                        .px(px(space::M))
                         .py(px(space::S))
                         .rounded(px(radius::XL))
                         .bg(p.selected)
@@ -3197,7 +3214,8 @@ impl ConversationView {
             .flex()
             .items_center()
             .px(px(space::M))
-            .py(px(space::S))
+            .py(px(6.))
+            .min_h(px(size::LIST_ITEM))
             .gap(px(space::S))
             .cursor_pointer()
             .relative()
@@ -3291,9 +3309,11 @@ impl ConversationView {
             let plugin_body = plugin_card
                 .and_then(|card| card.body.as_ref())
                 .map(|tree| crate::plugin_page::static_tree(tree, &format!("tool-card-{index}"), cx));
-            let body = match plugin_body.or_else(|| tool_view.as_ref().and_then(|view| view.render_output(tool, cx))) {
-                Some(content) => body.child(div().px(px(space::M)).py(px(space::S)).child(content)),
-                None => body.px(px(space::M)).py(px(space::S)).child(readable_with_id("output", output.clone())),
+            // 界面插件画的输出（如 diff）自己管左右留白：着色的行要铺满整行宽度。
+            let body = match (plugin_body, tool_view.as_ref().and_then(|view| view.render_output(tool, cx))) {
+                (Some(content), _) => body.child(div().px(px(space::M)).py(px(space::S)).child(content)),
+                (None, Some(content)) => body.child(content),
+                (None, None) => body.px(px(space::M)).py(px(space::S)).child(readable_with_id("output", output.clone())),
             };
             tool_card = tool_card.child(v_flex().child(divider(&p)).child(body));
         }
@@ -3692,13 +3712,15 @@ impl Render for ConversationView {
 
         // 首页：标题与输入卡片一起，在可用区域中偏上居中。打开已有会话、日志还在加载时不画首页
         // （否则首页先闪一下再换成对话内容），只画空的对话区和底部的输入卡片。
-        if self.transcript.rows.is_empty() && !self.loading {
+        if self.shows_home() {
             let hero = self.render_hero(cx);
             return root.child(
-                v_flex().flex_1().items_center().justify_center().px(px(space::XXL)).pb(px(space::XXXL * 2.)).child(
+                v_flex().flex_1().items_center().justify_center().pb(px(space::XXXL * 2.)).child(
+                    // 和对话页的输入区一样：最大宽度里含左右内边距，发出第一条消息时输入卡片不变宽窄。
                     v_flex()
                         .w_full()
                         .max_w(px(size::CONTENT_MAX_WIDTH))
+                        .px(px(space::XXL))
                         .gap(px(space::XXXL))
                         .child(hero)
                         .child(div().id(COMPOSER_SLOT).w_full().child(composer)),
@@ -3725,6 +3747,22 @@ impl Render for ConversationView {
                 .child(composer),
         )
     }
+}
+
+/// `/`、`@` 候选列表的外观：和弹出菜单一样（圆角 `LG`、内边距 4、描边、浮层阴影），最多 8 行高，再多就滚动。
+fn suggestion_list(id: &'static str, rows: Vec<crate::design::Pressable>, p: &crate::design::Palette) -> AnyElement {
+    v_flex()
+        .id(id)
+        .max_h(px(size::LIST_ITEM * 8. + space::XS * 2. + 2.))
+        .overflow_y_scroll()
+        .p(px(space::XS))
+        .rounded(px(radius::LG))
+        .border_1()
+        .border_color(p.border)
+        .bg(p.raised)
+        .shadow(crate::design::shadow::menu(p))
+        .children(rows)
+        .into_any_element()
 }
 
 /// Tab 正要走进、还没画出来的一行（见 `ConversationView::tab_into_row`）。
@@ -3988,7 +4026,8 @@ mod menu_tests {
         // 手指往下拖：内容跟着往下走，看到更早的行。
         touch_drag(cx, fixture.window, (500., 150.), (500., 550.));
         let after = top(cx);
-        assert!(after + 10 < before, "应该往回滚了：{before} → {after}");
+        // 拖了 400px（一行约 34px），至少回滚 8 行。以前写的是 10 行，正好落在行的边界上，输入区高度一变就时过时不过。
+        assert!(after + 8 < before, "应该往回滚了：{before} → {after}");
         assert!(cx.update_window(fixture.window, |_, window, _| window.last_input_was_touch()).unwrap());
     }
 
@@ -4289,6 +4328,16 @@ mod menu_tests {
         assert_eq!(cx.update(|cx| view.read(cx).draft(cx)), "  草稿 ", "空输入框放回草稿，原样保留空白");
         step(cx, fixture.window, |window, cx| view.update(cx, |view, cx| view.restore_draft("别的", window, cx)));
         assert_eq!(cx.update(|cx| view.read(cx).draft(cx)), "  草稿 ", "已有字时不覆盖");
+    }
+
+    /// 打开已有会话、日志还在后台读时不画首页（以前首页会先出现一下再换成对话内容）。
+    #[gpui::test]
+    fn loading_a_session_does_not_show_the_home_page(cx: &mut TestAppContext) {
+        let fixture = open(cx, 1);
+        let view = fixture.view.clone();
+        assert!(cx.update(|cx| view.read(cx).shows_home()), "新会话是首页");
+        cx.update(|cx| view.update(cx, |view, _| view.loading = true));
+        assert!(!cx.update(|cx| view.read(cx).shows_home()), "载入日志期间不画首页");
     }
 
     #[gpui::test]

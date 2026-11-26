@@ -51,11 +51,12 @@ pub mod size {
     pub const SIDEBAR_WIDTH: f32 = 260.;
     /// 收起后的侧边栏：一列图标按钮。
     pub const SIDEBAR_RAIL_WIDTH: f32 = 56.;
-    pub const CONTENT_MAX_WIDTH: f32 = 860.;
-    pub const MODAL_WIDTH: f32 = 1000.;
-    pub const MODAL_HEIGHT: f32 = 820.;
-    pub const MODAL_NAV_WIDTH: f32 = 240.;
-    pub const MODAL_CONTENT_MAX_WIDTH: f32 = 720.;
+    /// 消息列与输入卡片的最大宽度（含左右各 24 的内边距，正文约 752）。
+    pub const CONTENT_MAX_WIDTH: f32 = 800.;
+    pub const MODAL_WIDTH: f32 = 960.;
+    pub const MODAL_HEIGHT: f32 = 720.;
+    pub const MODAL_NAV_WIDTH: f32 = 220.;
+    pub const MODAL_CONTENT_MAX_WIDTH: f32 = 680.;
     pub const MENU_WIDTH: f32 = 300.;
 }
 

@@ -245,7 +245,7 @@ impl SessionSearchView {
             .gap(px(space::M))
             .px(px(space::L))
             .py(px(space::S))
-            .rounded(px(radius::LG))
+            .rounded(px(radius::MD))
             // 焦点框：2px 透明边框，聚焦时上色（见 `with_focus_ring`）。
             .border_2()
             .border_color(transparent_black())
@@ -273,7 +273,7 @@ impl SessionSearchView {
                     .child(div().text_body().truncate().child(title))
                     .child(div().text_caption().text_color(p.text_secondary).truncate().child(subtitle)),
             );
-        with_focus_ring(row, focused, radius::LG, window, p).into_any_element()
+        with_focus_ring(row, focused, radius::MD, window, p).into_any_element()
     }
 }
 

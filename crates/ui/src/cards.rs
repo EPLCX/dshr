@@ -17,6 +17,9 @@ use crate::plugin::{
 use crate::settings::SettingsUi;
 use crate::transcript::{ChangeSummary, DiffLineKind, ToolRow, parse_change_report};
 
+/// 计划面板里步骤列表最高这么多，再多在面板里滚动。
+const PLAN_MAX_HEIGHT: f32 = 240.;
+
 /// 桌面版自带的界面插件。顺序决定设置页、面板、状态行的先后。
 pub fn builtin_ui_plugins() -> Vec<Box<dyn UiPlugin>> {
     vec![Box::new(SettingsUi), Box::new(AccountUi), Box::new(FsUi), Box::new(PlanUi), Box::new(PresetsUi), Box::new(PermissionUi)]
@@ -78,7 +81,7 @@ impl ToolCard for ChangeCard {
                 DiffLineKind::Context => row,
             }
         });
-        Some(div().py(px(space::XS)).children(lines).into_any_element())
+        Some(div().py(px(space::S)).children(lines).into_any_element())
     }
 }
 
@@ -182,7 +185,10 @@ impl ComposerPanel for PlanPanel {
             card(&p)
                 .px(px(space::L))
                 .py(px(space::M))
-                .child(v_flex().gap(px(space::S)).child(header).when(expanded, |panel| panel.children(steps)))
+                .child(v_flex().gap(px(space::S)).child(header).when(expanded, |panel| {
+                    // 步骤多时在面板里滚动，不把输入区无限推高。
+                    panel.child(v_flex().id("plan-steps").max_h(px(PLAN_MAX_HEIGHT)).overflow_y_scroll().gap(px(space::S)).children(steps))
+                }))
                 .into_any_element(),
         )
     }

@@ -1448,7 +1448,7 @@ impl SettingsView {
             .aria_orientation(Orientation::Vertical)
             .w(px(size::MODAL_NAV_WIDTH))
             .flex_none()
-            .px(px(space::L))
+            .px(px(space::S))
             .gap(px(space::XS))
             .children(items)
     }
@@ -2930,9 +2930,9 @@ impl Render for SettingsView {
         let body = self.render_page(window, cx);
         let p = palette(cx);
         let header = h_flex()
-            .px(px(space::XXL + space::L))
-            .pt(px(space::XXL))
-            .pb(px(space::L))
+            .px(px(space::XXL))
+            .pt(px(space::XL))
+            .pb(px(space::M))
             .gap(px(space::S))
             .child(div().flex_1().child(heading(t!("settings.title").to_string(), 1).text_title()))
             .child(crate::design::framed(
@@ -2996,7 +2996,7 @@ impl Render for SettingsView {
                         .h_full()
                         .overflow_y_scroll()
                         .pl(px(space::L))
-                        .pr(px(space::XXL + space::L))
+                        .pr(px(space::XXL))
                         .pb(px(space::XXL))
                         // 切换页面即时显示（导航不做动画）。
                         .child(div().w_full().max_w(px(size::MODAL_CONTENT_MAX_WIDTH)).child(body)),
