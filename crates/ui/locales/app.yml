@@ -267,17 +267,6 @@ sidebar:
     es: "La acción falló: %{error}"
     fr: "Échec de l’action : %{error}"
     pt: "Falha na ação: %{error}"
-  account_api_key:
-    zh-CN: 账号：使用 API Key
-    en: "Account: API key"
-    zh-HK: "帳戶：API Key"
-    zh-TW: "帳號：API 金鑰"
-    de: "Konto: API-Schlüssel"
-    el: "Λογαριασμός: κλειδί API"
-    ja: "アカウント: APIキー"
-    es: "Cuenta: clave API"
-    fr: "Compte : clé API"
-    pt: "Conta: chave de API"
   account_missing:
     zh-CN: 账号：未配置
     en: "Account: not set up"
@@ -4564,6 +4553,50 @@ settings:
     es: "Esfuerzo de razonamiento predeterminado para nuevas sesiones"
     fr: "Effort de raisonnement par défaut pour les nouvelles sessions"
     pt: "Esforço de raciocínio padrão para novas sessões"
+  default_permission:
+    zh-CN: 权限
+    en: Permissions
+    zh-HK: "權限"
+    zh-TW: "權限"
+    de: "Berechtigungen"
+    el: "Δικαιώματα"
+    ja: "権限"
+    es: "Permisos"
+    fr: "Autorisations"
+    pt: "Permissões"
+  default_permission_hint:
+    zh-CN: 新会话开始时的权限模式；每个会话里仍可在输入框旁边改。
+    en: The permission mode new sessions start with. You can still change it next to the message box in each session.
+    zh-HK: "新對話開始時嘅權限模式；每個對話入面仍然可以喺輸入框隔籬改。"
+    zh-TW: "新工作階段開始時的權限模式；每個工作階段仍可在輸入框旁邊變更。"
+    de: "Der Berechtigungsmodus, mit dem neue Sitzungen beginnen. In jeder Sitzung lässt er sich neben dem Eingabefeld weiterhin ändern."
+    el: "Η λειτουργία δικαιωμάτων με την οποία ξεκινούν οι νέες συνεδρίες. Μπορείτε ακόμη να την αλλάξετε δίπλα στο πλαίσιο μηνύματος σε κάθε συνεδρία."
+    ja: "新しいセッションの開始時の権限モードです。各セッションでも入力欄の横で変更できます。"
+    es: "El modo de permisos con el que empiezan las sesiones nuevas. Puedes cambiarlo en cada sesión junto al cuadro de mensaje."
+    fr: "Le mode d’autorisation des nouvelles sessions. Vous pouvez toujours le changer à côté de la zone de message dans chaque session."
+    pt: "O modo de permissões com que as novas sessões começam. Ainda pode alterá-lo junto à caixa de mensagem em cada sessão."
+  default_preset:
+    zh-CN: 模式
+    en: Mode
+    zh-HK: "模式"
+    zh-TW: "模式"
+    de: "Modus"
+    el: "Λειτουργία"
+    ja: "モード"
+    es: "Modo"
+    fr: "Mode"
+    pt: "Modo"
+  default_preset_hint:
+    zh-CN: 新会话开始时的模式（标准、规划、审查、创造）；每个会话里仍可在输入框旁边改。
+    en: The mode new sessions start with (standard, plan, review, create). You can still change it next to the message box in each session.
+    zh-HK: "新對話開始時嘅模式（標準、規劃、審查、創造）；每個對話入面仍然可以喺輸入框隔籬改。"
+    zh-TW: "新工作階段開始時的模式（標準、規劃、審查、創造）；每個工作階段仍可在輸入框旁邊變更。"
+    de: "Der Modus, mit dem neue Sitzungen beginnen (Standard, Planen, Prüfen, Erstellen). In jeder Sitzung lässt er sich neben dem Eingabefeld weiterhin ändern."
+    el: "Η λειτουργία με την οποία ξεκινούν οι νέες συνεδρίες (τυπική, σχεδιασμός, έλεγχος, δημιουργία). Μπορείτε ακόμη να την αλλάξετε δίπλα στο πλαίσιο μηνύματος σε κάθε συνεδρία."
+    ja: "新しいセッションの開始時のモード（標準・計画・レビュー・作成）です。各セッションでも入力欄の横で変更できます。"
+    es: "El modo con el que empiezan las sesiones nuevas (estándar, planificar, revisar, crear). Puedes cambiarlo en cada sesión junto al cuadro de mensaje."
+    fr: "Le mode des nouvelles sessions (standard, planifier, relire, créer). Vous pouvez toujours le changer à côté de la zone de message dans chaque session."
+    pt: "O modo com que as novas sessões começam (padrão, planear, rever, criar). Ainda pode alterá-lo junto à caixa de mensagem em cada sessão."
   saved:
     zh-CN: 已保存
     en: Saved
@@ -5089,6 +5122,28 @@ about:
     es: "Este programa incluye %{count} crates de Rust de código abierto, además de QuickJS-ng, Zstandard, AWS-LC, los iconos de Lucide y otros componentes. Siguen siendo propiedad de sus autores y se usan bajo sus propias licencias."
     fr: "Ce programme inclut %{count} crates Rust open source, ainsi que QuickJS-ng, Zstandard, AWS-LC, les icônes Lucide et d’autres composants. Ils restent la propriété de leurs auteurs et sont utilisés selon leurs propres licences."
     pt: "Este programa inclui %{count} crates de código aberto em Rust, além de QuickJS-ng, Zstandard, AWS-LC, ícones Lucide e outros componentes. Eles continuam sendo propriedade de seus autores e são usados sob as respectivas licenças."
+  repository:
+    zh-CN: 仓库
+    en: Repository
+    zh-HK: "原始碼倉庫"
+    zh-TW: "儲存庫"
+    de: "Repository"
+    el: "Αποθετήριο"
+    ja: "リポジトリ"
+    es: "Repositorio"
+    fr: "Dépôt"
+    pt: "Repositório"
+  open_repository:
+    zh-CN: 在浏览器中打开仓库
+    en: Open repository in browser
+    zh-HK: "喺瀏覽器打開倉庫"
+    zh-TW: "在瀏覽器中開啟儲存庫"
+    de: "Repository im Browser öffnen"
+    el: "Άνοιγμα αποθετηρίου στο πρόγραμμα περιήγησης"
+    ja: "ブラウザーでリポジトリを開く"
+    es: "Abrir el repositorio en el navegador"
+    fr: "Ouvrir le dépôt dans le navigateur"
+    pt: "Abrir o repositório no navegador"
   open_notices:
     zh-CN: 查看第三方声明
     en: View third-party notices

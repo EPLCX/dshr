@@ -1,6 +1,10 @@
 //! “搜索会话”弹窗：按标题找会话。顶上是搜索框，下面是结果（没输入时是最近的会话），底部是按键提示。
 //! ↑ ↓ 选择，Enter 打开，Esc 关闭；鼠标悬停的那一项成为高亮项，点一下打开。
 //! 搜索框的角色是 `SearchInput`（UIA 里是编辑框）：讲述人聚焦到它时自动切到焦点模式，打的字进输入框。
+//!
+//! 结果是真正能拿到键盘焦点的列表项（读屏软件跟着焦点读出每一项）：在搜索框里按 ↓（或 Tab）进到列表，
+//! 列表里 ↑ ↓ / Home / End 移动，在第一项上按 ↑ 回到搜索框；在列表里直接打字也回到搜索框接着输入。
+//! 同一时刻只有高亮的那一项在 Tab 顺序里（“漫游 Tab 停靠点”），Tab 不用一项一项走过整个列表。
 
 use std::ops::Range;
 use std::time::{Duration, SystemTime};
@@ -14,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use crate::design::{Typography as _, motion, palette, radius, shadow, size, space};
+use crate::design::{Typography as _, motion, palette, radius, readable_with_id, shadow, size, space, with_focus_ring};
 
 /// 没输入时列出几个最近的会话。
 const RECENT: usize = 20;
@@ -35,6 +39,8 @@ pub struct SessionSearchView {
     /// 当前结果：`sessions` 里的下标，按显示顺序。
     matches: Vec<usize>,
     highlighted: usize,
+    /// 每个结果行的焦点句柄，按显示位置（不够时渲染时补上）。
+    rows: Vec<FocusHandle>,
     focus: FocusHandle,
     /// 刚打开、焦点还没进搜索框。等弹窗第一次画出来再给焦点：在那之前无障碍树里还没有搜索框，
     /// 讲述人收不到这次焦点变化，停在浏览模式里，打的字被当成快速导航键（“没有下一个标题级别”），输入不进去。
@@ -60,6 +66,7 @@ impl SessionSearchView {
             input,
             matches,
             highlighted: 0,
+            rows: Vec::new(),
             focus: cx.focus_handle(),
             focus_pending: true,
             scroll: ScrollHandle::new(),
@@ -94,15 +101,103 @@ impl SessionSearchView {
         cx.notify();
     }
 
-    fn step(&mut self, delta: isize, cx: &mut Context<Self>) {
+    /// 焦点在第几个结果行上（不在列表里时是 `None`）。
+    fn focused_row(&self, window: &Window) -> Option<usize> {
+        self.rows.iter().take(self.matches.len()).position(|handle| handle.is_focused(window))
+    }
+
+    /// 高亮第 `position` 项（超出范围时夹到两头），滚进视口；`focus` 时焦点也移过去。
+    fn highlight(&mut self, position: isize, focus: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.matches.is_empty() {
             return;
         }
         let last = self.matches.len() as isize - 1;
-        self.highlighted = (self.highlighted as isize + delta).clamp(0, last) as usize;
+        self.highlighted = position.clamp(0, last) as usize;
         // 第 0 个子元素是分组标题。
         self.scroll.scroll_to_item(self.highlighted + 1);
+        if focus {
+            self.ensure_rows(cx);
+            self.rows[self.highlighted].focus(window, cx);
+        }
         cx.notify();
+    }
+
+    /// 行的焦点句柄够用（结果变多时补上；句柄跨帧保留，焦点才不会丢）。
+    fn ensure_rows(&mut self, cx: &mut Context<Self>) {
+        while self.rows.len() < self.matches.len() {
+            self.rows.push(cx.focus_handle());
+        }
+    }
+
+    /// 列表里的按键。处理了返回 `true`（不再往下传）。
+    fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let keystroke = &event.keystroke;
+        let modifiers = &keystroke.modifiers;
+        let plain = !modifiers.control && !modifiers.alt && !modifiers.platform && !modifiers.function;
+        let row = self.focused_row(window);
+        match (keystroke.key.as_str(), row) {
+            ("escape", _) => {
+                cx.emit(SessionSearchEvent::Close);
+                true
+            }
+            // 搜索框里：↓ 进到列表，焦点落在高亮项上（读屏软件读出它）。
+            ("down", None) if plain && !self.matches.is_empty() => {
+                self.highlight(self.highlighted as isize, true, window, cx);
+                true
+            }
+            ("down", Some(row)) if plain => {
+                self.highlight(row as isize + 1, true, window, cx);
+                true
+            }
+            // 第一项上按 ↑：回到搜索框。
+            ("up", Some(0)) if plain => {
+                self.focus_input(window, cx);
+                true
+            }
+            ("up", Some(row)) if plain => {
+                self.highlight(row as isize - 1, true, window, cx);
+                true
+            }
+            ("home", Some(_)) if plain => {
+                self.highlight(0, true, window, cx);
+                true
+            }
+            ("end", Some(_)) if plain => {
+                self.highlight(self.matches.len() as isize - 1, true, window, cx);
+                true
+            }
+            ("enter" | "space", Some(row)) if plain => {
+                self.highlighted = row;
+                self.open_highlighted(cx);
+                true
+            }
+            // 列表里打字、退格：回到搜索框接着改搜索词。
+            ("backspace", Some(_)) if plain => {
+                let mut query = self.query(cx);
+                query.pop();
+                self.retype(query, window, cx);
+                true
+            }
+            // Shift 可以（大写字母、符号），其他修饰键是快捷键，不当成打字。
+            (_, Some(_)) if !modifiers.control && !modifiers.alt && !modifiers.platform => {
+                match keystroke.key_char.as_deref().filter(|text| !text.is_empty() && !text.chars().any(char::is_control)) {
+                    Some(text) => {
+                        let query = self.query(cx) + text;
+                        self.retype(query, window, cx);
+                        true
+                    }
+                    None => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// 把搜索词换成 `query`，焦点回到搜索框（光标在末尾）。
+    fn retype(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| input.set_value(query, window, cx));
+        self.focus_input(window, cx);
+        self.refilter(cx);
     }
 
     fn open_highlighted(&mut self, cx: &mut Context<Self>) {
@@ -111,9 +206,19 @@ impl SessionSearchView {
         }
     }
 
-    fn render_row(&self, position: usize, index: usize, query: &str, p: &crate::design::Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(
+        &self,
+        position: usize,
+        index: usize,
+        query: &str,
+        p: &crate::design::Palette,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let session = &self.sessions[index];
         let highlighted = position == self.highlighted;
+        let focus = self.rows[position].clone();
+        let focused = focus.is_focused(window);
         let mut subtitle = session.workspace.as_deref().map(crate::folder_name).unwrap_or_else(|| t!("sidebar.other_sessions").to_string());
         if let Some(ago) = session.modified.and_then(|modified| SystemTime::now().duration_since(modified).ok()).map(time_ago) {
             subtitle.push_str(" · ");
@@ -124,8 +229,10 @@ impl SessionSearchView {
             .map(|range| (range, HighlightStyle { color: Some(p.accent), font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() }))
             .collect();
         let title = StyledText::new(session.title.clone()).with_highlights(highlights);
-        h_flex()
+        let row = h_flex()
             .id(("session-search-row", position))
+            // 只有高亮项在 Tab 顺序里：从搜索框按 Tab 直接到它，再按 Tab 离开列表。
+            .track_focus(&focus.tab_stop(highlighted))
             .role(Role::ListBoxOption)
             .aria_selected(highlighted)
             .aria_label(format!("{}, {subtitle}", session.title))
@@ -137,6 +244,9 @@ impl SessionSearchView {
             .px(px(space::L))
             .py(px(space::S))
             .rounded(px(radius::LG))
+            // 焦点框：2px 透明边框，聚焦时上色（见 `with_focus_ring`）。
+            .border_2()
+            .border_color(transparent_black())
             .cursor_pointer()
             .when(highlighted, |row| row.bg(p.selected))
             .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, window, cx| {
@@ -160,8 +270,8 @@ impl SessionSearchView {
                     .min_w(px(0.))
                     .child(div().text_body().truncate().child(title))
                     .child(div().text_caption().text_color(p.text_secondary).truncate().child(subtitle)),
-            )
-            .into_any_element()
+            );
+        with_focus_ring(row, focused, radius::LG, window, p).into_any_element()
     }
 }
 
@@ -185,8 +295,9 @@ fn key_cap(text: &'static str, p: &crate::design::Palette) -> Div {
 }
 
 impl Render for SessionSearchView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        self.ensure_rows(cx);
         let query = self.query(cx);
         let searching = !query.trim().is_empty();
         let header = if searching { t!("search.results", count = self.matches.len()).to_string() } else { t!("search.recent").to_string() };
@@ -195,14 +306,23 @@ impl Render for SessionSearchView {
             .clone()
             .into_iter()
             .enumerate()
-            .map(|(position, index)| self.render_row(position, index, &query, &p, cx))
+            .map(|(position, index)| self.render_row(position, index, &query, &p, window, cx))
             .collect();
         let empty = rows.is_empty().then(|| {
             let text = if searching { t!("search.empty") } else { t!("search.no_sessions") };
-            div().px(px(space::L)).py(px(space::XL)).text_body().text_color(p.text_secondary).child(text.to_string())
+            div()
+                .px(px(space::L))
+                .py(px(space::XL))
+                .text_body()
+                .text_color(p.text_secondary)
+                .child(readable_with_id("session-search-empty", text.to_string()))
         });
-        let hint = |keys: Vec<&'static str>, label: String| {
+        // 按键提示：键帽只给眼睛看，读屏软件读一整句“选择：↑ ↓”。
+        let hint = |id: &'static str, keys: Vec<&'static str>, label: String| {
             h_flex()
+                .id(id)
+                .role(Role::Label)
+                .aria_label(format!("{label}: {}", keys.join(" ")))
                 .gap(px(space::XS))
                 .items_center()
                 .children(keys.into_iter().map(|key| key_cap(key, &p)))
@@ -213,20 +333,10 @@ impl Render for SessionSearchView {
             .role(Role::Dialog)
             .aria_label(t!("sidebar.search").to_string())
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| match event.keystroke.key.as_str() {
-                "up" => {
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.on_key(event, window, cx) {
                     cx.stop_propagation();
-                    this.step(-1, cx);
                 }
-                "down" => {
-                    cx.stop_propagation();
-                    this.step(1, cx);
-                }
-                "escape" => {
-                    cx.stop_propagation();
-                    cx.emit(SessionSearchEvent::Close);
-                }
-                _ => {}
             }))
             .occlude()
             .w(px(DIALOG_WIDTH))
@@ -286,7 +396,7 @@ impl Render for SessionSearchView {
                             .pb(px(space::S))
                             .text_caption()
                             .text_color(p.text_secondary)
-                            .child(header),
+                            .child(readable_with_id("session-search-header", header)),
                     )
                     .children(rows)
                     .children(empty),
@@ -302,9 +412,9 @@ impl Render for SessionSearchView {
                     // 外层的裁切是方的：底色自己带上圆角，不从弹窗的圆角里露出来。
                     .rounded_b(px(radius::XXL))
                     .bg(p.sidebar)
-                    .child(hint(vec!["↑", "↓"], t!("search.hint_select").to_string()))
-                    .child(hint(vec!["Enter"], t!("search.hint_open").to_string()))
-                    .child(hint(vec!["Esc"], t!("search.hint_close").to_string())),
+                    .child(hint("session-search-hint-select", vec!["↑", "↓"], t!("search.hint_select").to_string()))
+                    .child(hint("session-search-hint-open", vec!["Enter"], t!("search.hint_open").to_string()))
+                    .child(hint("session-search-hint-close", vec!["Esc"], t!("search.hint_close").to_string())),
             )
             // Tab 只在弹窗里循环。
             .focus_trap("session-search-trap", &self.focus)
@@ -396,6 +506,77 @@ mod tests {
                 workspace: None,
             })
             .collect()
+    }
+
+    mod keyboard {
+        use gpui::TestAppContext;
+        use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, WindowOptions};
+
+        use super::sessions;
+        use crate::session_search::SessionSearchView;
+
+        fn draw(cx: &mut TestAppContext, window: AnyWindowHandle) {
+            cx.update_window(window, |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+        }
+
+        fn press(cx: &mut TestAppContext, window: AnyWindowHandle, keys: &'static str) {
+            for key in keys.split(' ') {
+                cx.simulate_keystrokes(window, key);
+                draw(cx, window);
+            }
+        }
+
+        /// 焦点在哪：`Some(第几行)`，在搜索框里是 `None`。
+        fn focus(cx: &mut TestAppContext, window: AnyWindowHandle, view: &Entity<SessionSearchView>) -> Option<usize> {
+            cx.update_window(window, |_, window, cx| view.read(cx).focused_row(window)).unwrap()
+        }
+
+        fn input_focused(cx: &mut TestAppContext, window: AnyWindowHandle, view: &Entity<SessionSearchView>) -> bool {
+            cx.update_window(window, |_, window, cx| gpui_kit::Focusable::focus_handle(view.read(cx).input.read(cx), cx).is_focused(window))
+                .unwrap()
+        }
+
+        #[gpui::test]
+        fn arrows_move_focus_through_the_results_and_typing_returns_to_the_box(cx: &mut TestAppContext) {
+            let (window, view) = cx.update(|cx| {
+                gpui_kit::init(cx);
+                crate::design::init(cx);
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| SessionSearchView::new(sessions(&["alpha", "beta", "gamma"]), window, cx))
+                })
+                .unwrap()
+            });
+            // 第一帧画完才把焦点给搜索框。
+            draw(cx, window);
+            draw(cx, window);
+            assert!(input_focused(cx, window, &view));
+
+            // ↓ 进到列表：焦点在第一项上。
+            press(cx, window, "down");
+            assert_eq!(focus(cx, window, &view), Some(0));
+            press(cx, window, "down down down");
+            assert_eq!(focus(cx, window, &view), Some(2), "到底了停在最后一项");
+            press(cx, window, "home");
+            assert_eq!(focus(cx, window, &view), Some(0));
+            press(cx, window, "end");
+            assert_eq!(focus(cx, window, &view), Some(2));
+
+            // 第一项上按 ↑ 回到搜索框。
+            press(cx, window, "home up");
+            assert_eq!(focus(cx, window, &view), None);
+            assert!(input_focused(cx, window, &view));
+
+            // 在列表里打字：回到搜索框，字也打进去了。
+            press(cx, window, "down g");
+            assert!(input_focused(cx, window, &view));
+            assert_eq!(cx.update(|cx| view.read(cx).query(cx)), "g");
+            assert_eq!(cx.update(|cx| view.read(cx).matches.len()), 1, "只剩 gamma");
+        }
     }
 
     #[test]

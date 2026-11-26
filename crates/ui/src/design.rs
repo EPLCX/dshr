@@ -578,11 +578,40 @@ pub fn set_focus_from_keyboard(keyboard: bool, window: &mut Window) {
     }
 }
 
+thread_local! {
+    /// 最近一次（不是 Tab 的）按键之前焦点在哪、什么时候按的：之后不久焦点变了，就算键盘挪过去的。
+    static PENDING_KEY_FOCUS: std::cell::RefCell<Option<(Option<FocusHandle>, std::time::Instant)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// 按键之后这么久之内焦点变了，都算这次按键挪的（要等一两帧才移焦点的菜单、弹窗）。
+const KEY_FOCUS_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// 看最近一次按键之后焦点有没有变：变了就记成键盘焦点。按键派发完调一次；窗口的根视图每次渲染时
+/// 也调一次（在子视图之前），接住要等画完一帧才移过去的焦点。
+pub fn settle_focus_source(window: &mut Window, cx: &mut App) {
+    let Some((before, at)) = PENDING_KEY_FOCUS.with(|pending| pending.borrow().clone()) else {
+        return;
+    };
+    if at.elapsed() > KEY_FOCUS_WINDOW {
+        PENDING_KEY_FOCUS.with(|pending| pending.borrow_mut().take());
+        return;
+    }
+    if window.focused(cx) != before {
+        PENDING_KEY_FOCUS.with(|pending| pending.borrow_mut().take());
+        set_focus_from_keyboard(true, window);
+    }
+}
+
 /// 窗口根元素上调用：按下鼠标（或手指）时把 [`focus_from_keyboard`] 记成假。
 /// 按键那一半在 [`init`] 里用 `intercept_keystrokes` 记：绑定了动作的键（Tab、方向键）派发成动作后
 /// 不再走元素的按键监听，在根元素上捕获不到。
 pub fn track_focus_source<E: InteractiveElement>(element: E) -> E {
-    element.capture_any_mouse_down(|_, window, _| set_focus_from_keyboard(false, window))
+    element.capture_any_mouse_down(|_, window, _| {
+        // 鼠标点下去挪的焦点不算前面那次按键的。
+        PENDING_KEY_FOCUS.with(|pending| pending.borrow_mut().take());
+        set_focus_from_keyboard(false, window)
+    })
 }
 
 pub fn set_high_visibility_outlines(enabled: bool) {
@@ -820,7 +849,8 @@ impl IntoElement for FocusFrame {
 
 impl Element for FocusFrame {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    /// 高可见性轮廓开启时：控件所在的点击区域（点下去时把焦点给控件，见 `paint`）。
+    type PrepaintState = Option<Hitbox>;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -855,12 +885,15 @@ impl Element for FocusFrame {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> Option<Hitbox> {
+        // 先于控件插入：在控件的点击区域下面，不挡控件自己的悬停、点击。
+        let hitbox = (high_visibility_outlines() && self.handle.is_some()).then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
         self.child.prepaint(window, cx);
         if high_visibility_outlines() && self.handle.as_ref().is_some_and(|handle| handle.is_focused(window)) {
             let radius = cx.theme().radius;
             defer_outline(bounds, Corners::all(radius), window, cx);
         }
+        hitbox
     }
 
     fn paint(
@@ -869,13 +902,31 @@ impl Element for FocusFrame {
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         _: &mut (),
-        _: &mut (),
+        hitbox: &mut Option<Hitbox>,
         window: &mut Window,
         cx: &mut App,
     ) {
         self.child.paint(window, cx);
+        // 组件库的按钮按下鼠标时 `prevent_default`，点了也不拿焦点（为了不把焦点从输入框抢走）：
+        // 所以 Tab 过去有外圈，鼠标点了却没有。高可见性轮廓开启时说好了“键盘、鼠标聚焦都显示”，
+        // 这里在按下时直接把焦点给它（`focus` 不看 `prevent_default`）。
+        if let (Some(hitbox), Some(handle)) = (hitbox.take(), self.handle.clone()) {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble
+                    && event.button == MouseButton::Left
+                    && hitbox.is_hovered(window)
+                    && !handle.is_focused(window)
+                {
+                    handle.focus(window, cx);
+                }
+            });
+        }
     }
 }
+
+/// 测试用：高可见性轮廓的开关是整个进程共用的，改它的测试拿着这把锁，不和别的这类测试同时跑。
+#[cfg(test)]
+pub(crate) static HIGH_VISIBILITY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 thread_local! {
@@ -1143,7 +1194,20 @@ pub fn list_item(
     selected: bool,
     p: &Palette,
 ) -> Pressable {
-    let selected_bg = p.selected;
+    list_item_with_fill(id, icon, label, selected, p.selected, p)
+}
+
+/// 同 [`list_item`]，选中时的底色另给（悬停仍是中性的 `selected`）。用在“当前项”要和悬停分得开的地方，
+/// 如侧边栏里正在看的会话。
+pub fn list_item_with_fill(
+    id: impl Into<ElementId>,
+    icon: Option<IconName>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    selected_fill: Hsla,
+    p: &Palette,
+) -> Pressable {
+    let selected_bg = if selected { selected_fill } else { p.selected };
     let label = label.into();
     pressable(id, p)
         .accessibility_label(label.clone())
@@ -1184,8 +1248,20 @@ const MENU_CONTEXT: &str = "AppMenu";
 
 /// 注册菜单的按键。启动时调用一次。
 pub fn init(cx: &mut App) {
-    // 每一次按键（包括绑定成动作的 Tab、方向键）在派发之前都经过这里：之后挪过去的焦点算键盘的。
-    cx.intercept_keystrokes(|_, window, _| set_focus_from_keyboard(true, window)).detach();
+    // 每一次按键（包括绑定成动作的 Tab、方向键）在派发之前都经过这里。只有真正挪了焦点的按键才算
+    // “键盘焦点”（和浏览器的 `:focus-visible` 一样）：打字、在展开的列表里按方向键这些不挪焦点的按键，
+    // 不会让鼠标点过去的控件突然冒出焦点框。Tab 总算（只有一个可聚焦控件时焦点不动，也要看得见它在哪）。
+    cx.intercept_keystrokes(|event, window, cx| {
+        if moves_focus_always(&event.keystroke) {
+            set_focus_from_keyboard(true, window);
+            return;
+        }
+        // 派发完这次按键再比较：焦点变了就是键盘挪过去的。有的焦点要等下一帧画出来才移过去
+        // （打开菜单、弹窗时的 `focus_after_paint`），根视图渲染时再看一次（见 [`settle_focus_source`]）。
+        PENDING_KEY_FOCUS.with(|pending| *pending.borrow_mut() = Some((window.focused(cx), std::time::Instant::now())));
+        window.defer(cx, settle_focus_source);
+    })
+    .detach();
     cx.bind_keys([
         KeyBinding::new("up", MenuPrev, Some(MENU_CONTEXT)),
         KeyBinding::new("down", MenuNext, Some(MENU_CONTEXT)),
@@ -1195,6 +1271,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", MenuBack, Some(MENU_CONTEXT)),
         KeyBinding::new("right", MenuForward, Some(MENU_CONTEXT)),
     ]);
+}
+
+/// 不管焦点动没动都算键盘导航的键：Tab、Shift+Tab（F6 在区域之间跳，也算）。
+fn moves_focus_always(keystroke: &Keystroke) -> bool {
+    let modifiers = &keystroke.modifiers;
+    matches!(keystroke.key.as_str(), "tab" | "f6") && !modifiers.control && !modifiers.alt && !modifiers.platform
 }
 
 type MenuHandler = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
@@ -1537,6 +1619,7 @@ mod tests {
             }
         }
 
+        let _lock = super::HIGH_VISIBILITY_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         super::set_high_visibility_outlines(true);
         let window = cx.update(|cx| {
             gpui_kit::init(cx);
@@ -1560,6 +1643,69 @@ mod tests {
             draw(cx);
             assert_eq!(drawn(), before + 1, "{name} 有焦点时应该画一圈外轮廓");
         }
+        super::set_high_visibility_outlines(false);
+    }
+
+    /// 组件库的按钮按下鼠标时不拿焦点；高可见性轮廓开启时，套了 [`super::framed`] 的按钮点了也要拿到焦点（外圈才画得出来）。
+    #[gpui::test]
+    fn clicking_a_framed_button_focuses_it_with_high_visibility_outlines(cx: &mut gpui::TestAppContext) {
+        use gpui_kit::component::button::Button;
+        use gpui_kit::{
+            AppContext as _, Context, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, PlatformInput,
+            Render, Styled as _, Window, div, point, px,
+        };
+
+        struct View;
+        impl Render for View {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().p(px(40.)).child(super::framed("plain", Button::new("plain").outline().label("plain")))
+            }
+        }
+
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|_| View)).unwrap().0
+        });
+        let draw = |cx: &mut gpui::TestAppContext| {
+            cx.update_window(window, |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        };
+        let click = |cx: &mut gpui::TestAppContext| {
+            let position = point(px(48.), px(48.));
+            cx.update_window(window, |_, window, cx| {
+                let down = MouseDownEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                };
+                window.dispatch_event(PlatformInput::MouseDown(down), cx);
+                let up = MouseUpEvent { button: MouseButton::Left, position, modifiers: Modifiers::default(), click_count: 1 };
+                window.dispatch_event(PlatformInput::MouseUp(up), cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+        };
+        let focused = |cx: &mut gpui::TestAppContext| cx.update_window(window, |_, window, cx| window.focused(cx).is_some()).unwrap();
+
+        // 默认样式：和组件库一样，点了不拿焦点。
+        let _lock = super::HIGH_VISIBILITY_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        super::set_high_visibility_outlines(false);
+        draw(cx);
+        click(cx);
+        assert!(!focused(cx), "没开高可见性轮廓时点按钮不拿焦点");
+
+        super::set_high_visibility_outlines(true);
+        draw(cx);
+        click(cx);
+        assert!(focused(cx), "开了高可见性轮廓，点按钮应该拿到焦点");
+        let before = super::OUTLINES_DRAWN.with(|count| count.get());
+        draw(cx);
+        assert_eq!(super::OUTLINES_DRAWN.with(|count| count.get()), before + 1, "拿到焦点后画外圈");
         super::set_high_visibility_outlines(false);
     }
 

@@ -137,6 +137,8 @@ pub struct InstallDialog {
     cancel_focus: FocusHandle,
     opened: Instant,
     phase: motion::Phase,
+    /// 正文的滚动：Tab 走到看不见的地方时滚过去（见 `reveal::reveal_in`）。
+    body_scroll: ScrollHandle,
 }
 
 impl EventEmitter<InstallDialogEvent> for InstallDialog {}
@@ -163,7 +165,16 @@ impl InstallDialog {
         }
         let name = request.name.clone().unwrap_or_else(|| request.id.clone());
         crate::announce::announce(t!("install.announce", name = name, risk = risk.title()).to_string(), cx);
-        Self { request, risk, answer: Some(answer), focus, cancel_focus, opened: Instant::now(), phase: motion::Phase::SETTLED }
+        Self {
+            request,
+            risk,
+            answer: Some(answer),
+            focus,
+            cancel_focus,
+            opened: Instant::now(),
+            phase: motion::Phase::SETTLED,
+            body_scroll: ScrollHandle::new(),
+        }
     }
 
     pub fn set_phase(&mut self, phase: motion::Phase) {
@@ -583,15 +594,16 @@ impl Render for InstallDialog {
             .child(
                 v_flex()
                     .id("install-dialog-body")
+                    .track_scroll(&self.body_scroll)
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_y_scroll()
                     .px(px(space::XXL))
                     .pb(px(space::L))
                     .gap(px(space::XL))
-                    .child(source)
-                    .child(permissions)
-                    .children(contents),
+                    .child(crate::reveal::reveal_in(&self.body_scroll, "reveal-install-source", source))
+                    .child(crate::reveal::reveal_in(&self.body_scroll, "reveal-install-permissions", permissions))
+                    .children(contents.map(|contents| crate::reveal::reveal_in(&self.body_scroll, "reveal-install-contents", contents))),
             )
             .child(div().h(px(1.)).bg(p.border))
             .child(div().px(px(space::XXL)).py(px(space::L)).child(footer))

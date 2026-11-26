@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use gpui_kit::component::button::Button;
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 use rust_i18n::t;
 
@@ -15,6 +15,8 @@ use crate::design::{
 use crate::settings::SettingsView;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 源码仓库（来自工作区 `Cargo.toml` 的 `repository`）。
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const LICENSE: &str = include_str!("../../../LICENSE");
 const NOTICES: &str = include_str!("../../../THIRD_PARTY_NOTICES.md");
 
@@ -92,7 +94,21 @@ impl SettingsView {
             .gap(px(space::S))
             .child(info_row("about-version", t!("about.version").to_string(), VERSION.to_owned()))
             .child(info_row("about-platform", t!("about.platform").to_string(), platform()))
-            .child(info_row("about-license", t!("about.license").to_string(), "MIT".to_owned()));
+            .child(info_row("about-license", t!("about.license").to_string(), "MIT".to_owned()))
+            .child(info_row("about-repository", t!("about.repository").to_string(), REPOSITORY.to_owned()))
+            // 地址本身在上面一行读得到；按钮的名字说清楚会做什么（用系统浏览器打开）。
+            .child(
+                h_flex().pl(px(120. + space::L)).child(crate::design::framed(
+                    "about-open-repository",
+                    Button::new("about-open-repository")
+                        .ghost()
+                        .small()
+                        .icon(IconName::ExternalLink)
+                        .label(t!("about.open_repository").to_string())
+                        .tooltip(REPOSITORY)
+                        .on_click(cx.listener(|_, _, _, cx| cx.open_url(REPOSITORY))),
+                )),
+            );
 
         let license = field(
             t!("about.license").to_string(),

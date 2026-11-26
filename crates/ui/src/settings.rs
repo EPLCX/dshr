@@ -23,7 +23,7 @@ use rust_i18n::t;
 
 use crate::announce::announce;
 use crate::backend::Backend;
-use crate::conversation::{EFFORT_CHOICES, effort_label};
+use crate::conversation::{EFFORT_CHOICES, effort_label, permission_label, preset_id, preset_label};
 use crate::design::TEXT_SCALES;
 use crate::design::motion::Edge;
 use crate::design::{
@@ -40,6 +40,7 @@ use crate::{
     EDITABLE_SHORTCUTS, FIXED_SHORTCUTS, LANGUAGES, apply_language, apply_motion, apply_theme, bind_keys, current_keystroke,
     display_keystroke, keystroke_string,
 };
+use dshr_agent::{PermissionMode, Preset};
 
 /// 设置弹窗自带的三页。只有界面，没有后端那一半。
 pub struct SettingsUi;
@@ -188,6 +189,9 @@ pub struct SettingsView {
     high_contrast_select: Entity<DropdownState>,
     text_scale_select: Entity<DropdownState>,
     effort_select: Entity<DropdownState>,
+    /// 新会话默认的权限模式、预设（选项按 [`PERMISSION_CHOICES`]、`Preset::ALL` 的顺序）。
+    permission_select: Entity<DropdownState>,
+    preset_select: Entity<DropdownState>,
     default_choices: Vec<ModelRef>,
     /// 新会话默认的思考等级（保存前的草稿）。
     effort_default: Option<ReasoningEffort>,
@@ -281,6 +285,14 @@ impl SettingsView {
             let labels = EFFORT_CHOICES.into_iter().map(|level| effort_label(level).into()).collect();
             DropdownState::new(labels, EFFORT_CHOICES.iter().position(|level| *level == config.model.effort), cx).width(200.)
         });
+        let permission_select = cx.new(|cx| {
+            let current = crate::conversation::default_permission(&config);
+            DropdownState::new(permission_labels(), PERMISSION_CHOICES.iter().position(|mode| *mode == current), cx).width(200.)
+        });
+        let preset_select = cx.new(|cx| {
+            let current = crate::conversation::default_preset(&config);
+            DropdownState::new(preset_labels(), Preset::ALL.iter().position(|preset| *preset == current), cx).width(200.)
+        });
 
         let form = cx.new(|cx| ProviderForm::add(backend.clone(), window, cx));
         let form_subscription = Self::subscribe_form(&form, window, cx);
@@ -341,6 +353,8 @@ impl SettingsView {
             }
         }));
         subscriptions.push(cx.subscribe(&default_model, |this, _, _: &DropdownChanged, cx| this.save_defaults(cx)));
+        subscriptions.push(cx.subscribe(&permission_select, |this, _, _: &DropdownChanged, cx| this.save_defaults(cx)));
+        subscriptions.push(cx.subscribe(&preset_select, |this, _, _: &DropdownChanged, cx| this.save_defaults(cx)));
         let plugin_rows = Self::build_plugin_rows(&backend, &mut subscriptions, window, cx);
         let backend_scripts = backend.script_ids();
         let new_plugin = cx.new(|cx| InputState::new(window, cx).placeholder("my-plugin"));
@@ -371,6 +385,8 @@ impl SettingsView {
             high_contrast_select,
             text_scale_select,
             effort_select,
+            permission_select,
+            preset_select,
             default_choices: Vec::new(),
             effort_default: config.model.effort,
             defaults_message: None,
@@ -1383,11 +1399,16 @@ impl SettingsView {
         let default =
             self.default_model.read(cx).selected_index().and_then(|index| self.default_choices.get(index)).map(ModelRef::to_string);
         let effort = self.effort_default;
+        let permission = self.permission_select.read(cx).selected_index().and_then(|index| PERMISSION_CHOICES.get(index)).copied();
+        let preset = self.preset_select.read(cx).selected_index().and_then(|index| Preset::ALL.get(index)).copied();
         let result = self.backend.update_config(|config| {
             if let Some(default) = default {
                 config.model.default = default;
             }
             config.model.effort = effort;
+            // 选的是内置默认值时不写，配置文件里只留改过的。
+            config.model.permission = permission.filter(|mode| *mode != PermissionMode::default()).map(|mode| mode.id().to_owned());
+            config.model.preset = preset.filter(|preset| *preset != Preset::default()).map(|preset| preset_id(preset).to_owned());
         });
         self.defaults_message = Some(match result {
             Ok(()) => {
@@ -2571,6 +2592,15 @@ impl SettingsView {
             select.set_item_labels(EFFORT_CHOICES.into_iter().map(|level| effort_label(level).into()).collect(), cx);
             select.set_selected(effort_index, cx);
         });
+        // 名字、选项跟着界面语言重写一遍；选中哪一项由下拉框自己记着。
+        self.permission_select.update(cx, |select, cx| {
+            select.set_label(in_section(&defaults_title, t!("settings.default_permission")), cx);
+            select.set_item_labels(permission_labels(), cx);
+        });
+        self.preset_select.update(cx, |select, cx| {
+            select.set_label(in_section(&defaults_title, t!("settings.default_preset")), cx);
+            select.set_item_labels(preset_labels(), cx);
+        });
         // 改了就保存，和常规页一样，不再另按“保存”。
         let defaults = v_flex()
             .id("defaults-section")
@@ -2587,6 +2617,22 @@ impl SettingsView {
                         t!("settings.effort_default").to_string(),
                         Some(t!("conversation.effort_hint").to_string().into()),
                         self.effort_select.clone(),
+                        &p,
+                    )
+                    .into_any_element(),
+                    setting_row(
+                        "row-default-permission",
+                        t!("settings.default_permission").to_string(),
+                        Some(t!("settings.default_permission_hint").to_string().into()),
+                        self.permission_select.clone(),
+                        &p,
+                    )
+                    .into_any_element(),
+                    setting_row(
+                        "row-default-preset",
+                        t!("settings.default_preset").to_string(),
+                        Some(t!("settings.default_preset_hint").to_string().into()),
+                        self.preset_select.clone(),
                         &p,
                     )
                     .into_any_element(),
@@ -2760,6 +2806,18 @@ impl SettingsView {
             .into_any_element()
     }
 }
+/// “新会话默认设置”里权限模式的选项顺序（和输入卡片上的权限菜单一样）。
+const PERMISSION_CHOICES: [PermissionMode; 4] =
+    [PermissionMode::Manual, PermissionMode::Workspace, PermissionMode::AutoReview, PermissionMode::FullAccess];
+
+fn permission_labels() -> Vec<SharedString> {
+    PERMISSION_CHOICES.into_iter().map(|mode| permission_label(mode).into()).collect()
+}
+
+fn preset_labels() -> Vec<SharedString> {
+    Preset::ALL.into_iter().map(|preset| preset_label(preset).into()).collect()
+}
+
 const THEMES: [ThemePreference; 3] = [ThemePreference::System, ThemePreference::Light, ThemePreference::Dark];
 const MOTIONS: [MotionPreference; 3] = [MotionPreference::System, MotionPreference::Reduce, MotionPreference::Full];
 

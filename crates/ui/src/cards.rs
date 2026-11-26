@@ -225,16 +225,15 @@ impl UiPlugin for AccountUi {
     fn apply_ui(&self, cx: &mut UiScope<'_>) {
         cx.status_item(StatusItem {
             id: "account",
+            // 一切正常（已配好可用的提供商）时不占一行：只在演示模式、还没配置时提醒。
             read: Rc::new(|backend| {
-                let ok = backend.has_ready_provider();
-                let label = if backend.is_demo() {
-                    t!("sidebar.account_demo")
-                } else if ok {
-                    t!("sidebar.account_api_key")
+                if backend.is_demo() {
+                    Some(StatusLine { label: t!("sidebar.account_demo").to_string(), ok: backend.has_ready_provider() })
+                } else if backend.has_ready_provider() {
+                    None
                 } else {
-                    t!("sidebar.account_missing")
-                };
-                StatusLine { label: label.to_string(), ok }
+                    Some(StatusLine { label: t!("sidebar.account_missing").to_string(), ok: false })
+                }
             }),
         });
     }

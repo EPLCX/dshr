@@ -4,6 +4,7 @@ description = "GPUI 视图：工作区窗口、侧边栏、对话区与输入框
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 

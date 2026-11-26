@@ -137,6 +137,8 @@
 ### 5.1 键盘
 
 - 所有可点击的东西都用 `design::pressable`（包着 gpui-kit 的 `Button`），不要给 `div` 挂 `on_click`。它自带 Tab 顺序和 Enter/Space 触发，键盘聚焦时显示 2px `focus_ring`（等于 `accent`），鼠标点击时不显示。
+  “键盘聚焦”只看真正挪了焦点的按键（Tab / Shift+Tab / F6 总算，其他键要焦点因它而变，包括晚一两帧才移过去的菜单、弹窗），
+  打字、在展开的列表里按方向键不算：鼠标点过去的控件不会因为按了一下键就冒出焦点框（`design::settle_focus_source`）。
 - 设置里的“高可见性控件轮廓”：键盘、鼠标聚焦都显示焦点框，外面隔 7px 空隙再画一圈 3px 正文色的外轮廓（`design::focus_outline`），
   外轮廓四周再有一圈淡淡的阴影（几圈越来越淡的细线，不用实心的投影），底下是什么颜色两圈都分得开。外轮廓是只有描边的框，**不要用投影画**：GPUI 的投影是实心的，控件没有底色时会整块涂黑。
   外轮廓画在延后绘制层（`OutlineLayer`，次序 150：比所有弹出层高、比工具提示低），不会被卡片、列表裁掉，
@@ -145,6 +147,9 @@
   （基于 `pressable`，带外圈，能设说明；切换时圆钮滑过去、轨道变色，`BASE` + 标准曲线），不用组件库的 `Switch`。
   组件库的按钮、输入框外面套 `design::framed(和 Button::new 一样的 id, 按钮)` / `framed_handle(输入框的焦点句柄, 输入框)`，
   聚焦时画同样的外圈（组件库自己只画一圈半透明的焦点框，高可见性时 `sync_theme` 把它换成正文色）。
+  组件库的按钮按下鼠标时 `prevent_default`、点了不拿焦点；高可见性轮廓开启时 `framed` 在按下时把焦点给它，鼠标点击也看得到外圈。
+- 滚动容器里能聚焦的东西包一层 `reveal::reveal_in(&滚动句柄, id, 子元素)`（容器 `track_scroll` 同一个句柄）：Tab 走到看不见的地方时容器跟着滚。
+  GPUI 不会自己滚。设置页正文用 `reveal::follow_focus_in` + `reveal`。
   弹出菜单的触发按钮用 `design::framed_trigger`：它把 `Selectable` 转给里面的按钮，可以直接交给 `menu_popover`。
 - 只有图标、没有文字的按钮必须设置 `accessibility_label`（`tooltip` 只是补充说明，不算名字）。
 - `pressable(...).selected(..)` 只改样式，读屏软件读不到。选中 / 勾选状态要另外给：分段控件用 `role(RadioButton)` + `aria_toggled`（`segmented` 已内置）；单选菜单项用 `design::menu_choice`；设置导航是 `Tab` + `aria_selected`（`nav_item` 已内置，外层 `TabList`）；当前会话是 `ListItem` + `aria_selected`。可展开的标题按钮设 `aria_expanded`。

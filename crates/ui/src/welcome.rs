@@ -27,6 +27,8 @@ pub struct WelcomeView {
     /// 账号登录进行中的任务句柄；`Some` 时按钮置灰并显示等待提示。
     sign_in: Option<tokio::task::JoinHandle<Result<String, String>>>,
     scroll: SmoothScroll,
+    /// 上半部分的滚动：Tab 走到看不见的地方时滚过去（见 `reveal::reveal_in`）。
+    body_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -47,6 +49,7 @@ impl WelcomeView {
             error: None,
             sign_in: None,
             scroll: SmoothScroll::default(),
+            body_scroll: ScrollHandle::new(),
             _subscriptions: vec![subscription],
         }
     }
@@ -130,11 +133,13 @@ impl WelcomeView {
 impl Render for WelcomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::design::update_touch_mode(window, cx);
+        crate::design::settle_focus_source(window, cx);
         let p = palette(cx);
         // 上半部分可滚动，底部按钮固定：窗口内容区比设计尺寸矮时（如 macOS 标题栏占掉的高度、
         // 较大的系统字号）只会滚动上半部分，按钮不会被截断。
         let body = v_flex()
             .id("welcome-body")
+            .track_scroll(&self.body_scroll)
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
@@ -151,7 +156,9 @@ impl Render for WelcomeView {
                     .child(heading(t!("welcome.title").to_string(), 1).text_display())
                     .child(description(t!("welcome.subtitle").to_string(), &p)),
             )
-            .child(
+            .child(crate::reveal::reveal_in(
+                &self.body_scroll,
+                "reveal-welcome-sign-in",
                 v_flex()
                     .gap(px(space::S))
                     .child(crate::design::framed(
@@ -168,7 +175,7 @@ impl Render for WelcomeView {
                             .is_some()
                             .then(|| div().flex().justify_center().child(hint(t!("welcome.signing_in").to_string(), Tone::Neutral, &p))),
                     ),
-            )
+            ))
             .child(
                 h_flex()
                     .gap(px(space::M))
@@ -176,7 +183,9 @@ impl Render for WelcomeView {
                     .child(hint(t!("welcome.or_api_key").to_string(), Tone::Neutral, &p))
                     .child(div().flex_1().child(divider(&p))),
             )
-            .child(
+            .child(crate::reveal::reveal_in(
+                &self.body_scroll,
+                "reveal-welcome-api-key",
                 v_flex()
                     .gap(px(space::S))
                     .child(crate::design::framed_handle(
@@ -185,7 +194,7 @@ impl Render for WelcomeView {
                     ))
                     .child(hint(t!("welcome.api_key_hint").to_string(), Tone::Neutral, &p))
                     .children(self.error.clone().map(|error| motion::error_in(hint(error, Tone::Danger, &p), "welcome-error-enter"))),
-            );
+            ));
         crate::design::track_focus_source(v_flex())
             .size_full()
             .bg(p.surface)

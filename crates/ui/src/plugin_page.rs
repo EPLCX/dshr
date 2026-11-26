@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Disableable as _, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -21,6 +20,7 @@ use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
 use crate::design::{Tone, Typography as _, badge, card, divider, hint, mono_font, palette, pressable, radius, readable_with_id, space};
+use crate::reveal::reveal_in;
 
 pub struct PluginPageView {
     backend: Arc<Backend>,
@@ -44,9 +44,16 @@ pub struct PluginPageView {
     pending_link: Option<String>,
     /// 上次看到的 `host.ui.refresh` 次数。
     refresh_generation: u64,
+    /// 页面正文的滚动（滚动容器在弹窗里，见 `WorkspaceView`）：键盘焦点移到看不见的控件时滚过去。
+    scroll: ScrollHandle,
 }
 
 impl PluginPageView {
+    /// 页面正文所在的滚动容器要 `track_scroll` 这个句柄。
+    pub fn scroll_handle(&self) -> &ScrollHandle {
+        &self.scroll
+    }
+
     pub fn new(
         backend: Arc<Backend>,
         plugin: String,
@@ -69,6 +76,7 @@ impl PluginPageView {
             textareas: HashMap::new(),
             selects: HashMap::new(),
             pending_link: None,
+            scroll: ScrollHandle::new(),
             refresh_generation,
         };
         view.refresh(window, cx);
@@ -227,7 +235,18 @@ impl PluginPageView {
         }
     }
 
+    /// 画一个节点。能聚焦的控件包一层 [`reveal_in`]：Tab 走到页面下面看不见的地方时，页面跟着滚。
     fn node(&self, node: &Value, path: &str, cx: &mut Context<Self>) -> AnyElement {
+        let element = self.node_content(node, path, cx);
+        match node.get("type").and_then(Value::as_str) {
+            Some("button" | "input" | "switch" | "textarea" | "select" | "link" | "calendar") => {
+                reveal_in(&self.scroll, SharedString::from(format!("{}-{path}-reveal", self.plugin)), element).into_any_element()
+            }
+            _ => element,
+        }
+    }
+
+    fn node_content(&self, node: &Value, path: &str, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let id = |suffix: &str| SharedString::from(format!("{}-{path}{suffix}", self.plugin));
         let string = |key: &str| node.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
@@ -333,13 +352,17 @@ impl PluginPageView {
             "switch" => {
                 let action = string("action");
                 let value = node.get("payload").cloned().unwrap_or(Value::Null);
-                Switch::new(id(""))
-                    .checked(node.get("checked").and_then(Value::as_bool).unwrap_or(false))
-                    .label(string("label"))
-                    .disabled(self.busy)
-                    .on_click(cx.listener(move |this, checked: &bool, window, cx| {
-                        this.act(action.clone(), value.clone(), Some(*checked), window, cx)
-                    }))
+                let checked = node.get("checked").and_then(Value::as_bool).unwrap_or(false);
+                let label = string("label");
+                // 用应用自己的开关（和设置页一样）：组件库的开关没有高可见性轮廓的外圈。
+                // 名字给开关本身，读屏软件读“<名字>，开关，开 / 关”；旁边的文字只给眼睛看。
+                h_flex()
+                    .gap(px(space::S))
+                    .items_center()
+                    .child(crate::design::switch(id(""), checked, &p).accessibility_label(label.clone()).disabled(self.busy).on_click(
+                        cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), Some(!checked), window, cx)),
+                    ))
+                    .child(div().text_body().when(self.busy, |text| text.opacity(0.5)).child(label))
                     .into_any_element()
             }
             "list" => {
@@ -363,16 +386,22 @@ impl PluginPageView {
                         };
                         match action {
                             // 能点的行是按钮：Tab 能走到，Enter / 空格触发；读屏软件读标题，详情作补充说明。
-                            Some(action) if !self.busy => pressable(item_id, &p)
-                                .accessibility_label(title.clone())
-                                .when_some(detail.clone(), |row, detail| row.aria_description(detail))
-                                .flex()
-                                .items_center()
-                                .cursor_pointer()
-                                .hover(move |style| style.bg(selected))
-                                .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)))
-                                .child(content(h_flex().flex_1().min_w(px(0.))))
-                                .into_any_element(),
+                            Some(action) if !self.busy => reveal_in(
+                                &self.scroll,
+                                SharedString::from(format!("{item_id}-reveal")),
+                                pressable(item_id, &p)
+                                    .accessibility_label(title.clone())
+                                    .when_some(detail.clone(), |row, detail| row.aria_description(detail))
+                                    .flex()
+                                    .items_center()
+                                    .cursor_pointer()
+                                    .hover(move |style| style.bg(selected))
+                                    .on_click(
+                                        cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)),
+                                    )
+                                    .child(content(h_flex().flex_1().min_w(px(0.)))),
+                            )
+                            .into_any_element(),
                             // 不能点的行：文字直接进无障碍树。
                             _ => {
                                 let text = match &detail {
@@ -392,7 +421,10 @@ impl PluginPageView {
                     .gap(px(space::XS))
                     .w_full()
                     .children(label.clone().map(|label| div().text_body().child(readable_with_id(id("-label"), label))))
-                    .child(Textarea::new(area).aria_label(label.unwrap_or_else(|| string("placeholder"))))
+                    .child(crate::design::framed_handle(
+                        gpui_kit::Focusable::focus_handle(area.read(cx), cx),
+                        Textarea::new(area).aria_label(label.unwrap_or_else(|| string("placeholder"))),
+                    ))
                     .into_any_element()
             }
             // 选择框：选项不多时一排按钮最直接，读屏软件也能逐个读出；选中的那个是主按钮。
