@@ -1,5 +1,6 @@
 //! `edit_file` 与文件改动报告（统一 diff）。
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -41,9 +42,63 @@ pub(crate) fn change_report(verb: &str, path: &str, before: &str, after: &str) -
 }
 
 /// 在阻塞线程池里生成改动报告：比较大文件是纯 CPU 工作，不占用运行时的工作线程。
-pub(crate) async fn change_report_blocking(verb: &'static str, path: String, before: String, after: String) -> String {
+pub(crate) async fn change_report_blocking(verb: &'static str, path: String, before: String, after: Arc<String>) -> String {
     let fallback = format!("{verb} {path}");
     tokio::task::spawn_blocking(move || change_report(verb, &path, &before, &after)).await.unwrap_or(fallback)
+}
+
+/// 大文件里改了一处：只比较改动前后各 3 行的窗口，hunk 头的行号再加上窗口前面的行数。
+/// 结果和整份比较一样（窗口外没有变化），但不用把几百 MB 的文件按行切开再比一遍。
+fn local_change_report(path: &str, text: &str, start: usize, old: &str, new: &str) -> String {
+    let end = start + old.len();
+    let mut from = text[..start].rfind('\n').map_or(0, |at| at + 1);
+    for _ in 0..3 {
+        if from == 0 {
+            break;
+        }
+        from = text[..from - 1].rfind('\n').map_or(0, |at| at + 1);
+    }
+    let mut to = end;
+    for _ in 0..4 {
+        match text[to..].find('\n') {
+            Some(at) => to += at + 1,
+            None => {
+                to = text.len();
+                break;
+            }
+        }
+    }
+    // 往后取 4 次换行：先补完改动所在的行，再多 3 行（旧文本以换行结尾时多取一行，不影响结果）。
+    let window = &text[from..to];
+    let after = format!("{}{new}{}", &window[..start - from], &window[end - from..]);
+    let offset = text.as_bytes()[..from].iter().filter(|byte| **byte == b'\n').count();
+    let report = change_report("Edited", path, window, &after);
+    shift_hunks(&report, offset)
+}
+
+/// 把统一 diff 里 `@@ -a,b +c,d @@` 的起始行号都加上 `offset`。
+fn shift_hunks(report: &str, offset: usize) -> String {
+    if offset == 0 {
+        return report.to_owned();
+    }
+    let shift = |range: &str| -> String {
+        let (line, count) = range.split_once(',').map_or((range, None), |(line, count)| (line, Some(count)));
+        let line = line.parse::<usize>().map_or_else(|_| line.to_owned(), |line| (line + offset).to_string());
+        match count {
+            Some(count) => format!("{line},{count}"),
+            None => line,
+        }
+    };
+    let mut out = String::with_capacity(report.len() + 16);
+    for line in report.split_inclusive('\n') {
+        let header = line.strip_prefix("@@ -").and_then(|rest| {
+            let (ranges, tail) = rest.split_once(" @@")?;
+            let (old, new) = ranges.split_once(" +")?;
+            Some(format!("@@ -{} +{} @@{tail}", shift(old), shift(new)))
+        });
+        out.push_str(header.as_deref().unwrap_or(line));
+    }
+    out
 }
 
 pub struct EditFile;
@@ -115,6 +170,12 @@ impl Tool for EditFile {
             (std::borrow::Cow::Borrowed(before.as_str()), input.old_string.clone(), input.new_string.clone())
         };
         let count = haystack.matches(&old).count();
+        // 大文件只改一处：差异只在改动附近算（见 [`local_change_report`]）。改多处的只报告次数。
+        let large = before.len() as u64 > crate::builtin::MAX_DIFF_BYTES;
+        let local = (large && count == 1).then(|| {
+            let start = haystack.find(&old).unwrap_or_default();
+            local_change_report(&input.path, &haystack, start, &old, &new)
+        });
         let after = match count {
             0 => return ToolOutput::error(format!("在 {} 中没有找到 old_string，请先读取文件确认原文", input.path)),
             1 => haystack.replacen(&old, &new, 1),
@@ -133,7 +194,16 @@ impl Tool for EditFile {
             Ok(result) => result,
             Err(reason) => return ToolOutput::error(format!("没有写入 {}：{reason}", input.path)),
         };
-        match crate::write_atomic(path, after.clone()).await {
+        // 插件改写过内容时，局部差异就不准了，退回整份比较。
+        let local = local.filter(|_| changed_by.is_empty());
+        let after = Arc::new(after);
+        match crate::write_atomic(path, Arc::clone(&after)).await {
+            Ok(()) if large && changed_by.is_empty() => {
+                drop(before);
+                ToolOutput::ok(truncate(local.unwrap_or_else(|| {
+                    format!("Edited {} ({count} replacements; the file is {} bytes, too large to diff)", input.path, after.len())
+                })))
+            }
             Ok(()) => {
                 let report = change_report_blocking("Edited", input.path, before, after).await + &crate::adjusted_note(&changed_by);
                 ToolOutput::ok(truncate(report))
@@ -196,5 +266,36 @@ mod tests {
         let mixed = EditFile.execute(json!({"path": "w.cs", "old_string": "b\nc", "new_string": "B\nC"}), &ctx).await;
         assert!(!mixed.is_error, "{}", mixed.content);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\r\nB\nC\n");
+    }
+    #[tokio::test]
+    async fn large_files_diff_only_around_the_edit() {
+        let (dir, ctx) = ctx();
+        let file = dir.path().join("big.txt");
+        let text: String = (0..200_000).map(|n| format!("row {n}\n")).collect();
+        assert!(text.len() as u64 > crate::builtin::MAX_DIFF_BYTES);
+        std::fs::write(&file, &text).unwrap();
+
+        let out = EditFile.execute(json!({"path": "big.txt", "old_string": "row 150000\n", "new_string": "ROW\nNEW\n"}), &ctx).await;
+        assert!(!out.is_error, "{}", out.content);
+        // 和整份比较的结果一样，包括 hunk 头的行号。
+        let expected = text.replacen("row 150000\n", "ROW\nNEW\n", 1);
+        assert_eq!(out.content, change_report("Edited", "big.txt", &text, &expected));
+        assert!(out.content.contains("@@ -149998,7 +149998,8 @@"), "{}", out.content);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), expected);
+
+        // 开头、结尾（没有换行）附近的改动也一样。
+        let text = format!("{}tail", "x\n".repeat(600_000));
+        std::fs::write(&file, &text).unwrap();
+        let out = EditFile.execute(json!({"path": "big.txt", "old_string": "x\ntail", "new_string": "y\nend"}), &ctx).await;
+        assert_eq!(out.content, change_report("Edited", "big.txt", &text, &text.replace("x\ntail", "y\nend")));
+
+        // 改多处的只报告次数。
+        let out = EditFile.execute(json!({"path": "big.txt", "old_string": "x\n", "new_string": "z\n", "replace_all": true}), &ctx).await;
+        assert!(out.content.contains("599999 replacements"), "{}", out.content);
+    }
+
+    #[test]
+    fn hunk_headers_shift() {
+        assert_eq!(shift_hunks("x\n@@ -1,3 +1 @@ f\n a\n", 10), "x\n@@ -11,3 +11 @@ f\n a\n");
     }
 }
