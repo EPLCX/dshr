@@ -15,10 +15,12 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{IndentInline, InputEvent, OutdentInline, Textarea, TextareaState};
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
+
+use crate::design::ControlSize as _;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -26,7 +28,7 @@ use crate::announce::{announce, announce_after};
 use crate::backend::{Backend, ModelChoice, TurnOptions, UiApprover};
 use crate::design::motion::Edge;
 use crate::design::{
-    MenuFocus, Tone, Typography as _, badge, brand_mark, card, description, divider, heading, hint, hover_fill, list_item, menu_choice,
+    MenuFocus, Tone, Typography as _, badge, brand_mark, card, description, divider, heading, hint, hover_fill, menu_choice, menu_item,
     menu_popover, mono_font, motion, palette, pressable, radius, readable_with_id, size, space, with_focus_ring,
 };
 use crate::plugin::{ComposerControl, PanelContext, UiRegistry};
@@ -1397,7 +1399,7 @@ impl ConversationView {
             "workspace-chip",
             Button::new("workspace-chip")
                 .ghost()
-                .small()
+                .control_sm()
                 .icon(IconName::Folder)
                 .label(label)
                 .accessibility_label(name)
@@ -1419,7 +1421,7 @@ impl ConversationView {
             Button::new("permission-trigger")
                 .track_focus(&trigger_focus)
                 .ghost()
-                .small()
+                .control_sm()
                 .icon(permission_icon(current))
                 .label(permission_label(current))
                 // 只读“工作区内修改”听不出这是什么：带上“修改策略”。
@@ -1445,14 +1447,14 @@ impl ConversationView {
                     .accessibility_label(permission_label(mode))
                     .aria_description(permission_description(mode))
                     .relative()
-                    .px(px(space::M))
+                    .px(px(space::S))
                     .py(px(space::S))
                     .flex()
                     .gap(px(space::S))
                     .items_start()
-                    .rounded(px(radius::MD))
+                    .rounded(px(radius::SM))
                     .cursor_pointer()
-                    .child(hover_fill(&p, radius::MD, false))
+                    .child(hover_fill(&p, radius::SM, false))
                     .child(Icon::new(permission_icon(mode)).size(px(size::ICON_MD)).mt(px(2.)))
                     .child(
                         // min_w(0) 让说明在菜单宽度内换行，而不是把菜单撑开。
@@ -1506,7 +1508,7 @@ impl ConversationView {
             Button::new("preset-trigger")
                 .track_focus(&trigger_focus)
                 .ghost()
-                .small()
+                .control_sm()
                 .icon(preset_icon(current))
                 .label(trigger_label.clone())
                 .accessibility_label(t!("a11y.choice", group = t!("a11y.mode_menu"), value = trigger_label).to_string())
@@ -1534,14 +1536,14 @@ impl ConversationView {
                         .aria_description(preset_description(preset))
                         .selected(chosen)
                         .relative()
-                        .px(px(space::M))
+                        .px(px(space::S))
                         .py(px(space::S))
                         .flex()
                         .gap(px(space::S))
                         .items_start()
-                        .rounded(px(radius::MD))
+                        .rounded(px(radius::SM))
                         .cursor_pointer()
-                        .child(hover_fill(&p, radius::MD, false))
+                        .child(hover_fill(&p, radius::SM, false))
                         .child(Icon::new(preset_icon(preset)).size(px(size::ICON_MD)).mt(px(2.)))
                         .child(v_flex().flex_1().min_w(px(0.)).child(div().text_label().child(preset_label(preset))).child(hint(
                             preset_description(preset),
@@ -1574,14 +1576,14 @@ impl ConversationView {
                     .aria_description(preset.description.clone())
                     .selected(chosen)
                     .relative()
-                    .px(px(space::M))
+                    .px(px(space::S))
                     .py(px(space::S))
                     .flex()
                     .gap(px(space::S))
                     .items_start()
-                    .rounded(px(radius::MD))
+                    .rounded(px(radius::SM))
                     .cursor_pointer()
-                    .child(hover_fill(&p, radius::MD, false))
+                    .child(hover_fill(&p, radius::SM, false))
                     .child(Icon::new(IconName::Bot).size(px(size::ICON_MD)).mt(px(2.)))
                     .child(
                         v_flex()
@@ -1706,7 +1708,7 @@ impl ConversationView {
                     ("remove-attachment", index),
                     Button::new(("remove-attachment", index))
                         .ghost()
-                        .xsmall()
+                        .control_xs()
                         .icon(IconName::Close)
                         .accessibility_label(t!("conversation.remove_attachment", name = name).to_string())
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1747,7 +1749,7 @@ impl ConversationView {
             Button::new("model-trigger")
                 .track_focus(&trigger_focus)
                 .ghost()
-                .small()
+                .control_sm()
                 .accessibility_label(t!("a11y.choice", group = t!("a11y.model_menu"), value = label).to_string())
                 .label(label)
                 .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM))),
@@ -1777,7 +1779,7 @@ impl ConversationView {
                     for (index, choice) in choices.iter().enumerate() {
                         let header = (last_provider != Some(choice.provider_name.as_str())).then(|| {
                             div()
-                                .px(px(space::S))
+                                .px(px(space::S + 2.))
                                 .pt(px(space::S))
                                 .pb(px(space::XS))
                                 .text_caption()
@@ -1792,7 +1794,7 @@ impl ConversationView {
                         let view = view.clone();
                         let item =
                             // 当前模型只用对勾表示，勾选状态另外告诉读屏软件。
-                            menu_choice(list_item(("model-choice", index), None, choice.label.clone(), false, &p), selected)
+                            menu_choice(menu_item(("model-choice", index), None, choice.label.clone(), false, &p), selected)
                                 .focus_on_hover().track_focus(&menu.item(index, cx))
                                 // 读出提供商：同一个模型可能在两个提供商下都有（如截图里的 DeepSeek-V4.1-Flash）。
                                 .accessibility_label(format!("{} · {}", choice.provider_name, choice.label))
@@ -1835,7 +1837,7 @@ impl ConversationView {
                         move |window: &mut Window, cx: &mut App| show_page(ModelMenuPage::Effort, effort_index(effort) + 1, window, cx)
                     };
                     menu.on_forward(entry_index, to_effort.clone(), cx);
-                    let entry = list_item("model-effort-entry", None, effort_group.clone(), false, &p)
+                    let entry = menu_item("model-effort-entry", None, effort_group.clone(), false, &p)
                         .focus_on_hover()
                         .track_focus(&menu.item(entry_index, cx))
                         .accessibility_label(t!("a11y.choice", group = effort_group, value = effort_label(effort)).to_string())
@@ -1857,7 +1859,7 @@ impl ConversationView {
                         move |window: &mut Window, cx: &mut App| show_page(ModelMenuPage::Models, entry_index, window, cx)
                     };
                     menu.on_back(back.clone(), cx);
-                    let back_item = list_item("model-effort-back", Some(IconName::ChevronLeft), effort_group.clone(), false, &p)
+                    let back_item = menu_item("model-effort-back", Some(IconName::ChevronLeft), effort_group.clone(), false, &p)
                         .focus_on_hover()
                         .track_focus(&menu.item(0, cx))
                         .accessibility_label(t!("conversation.effort_back").to_string())
@@ -1870,7 +1872,7 @@ impl ConversationView {
                         let (view, back) = (view.clone(), back.clone());
                         let checked = level == effort;
                         let name = t!("a11y.choice", group = effort_group, value = effort_label(level)).to_string();
-                        let item = menu_choice(list_item(("effort", index), None, effort_label(level), false, &p), checked)
+                        let item = menu_choice(menu_item(("effort", index), None, effort_label(level), false, &p), checked)
                             .focus_on_hover()
                             .track_focus(&menu.item(index + 1, cx))
                             .accessibility_label(name)
@@ -1955,7 +1957,16 @@ impl ConversationView {
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .child(
                 motion::highlight("send-stop-fill", p.text, size::CONTROL_MD / 2., stop).without_hover().animate(motion::FAST).outset(2.),
-            );
+            )
+            // 悬停提亮、按住压暗（可用时才有）。
+            .when(enabled, |button| {
+                button.child(
+                    motion::highlight("send-state", transparent_black(), size::CONTROL_MD / 2., false)
+                        .hover_color(white().opacity(0.14))
+                        .pressed_color(black().opacity(0.14))
+                        .outset(2.),
+                )
+            });
         if stop {
             return base
                 .accessibility_label(t!("conversation.stop").to_string())
@@ -2091,7 +2102,7 @@ impl ConversationView {
                         ("unsteer", id as usize),
                         Button::new(("unsteer", id as usize))
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .icon(IconName::Close)
                             .tooltip(t!("conversation.unsteer").to_string())
                             .accessibility_label(t!("conversation.unsteer").to_string())
@@ -2126,7 +2137,7 @@ impl ConversationView {
                             ("steer", index),
                             Button::new(("steer", index))
                                 .ghost()
-                                .xsmall()
+                                .control_xs()
                                 .icon(gpui_kit::assets::IconName::CornerDownLeft)
                                 .label(t!("conversation.steer").to_string())
                                 .tooltip(t!("conversation.steer_tooltip", key = steer_key).to_string())
@@ -2138,7 +2149,7 @@ impl ConversationView {
                         ("unqueue", index),
                         Button::new(("unqueue", index))
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .icon(IconName::Close)
                             .accessibility_label(t!("conversation.unqueue").to_string())
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -2178,7 +2189,7 @@ impl ConversationView {
             "attach",
             Button::new("attach")
                 .ghost()
-                .small()
+                .control_sm()
                 .icon(IconName::Plus)
                 .tooltip(t!("conversation.attach").to_string())
                 .accessibility_label(t!("conversation.attach").to_string())
@@ -2216,12 +2227,12 @@ impl ConversationView {
         column.children(panels).children(slash_menu).child(queue).child(
             v_flex()
                 .w_full()
-                .rounded(px(radius::XXL))
+                .rounded(px(radius::XL))
                 .border_1()
                 // 文件拖进窗口时用高亮色提示：松手就加为附件。
                 .border_color(if drag_border { p.accent } else { p.border })
                 .bg(p.surface)
-                .shadow_md()
+                .shadow(crate::design::shadow::composer(&p))
                 .p(px(space::M))
                 .gap(px(space::XS))
                 // 文件拖放（GPUI 把它翻译成内部拖拽）：悬停时高亮，松手把路径加进附件。
@@ -2408,11 +2419,11 @@ impl ConversationView {
             .on_action(cx.listener(|this, _: &ApprovalAlways, window, cx| this.answer_approval(ApprovalChoice::Always, window, cx)))
             .on_action(cx.listener(|this, _: &ApprovalDeny, window, cx| this.answer_approval(ApprovalChoice::Deny, window, cx)))
             .w_full()
-            .rounded(px(radius::XXL))
+            .rounded(px(radius::XL))
             .border_1()
             .border_color(p.warning)
             .bg(p.surface)
-            .shadow_md()
+            .shadow(crate::design::shadow::composer(&p))
             .p(px(space::M))
             .gap(px(space::S))
             .child(
@@ -2528,7 +2539,7 @@ impl ConversationView {
         let p = palette(cx);
         let turn = footer.turn;
         let icon_button = |id: &'static str, icon: gpui_kit::assets::IconName, label: String| {
-            Button::new((id, index)).ghost().xsmall().icon(icon).tooltip(label.clone()).accessibility_label(label)
+            Button::new((id, index)).ghost().control_xs().icon(icon).tooltip(label.clone()).accessibility_label(label)
         };
         let usage = (footer.tokens > 0).then(|| {
             h_flex()
@@ -2662,9 +2673,11 @@ impl ConversationView {
             .border_color(p.border)
             .bg(p.surface)
             .text_color(p.text)
-            .shadow(crate::design::shadow::menu())
+            .shadow(crate::design::shadow::menu(&p))
             .cursor_pointer()
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
+            .relative()
+            .child(hover_fill(&p, size::CONTROL_MD / 2., false))
             .child(Icon::new(IconName::ArrowDown).size(px(size::ICON_MD)))
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_latest(window, cx)));
         let row = div().absolute().left_0().right_0().bottom(px(space::L)).flex().justify_center().child(button);

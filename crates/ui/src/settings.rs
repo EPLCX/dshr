@@ -16,10 +16,12 @@ use dshr_context::Status;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
+
+use crate::design::ControlSize as _;
 
 use crate::announce::announce;
 use crate::backend::Backend;
@@ -879,7 +881,7 @@ impl SettingsView {
                     ("browse-install", index),
                     Button::new(("browse-install", index))
                         .outline()
-                        .xsmall()
+                        .control_xs()
                         .label(t!("settings.plugin_browse_install").to_string())
                         .accessibility_label(t!("settings.plugin_browse_install_named", id = entry.id).to_string())
                         .on_click(cx.listener(move |this, _, window, cx| this.install_from_index(id.clone(), window, cx))),
@@ -1552,7 +1554,7 @@ impl SettingsView {
                         "open-instructions",
                         Button::new("open-instructions")
                             .outline()
-                            .small()
+                            .control_sm()
                             .label(t!("settings.open_instructions").to_string())
                             .on_click(cx.listener(|this, _, _, cx| this.open_global_instructions(cx))),
                     ),
@@ -1565,7 +1567,7 @@ impl SettingsView {
                         "open-skills",
                         Button::new("open-skills")
                             .outline()
-                            .small()
+                            .control_sm()
                             .label(t!("settings.open_skills").to_string())
                             .on_click(cx.listener(|this, _, _, cx| this.open_skills_dir(cx))),
                     ),
@@ -1641,7 +1643,7 @@ impl SettingsView {
                                     "open-plugins-dir",
                                     Button::new("open-plugins-dir")
                                         .ghost()
-                                        .small()
+                                        .control_sm()
                                         .flex_none()
                                         .icon(IconName::FolderOpen)
                                         .label(t!("settings.open_plugins_dir").to_string())
@@ -1695,7 +1697,7 @@ impl SettingsView {
                             crate::design::framed(
                                 ("mcp-login", index),
                                 Button::new(("mcp-login", index))
-                                    .xsmall()
+                                    .control_xs()
                                     .when(sign_out, |button| button.ghost())
                                     .when(!sign_out, |button| button.primary())
                                     .label(if sign_out { t!("settings.mcp_logout") } else { t!("settings.mcp_login") }.to_string())
@@ -1706,7 +1708,7 @@ impl SettingsView {
                             ("mcp-reconnect", index),
                             Button::new(("mcp-reconnect", index))
                                 .ghost()
-                                .xsmall()
+                                .control_xs()
                                 .label(t!("settings.mcp_reconnect").to_string())
                                 .accessibility_label(t!("settings.mcp_reconnect_server", name = server.name).to_string())
                                 .on_click(cx.listener(move |this, _, _, cx| this.reconnect_mcp(reconnect_name.clone(), cx))),
@@ -1715,7 +1717,7 @@ impl SettingsView {
                             ("mcp-log", index),
                             Button::new(("mcp-log", index))
                                 .ghost()
-                                .xsmall()
+                                .control_xs()
                                 .label(if log_open { t!("settings.plugin_logs_hide") } else { t!("settings.plugin_logs") }.to_string())
                                 .accessibility_label(t!("settings.plugin_logs_named", name = server.name).to_string())
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1764,7 +1766,7 @@ impl SettingsView {
                         ("remove-mcp", index),
                         Button::new(("remove-mcp", index))
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .label(t!("settings.mcp_remove").to_string())
                             .accessibility_label(t!("settings.mcp_remove_server", name = server.name).to_string())
                             .on_click(cx.listener(move |this, _, window, cx| this.remove_mcp_server(remove_name.clone(), window, cx))),
@@ -1858,7 +1860,7 @@ impl SettingsView {
                                 (self.mcp_add_focus).clone(),
                                 Button::new("open-mcp-form")
                                     .outline()
-                                    .small()
+                                    .control_sm()
                                     .icon(IconName::Plus)
                                     .label(t!("a11y.mcp_add_server").to_string())
                                     .accessibility_label(in_section(&section, t!("a11y.mcp_add_server")))
@@ -2070,7 +2072,7 @@ impl SettingsView {
                             ("grant-plugin", index),
                             Button::new(("grant-plugin", index))
                                 .primary()
-                                .small()
+                                .control_sm()
                                 .flex_none()
                                 .label(t!("settings.plugin_grant").to_string())
                                 .accessibility_label(t!("settings.plugin_grant_named", name = name).to_string())
@@ -2102,7 +2104,7 @@ impl SettingsView {
                         ("update-plugin", index),
                         Button::new(("update-plugin", index))
                             .outline()
-                            .xsmall()
+                            .control_xs()
                             .label(t!("settings.plugin_update").to_string())
                             .on_click(cx.listener(move |this, _, window, cx| this.update_plugin(id, window, cx))),
                     ))
@@ -2113,7 +2115,7 @@ impl SettingsView {
                     ("rollback-plugin", index),
                     Button::new(("rollback-plugin", index))
                         .ghost()
-                        .xsmall()
+                        .control_xs()
                         .label(t!("settings.plugin_rollback", version = version).to_string())
                         .on_click(cx.listener(move |this, _, window, cx| this.rollback_plugin(id, window, cx))),
                 ))
@@ -2133,8 +2135,7 @@ impl SettingsView {
                     ("delete-plugin", index),
                     Button::new(("delete-plugin", index))
                         .danger()
-                        .ghost()
-                        .xsmall()
+                        .control_xs()
                         .label(label)
                         .accessibility_label(accessibility)
                         .on_click(cx.listener(move |this, _, _, cx| this.delete_plugin(id, cx))),
@@ -2153,7 +2154,7 @@ impl SettingsView {
                         ("unlink-plugin", index),
                         Button::new(("unlink-plugin", index))
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .label(t!("settings.plugin_unlink").to_string())
                             .on_click(cx.listener(move |this, _, _, cx| this.unlink_plugin(id, cx))),
                     ))
@@ -2169,7 +2170,7 @@ impl SettingsView {
                         ("plugin-details", index),
                         Button::new(("plugin-details", index))
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .icon(if expanded { IconName::ChevronUp } else { IconName::ChevronDown })
                             .label(if expanded { t!("settings.details_hide") } else { t!("settings.details_show") }.to_string())
                             .accessibility_label(t!("settings.details_named", name = name).to_string())
@@ -2205,7 +2206,7 @@ impl SettingsView {
                             .child(crate::design::framed(
                                 SharedString::from(format!("plugin-{index}-secret-save-{secret_index}")),
                                 Button::new(SharedString::from(format!("plugin-{index}-secret-save-{secret_index}")))
-                                    .small()
+                                    .control_sm()
                                     .outline()
                                     .label(t!("settings.save").to_string())
                                     .on_click(
@@ -2240,7 +2241,7 @@ impl SettingsView {
                 ("plugin-log", index),
                 Button::new(("plugin-log", index))
                     .ghost()
-                    .xsmall()
+                    .control_xs()
                     .label(if open { t!("settings.plugin_logs_hide") } else { t!("settings.plugin_logs") }.to_string())
                     .accessibility_label(t!("settings.plugin_logs_named", name = id).to_string())
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2341,7 +2342,7 @@ impl SettingsView {
                     ("edit-shortcut", index),
                     Button::new(("edit-shortcut", index))
                         .outline()
-                        .xsmall()
+                        .control_xs()
                         .label(if recording { t!("settings.cancel") } else { t!("settings.change") }.to_string())
                         // 读出现在的按键：只听“修改快捷键”不知道它现在是什么。
                         .accessibility_label(
@@ -2431,7 +2432,7 @@ impl SettingsView {
                         "reveal-reset-shortcuts",
                         crate::design::framed(
                             "reset-shortcuts",
-                            Button::new("reset-shortcuts").ghost().small().label(t!("settings.reset_shortcuts").to_string()).on_click(
+                            Button::new("reset-shortcuts").ghost().control_sm().label(t!("settings.reset_shortcuts").to_string()).on_click(
                                 cx.listener(|this, _, _, cx| {
                                     this.recording = None;
                                     this.save_shortcut(|bindings| bindings.bindings.clear(), cx);
@@ -2660,7 +2661,7 @@ impl SettingsView {
                                         edit_focus.clone(),
                                         Button::new(("edit-provider", index))
                                             .outline()
-                                            .small()
+                                            .control_sm()
                                             .label(t!("settings.edit").to_string())
                                             // 名称里带上状态：Tab 到按钮上就知道这个提供商能不能用。
                                             .accessibility_label(in_section(t!("settings.edit_provider", name = provider.name), &status))
@@ -2707,7 +2708,7 @@ impl SettingsView {
                                     (self.add_provider_focus).clone(),
                                     Button::new("add-provider")
                                         .outline()
-                                        .small()
+                                        .control_sm()
                                         .icon(IconName::Plus)
                                         .label(t!("settings.add_provider").to_string())
                                         .track_focus(&self.add_provider_focus)
@@ -2745,7 +2746,7 @@ impl SettingsView {
                             ("add-plugin-provider", index),
                             Button::new(("add-plugin-provider", index))
                                 .outline()
-                                .small()
+                                .control_sm()
                                 .label(t!("settings.add_provider").to_string())
                                 .accessibility_label(t!("settings.plugin_provider_add_named", name = name).to_string())
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -2938,7 +2939,7 @@ impl Render for SettingsView {
                 "open-config",
                 Button::new("open-config")
                     .outline()
-                    .small()
+                    .control_sm()
                     .label(t!("settings.open_config").to_string())
                     .on_click(cx.listener(|this, _, _, cx| this.open_config_file(cx))),
             ))
@@ -2946,7 +2947,7 @@ impl Render for SettingsView {
                 "close-settings",
                 Button::new("close-settings")
                     .ghost()
-                    .small()
+                    .control_sm()
                     .icon(IconName::Close)
                     .accessibility_label(t!("settings.close").to_string())
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close))),
@@ -2976,13 +2977,13 @@ impl Render for SettingsView {
             .max_w(relative(0.94))
             .h(px(size::MODAL_HEIGHT))
             .max_h(relative(0.92))
-            .rounded(px(radius::XXL))
+            .rounded(px(radius::XL))
             .bg(p.raised)
             .border_1()
             .border_color(p.border)
             .text_color(p.text)
             // 卡片淡入并上浮一点，阴影跟着渐显（见 `motion::pop`）；关上时立即移除。
-            .map(|card| motion::pop(card, Edge::Bottom, motion::SHORT, self.phase, shadow::modal()))
+            .map(|card| motion::pop(card, Edge::Bottom, motion::SHORT, self.phase, shadow::modal(&p)))
             .overflow_hidden()
             .child(header)
             .child(

@@ -12,6 +12,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::design::ControlSize as _;
+
 use crate::announce::announce;
 use crate::backend::{Backend, KeyStatus};
 use crate::design::{
@@ -574,7 +576,7 @@ impl ProviderForm {
                             "sign-out",
                             Button::new("sign-out")
                                 .ghost()
-                                .xsmall()
+                                .control_xs()
                                 .label(t!("settings.sign_out").to_string())
                                 .on_click(cx.listener(|this, _, window, cx| this.sign_out_account(window, cx))),
                         ),
@@ -589,7 +591,7 @@ impl ProviderForm {
                             "sign-in",
                             Button::new("sign-in")
                                 .outline()
-                                .small()
+                                .control_sm()
                                 .label(t!("settings.sign_in_with_account").to_string())
                                 .disabled(signing_in)
                                 .on_click(cx.listener(|this, _, window, cx| this.sign_in_account(window, cx))),
@@ -630,7 +632,7 @@ impl ProviderForm {
                         "clear-key",
                         Button::new("clear-key")
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .label(t!("settings.clear_key").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.clear_key(window, cx))),
                     ),
@@ -720,7 +722,7 @@ impl ProviderForm {
                                 ("remove-model", index),
                                 Button::new(("remove-model", index))
                                     .ghost()
-                                    .small()
+                                    .control_sm()
                                     .icon(IconName::Close)
                                     .accessibility_label(row_label(t!("settings.remove_model").to_string()))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -752,7 +754,7 @@ impl ProviderForm {
                             "fetch-models",
                             Button::new("fetch-models")
                                 .ghost()
-                                .small()
+                                .control_sm()
                                 .icon(IconName::RefreshCw)
                                 .label(fetch_label.to_string())
                                 .disabled(matches!(self.fetch, Fetch::Running))
@@ -769,7 +771,7 @@ impl ProviderForm {
                         "add-model",
                         Button::new("add-model")
                             .outline()
-                            .small()
+                            .control_sm()
                             .icon(IconName::Plus)
                             .label(t!("settings.add_model").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.add_model(window, cx))),

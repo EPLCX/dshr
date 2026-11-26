@@ -12,10 +12,12 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
+
+use crate::design::ControlSize as _;
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
@@ -322,7 +324,7 @@ impl PluginPageView {
             "divider" => divider(&p).into_any_element(),
             "button" => {
                 let (action, value) = (string("action"), node.get("payload").cloned().unwrap_or(Value::Null));
-                let button = Button::new(id("")).small().label(string("label")).disabled(self.busy);
+                let button = Button::new(id("")).control_sm().label(string("label")).disabled(self.busy);
                 let button = match node.get("variant").and_then(Value::as_str) {
                     Some("primary") => button.primary(),
                     Some("ghost") => button.ghost(),
@@ -367,7 +369,6 @@ impl PluginPageView {
             }
             "list" => {
                 let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
-                let selected = p.selected;
                 v_flex()
                     .gap(px(2.))
                     .children(items.into_iter().enumerate().map(|(index, item)| {
@@ -392,10 +393,13 @@ impl PluginPageView {
                                 pressable(item_id, &p)
                                     .accessibility_label(title.clone())
                                     .when_some(detail.clone(), |row, detail| row.aria_description(detail))
+                                    .relative()
                                     .flex()
                                     .items_center()
+                                    .rounded(px(radius::MD))
                                     .cursor_pointer()
-                                    .hover(move |style| style.bg(selected))
+                                    // 悬停、按下底色铺满整行，带圆角。
+                                    .child(crate::design::hover_fill(&p, radius::MD, false))
                                     .on_click(
                                         cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)),
                                     )
@@ -437,7 +441,7 @@ impl PluginPageView {
                 let buttons = options.into_iter().enumerate().map(|(index, option)| {
                     let value = option.as_str().or_else(|| option.get("value").and_then(Value::as_str)).unwrap_or_default().to_owned();
                     let text = option.get("label").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| value.clone());
-                    let button = Button::new(id(&format!("-option-{index}"))).small().label(text).disabled(self.busy);
+                    let button = Button::new(id(&format!("-option-{index}"))).control_sm().label(text).disabled(self.busy);
                     let button = if value == current { button.primary() } else { button.outline() };
                     let (select, action) = (select.clone(), action.clone());
                     crate::design::framed(
@@ -467,7 +471,7 @@ impl PluginPageView {
                 crate::design::framed(
                     id(""),
                     Button::new(id(""))
-                        .small()
+                        .control_sm()
                         .ghost()
                         .icon(IconName::ExternalLink)
                         .label(label)
@@ -817,9 +821,9 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());
-                let selected_bg = p.selected;
+                let hover_bg = p.hover;
                 cell.cursor_pointer()
-                    .hover(move |style| style.bg(selected_bg))
+                    .hover(move |style| style.bg(hover_bg))
                     .on_click(move |_, window, cx| pick(date.clone(), window, cx))
                     .into_any_element()
             }
@@ -1051,7 +1055,7 @@ impl Render for PluginPageView {
                         "plugin-page-retry",
                         Button::new("plugin-page-retry")
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .label(t!("plugin_page.retry").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))),
                     ),

@@ -148,7 +148,7 @@ fn indicator(anchor: Point<Pixels>, cx: &App) -> impl IntoElement {
                 .bg(p.raised.opacity(0.92))
                 .border_1()
                 .border_color(p.border)
-                .shadow_md()
+                .shadow(crate::design::shadow::menu(&p))
                 .text_color(p.text_secondary)
                 .child(Icon::new(IconName::ChevronUp).xsmall())
                 .child(Icon::new(IconName::ChevronDown).xsmall()),

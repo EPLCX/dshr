@@ -18,6 +18,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::design::ControlSize as _;
+
 use crate::design::{Typography as _, motion, palette, radius, readable_with_id, shadow, size, space, with_focus_ring};
 
 /// 没输入时列出几个最近的会话。
@@ -342,13 +344,13 @@ impl Render for SessionSearchView {
             .w(px(DIALOG_WIDTH))
             .max_w(relative(0.94))
             .max_h(relative(0.8))
-            .rounded(px(radius::XXL))
+            .rounded(px(radius::XL))
             .bg(p.raised)
             .border_1()
             .border_color(p.border)
             .text_color(p.text)
             .overflow_hidden()
-            .map(|dialog| motion::pop(dialog, motion::Edge::Top, 0., self.phase, shadow::modal()))
+            .map(|dialog| motion::pop(dialog, motion::Edge::Top, 0., self.phase, shadow::modal(&p)))
             .child(
                 h_flex()
                     .flex_none()
@@ -370,7 +372,7 @@ impl Render for SessionSearchView {
                         "close-session-search",
                         Button::new("close-session-search")
                             .ghost()
-                            .small()
+                            .control_sm()
                             .icon(IconName::Close)
                             .accessibility_label(t!("search.hint_close").to_string())
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SessionSearchEvent::Close))),
@@ -410,7 +412,7 @@ impl Render for SessionSearchView {
                     .px(px(space::XL))
                     .py(px(space::M))
                     // 外层的裁切是方的：底色自己带上圆角，不从弹窗的圆角里露出来。
-                    .rounded_b(px(radius::XXL))
+                    .rounded_b(px(radius::XL))
                     .bg(p.sidebar)
                     .child(hint("session-search-hint-select", vec!["↑", "↓"], t!("search.hint_select").to_string()))
                     .child(hint("session-search-hint-open", vec!["Enter"], t!("search.hint_open").to_string()))

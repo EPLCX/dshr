@@ -49,6 +49,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::design::ControlSize as _;
+
 pub use backend::Backend;
 pub use cards::{AccountUi, FsUi, PermissionUi, PlanUi, PresetsUi, builtin_ui_plugins};
 pub use conversation::{ConversationEvent, ConversationView};
@@ -433,7 +435,10 @@ pub(crate) fn apply_palette(backend: &Backend, cx: &mut App) -> Result<(), Strin
         (!key.is_empty()).then(|| backend.themes().into_iter().find(|theme| Backend::theme_key(theme) == key)).flatten()
     };
     let result = match theme {
-        Some(theme) => design::PaletteOverride::parse(&theme.light, &theme.dark),
+        Some(theme) => design::PaletteOverride::parse(&theme.light, &theme.dark).map(|mut over| {
+            over.high_contrast = high_contrast;
+            over
+        }),
         None => Ok(design::PaletteOverride::default()),
     };
     let result = match result {
@@ -549,12 +554,15 @@ pub(crate) fn sync_theme(cx: &mut App) {
     let overridden = cx.try_global::<design::PaletteOverride>().is_some_and(|over| !over.is_empty(dark));
     let theme = gpui_kit::component::ActiveTheme::theme(cx);
     let needs_colors = overridden
-        && (theme.foreground != p.text || theme.background != p.surface || theme.input != p.border || theme.switch != p.text_secondary);
-    if theme.ring != ring || theme.font_size != font || theme.mono_font_size != mono || needs_colors {
+        && (theme.foreground != p.text || theme.background != p.surface || theme.border != p.border || theme.switch != p.text_secondary);
+    let needs_controls = !design::control_theme_applied(&p, theme);
+    if theme.ring != ring || theme.font_size != font || theme.mono_font_size != mono || needs_colors || needs_controls {
         Theme::update(cx, |theme| {
             if overridden {
                 design::apply_palette_to_theme(&p, &mut theme.colors);
             }
+            // 圆角、按钮与输入框的状态色：所有主题都按调色板设（`Theme::change` 每次都会把它们换回原始值）。
+            design::control_theme(&p, theme);
             theme.colors.ring = ring;
             theme.font_size = font;
             theme.mono_font_size = mono;
@@ -1447,7 +1455,7 @@ impl WorkspaceView {
                 .rounded(px(radius::MD))
                 .bg(p.raised)
                 .border_color(p.border)
-                .shadow(design::shadow::menu())
+                .shadow(design::shadow::menu(&p))
                 .text_label()
                 .cursor_pointer()
                 .child(label)
@@ -1610,7 +1618,7 @@ impl WorkspaceView {
             Button::new(("session-more", index))
                 .track_focus(&trigger_focus)
                 .ghost()
-                .xsmall()
+                .control_xs()
                 .icon(IconName::Ellipsis)
                 .accessibility_label(t!("sidebar.session_actions", title = session.title).to_string()),
         );
@@ -1620,7 +1628,7 @@ impl WorkspaceView {
             let (rename_view, delete_view) = (view.clone(), view.clone());
             let (rename_id, delete_id, title) = (id.clone(), id.clone(), title.clone());
             let delete_label = if confirming { t!("sidebar.confirm_delete") } else { t!("sidebar.delete") };
-            let rename = list_item("session-rename", None, t!("sidebar.rename").to_string(), false, &p)
+            let rename = design::menu_item("session-rename", None, t!("sidebar.rename").to_string(), false, &p)
                 .focus_on_hover()
                 .track_focus(&menu.item(0, cx))
                 .on_click(move |_, window, cx| {
@@ -1628,11 +1636,11 @@ impl WorkspaceView {
                     rename_view.update(cx, |this, cx| this.start_rename(id, title, window, cx)).ok();
                 });
             v_flex()
-                .w(px(180.))
+                .min_w(px(200.))
                 .p(px(space::XS))
                 .child(rename)
                 .child(
-                    list_item("session-delete", None, delete_label.to_string(), false, &p)
+                    design::menu_item("session-delete", None, delete_label.to_string(), false, &p)
                         .focus_on_hover()
                         .track_focus(&menu.item(1, cx))
                         .text_color(p.danger)
@@ -1815,7 +1823,7 @@ impl WorkspaceView {
                 ("workspace-new", index),
                 Button::new(("workspace-new", index))
                     .ghost()
-                    .xsmall()
+                    .control_xs()
                     .icon(IconName::Plus)
                     .tooltip(path.display().to_string())
                     .accessibility_label(t!("sidebar.new_in_workspace", name = name).to_string())
@@ -1826,7 +1834,7 @@ impl WorkspaceView {
                     ("workspace-remove", index),
                     Button::new(("workspace-remove", index))
                         .ghost()
-                        .xsmall()
+                        .control_xs()
                         .icon(IconName::Close)
                         .accessibility_label(t!("sidebar.remove_workspace", name = name).to_string())
                         .on_click(cx.listener(move |this, _, _, cx| this.forget_workspace(&path, cx))),
@@ -1946,7 +1954,7 @@ impl WorkspaceView {
             .items_center()
             .justify_center()
             .w_full()
-            .h(px(size::NAV_ITEM))
+            .h(px(size::TITLE_BAR))
             .when(!traffic_lights, |row| row.child(brand_mark(size::ICON_LG, &p)));
         let top = v_flex()
             .items_center()
@@ -2150,7 +2158,7 @@ impl WorkspaceView {
                             .flex_1()
                             .min_w(px(0.))
                             .items_center()
-                            .h(px(size::NAV_ITEM))
+                            .h(px(size::TITLE_BAR))
                             .px(px(space::M))
                             // macOS：品牌放在红黄绿按钮右边。
                             .pl(px(space::M + title_bar::brand_offset(space::M * 2., window)))
@@ -2175,7 +2183,7 @@ impl WorkspaceView {
                         "add-workspace",
                         Button::new("add-workspace")
                             .ghost()
-                            .xsmall()
+                            .control_xs()
                             .icon(IconName::FolderOpen)
                             .tooltip(t!("sidebar.add_workspace").to_string())
                             .accessibility_label(t!("sidebar.add_workspace").to_string())
@@ -2328,7 +2336,7 @@ impl Render for WorkspaceView {
                 .w(px(size::MODAL_CONTENT_MAX_WIDTH))
                 .max_w(relative(0.94))
                 .max_h(relative(0.9))
-                .rounded(px(radius::XXL))
+                .rounded(px(radius::XL))
                 .bg(p.raised)
                 .border_1()
                 .border_color(p.border)
@@ -2343,7 +2351,7 @@ impl Render for WorkspaceView {
                             "close-plugin-page",
                             Button::new("close-plugin-page")
                                 .ghost()
-                                .small()
+                                .control_sm()
                                 .icon(IconName::Close)
                                 .accessibility_label(t!("settings.close").to_string())
                                 .on_click(cx.listener(|this, _, window, cx| this.close_plugin_page(window, cx))),
@@ -2358,7 +2366,7 @@ impl Render for WorkspaceView {
                         .overflow_y_scroll()
                         .child(page.view.clone()),
                 )
-                .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::SHORT, phase, shadow::modal()))
+                .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::SHORT, phase, shadow::modal(&p)))
                 .focus_trap("plugin-page-trap", &page.focus);
             title_bar::below(div().id("plugin-page-overlay").absolute())
                 .occlude()
