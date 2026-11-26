@@ -4510,7 +4510,7 @@ mod menu_tests {
                 view.transcript.apply(&event(EventBody::ToolCall {
                     call_id: call_id.into(),
                     name: "run_shell".into(),
-                    input: serde_json::json!({ "command": "rm -rf build" }),
+                    input: serde_json::json!({ "command": "rm -rf build" }).into(),
                 }));
                 view.transcript.attach_approval(call_id, tx, Some("会删除目录".into()));
                 view.sync_rows(cx);

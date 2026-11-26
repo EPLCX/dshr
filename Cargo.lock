@@ -2054,6 +2054,7 @@ dependencies = [
  "dshr-context",
  "dshr-llm",
  "dshr-sandbox",
+ "futures",
  "globset",
  "grep-regex",
  "grep-searcher",

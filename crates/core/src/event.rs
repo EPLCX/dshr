@@ -63,8 +63,10 @@ pub enum EventBody {
     /// 一次失败的模型请求；成功的那次直接记为 `assistant/message`。
     #[serde(rename = "assistant/attempt")]
     AssistantAttempt { attempt: u32, error: String },
+    /// `input` 用 `Arc` 共享：写 `write_file` 这类调用时参数就是整份文件内容，记进日志、推给界面都只加引用计数
+    /// （序列化形状不变）。
     #[serde(rename = "tool/call")]
-    ToolCall { call_id: String, name: String, input: Value },
+    ToolCall { call_id: String, name: String, input: Arc<Value> },
     #[serde(rename = "tool/result")]
     ToolResult {
         call_id: String,
