@@ -1531,18 +1531,29 @@ impl WorkspaceView {
         }
         let title = input.read(cx).value().trim().to_owned();
         let unchanged = self.sessions.iter().any(|session| session.id == id && session.title == title);
-        if !title.is_empty() && !unchanged {
-            match self.backend.rename_session(id, &title) {
-                // 列表在后台刷新，先把新标题显示出来。
-                Ok(()) => {
-                    if let Some(session) = self.sessions.iter_mut().find(|session| session.id == id) {
-                        session.title = title;
-                    }
-                }
-                Err(error) => self.sidebar_error = Some(t!("sidebar.action_failed", error = error).to_string()),
-            }
+        if title.is_empty() || unchanged {
+            self.refresh_sessions(cx);
+            return;
         }
-        self.refresh_sessions(cx);
+        // 先把新标题显示出来。写日志放到后台：没打开的会话要先把整份日志扫一遍才能接着写（几十 MB 的日志
+        // 要几十毫秒），不能卡住界面。写完（或失败）再从磁盘刷新列表。
+        if let Some(session) = self.sessions.iter_mut().find(|session| session.id == id) {
+            session.title = title.clone();
+        }
+        cx.notify();
+        let (backend, id) = (self.backend.clone(), id.to_owned());
+        let renamed = cx.background_executor().spawn(async move { backend.rename_session(&id, &title) });
+        cx.spawn(async move |this, cx| {
+            let result = renamed.await;
+            this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.sidebar_error = Some(t!("sidebar.action_failed", error = error).to_string());
+                }
+                this.refresh_sessions(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn delete_session(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {

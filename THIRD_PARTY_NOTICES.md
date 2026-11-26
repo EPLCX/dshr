@@ -3,7 +3,7 @@
 dshr 本身以 MIT 许可发布，见 [LICENSE](LICENSE)。dshr 的桌面版与命令行版包含下列第三方组件，
 它们各自的版权归原作者所有，按各自的许可证使用。可选双许可（如 `MIT OR Apache-2.0`）的组件，本项目按其中任一许可使用。
 
-统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 559 个 crate；
+统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 561 个 crate；
 dev / build 依赖不进最终程序，不列入。
 
 ## 参照项目
@@ -193,6 +193,7 @@ dev / build 依赖不进最终程序，不列入。
 | [gpui-pre-collections](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-derive-refineable](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-http-client](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
+| [gpui-pre-macos](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-macros](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-platform](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-refineable](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
@@ -200,6 +201,7 @@ dev / build 依赖不进最终程序，不列入。
 | [gpui-pre-shared-string](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-sum-tree](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-util](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
+| [gpui-pre-windows](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-ztracing](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-ztracing-macro](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [granit-parser](https://github.com/bourumir-wyngs/granit-parser) | 1.3.0 | MIT OR Apache-2.0 |
@@ -6965,9 +6967,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 105. gpui-pre 0.3.12 等 14 项
+### 105. gpui-pre 0.3.12 等 16 项
 
-使用者：gpui-pre 0.3.12（LICENSE-APACHE）、gpui-pre-apple 0.3.12（LICENSE-APACHE）、gpui-pre-collections 0.3.12（LICENSE-APACHE）、gpui-pre-derive-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-http-client 0.3.12（LICENSE-APACHE）、gpui-pre-macros 0.3.12（LICENSE-APACHE）、gpui-pre-platform 0.3.12（LICENSE-APACHE）、gpui-pre-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-scheduler 0.3.12（LICENSE-APACHE）、gpui-pre-shared-string 0.3.12（LICENSE-APACHE）、gpui-pre-sum-tree 0.3.12（LICENSE-APACHE）、gpui-pre-util 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing-macro 0.3.12（LICENSE-APACHE）
+使用者：gpui-pre 0.3.12（LICENSE-APACHE）、gpui-pre-apple 0.3.12（LICENSE-APACHE）、gpui-pre-collections 0.3.12（LICENSE-APACHE）、gpui-pre-derive-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-http-client 0.3.12（LICENSE-APACHE）、gpui-pre-macos 0.3.12（LICENSE-APACHE）、gpui-pre-macros 0.3.12（LICENSE-APACHE）、gpui-pre-platform 0.3.12（LICENSE-APACHE）、gpui-pre-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-scheduler 0.3.12（LICENSE-APACHE）、gpui-pre-shared-string 0.3.12（LICENSE-APACHE）、gpui-pre-sum-tree 0.3.12（LICENSE-APACHE）、gpui-pre-util 0.3.12（LICENSE-APACHE）、gpui-pre-windows 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing-macro 0.3.12（LICENSE-APACHE）
 
 ```text
 Copyright 2022 - 2025 Zed Industries, Inc.

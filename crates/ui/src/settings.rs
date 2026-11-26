@@ -183,6 +183,9 @@ pub struct SettingsView {
     /// 配色方案：第一项是默认配色，其余是 `Backend::themes()`。
     palette_select: Entity<DropdownState>,
     palette_keys: Vec<String>,
+    /// 下拉框里的配色方案（顺序同 `palette_keys[1..]`）。打开设置页、插件变化时读一次：
+    /// `Backend::themes()` 要读 `themes/` 目录、逐个解析文件，不能在每次重画时调用。
+    palette_themes: Vec<dshr_agent::ThemeDef>,
     palette_error: Option<String>,
     motion_select: Entity<DropdownState>,
     /// 辅助功能页的高对比度、文字大小。
@@ -380,6 +383,7 @@ impl SettingsView {
             theme_select,
             palette_select,
             palette_keys,
+            palette_themes: themes,
             palette_error: None,
             motion_select,
             high_contrast_select,
@@ -604,7 +608,10 @@ impl SettingsView {
                 // 一次开关、热重载会在每个 `Context` 里各发布一两次快照：稍等一下，合并成一次刷新。
                 cx.background_executor().timer(std::time::Duration::from_millis(80)).await;
                 let _ = changes.borrow_and_update();
-                let updated = this.update_in(cx, |this, window, cx| this.sync_plugin_rows(false, window, cx));
+                let updated = this.update_in(cx, |this, window, cx| {
+                    this.refresh_palettes();
+                    this.sync_plugin_rows(false, window, cx);
+                });
                 if updated.is_err() {
                     break;
                 }
@@ -617,6 +624,13 @@ impl SettingsView {
     ///
     /// 哪些是 JS 插件（`script_ids`）也要跟着换：它决定一行显示在“JS 插件”下面；只在打开设置时读一次的话，
     /// 新装的插件有了行也显示不出来，一直是“暂无 JS 插件”，要关掉设置再打开才看得到。
+    /// 重新读一次可选的配色方案（插件装上、卸下时，插件带的方案跟着变）。
+    fn refresh_palettes(&mut self) {
+        let themes = self.backend.themes();
+        self.palette_keys = std::iter::once(String::new()).chain(themes.iter().map(Backend::theme_key)).collect();
+        self.palette_themes = themes;
+    }
+
     fn sync_plugin_rows(&mut self, rebuild: bool, window: &mut Window, cx: &mut Context<Self>) {
         let ids: Vec<&str> = self.backend.plugins().iter().map(|plugin| plugin.id).collect();
         let known: Vec<&str> = self.plugin_rows.iter().map(|row| row.id).collect();
@@ -2543,7 +2557,7 @@ impl SettingsView {
         // 配色方案同样随语言刷新：内置方案的名字是翻译的。
         let palette_index = self.palette_keys.iter().position(|key| *key == ui.palette).or(Some(0));
         let palette_labels: Vec<SharedString> = std::iter::once(t!("settings.palette_default").to_string().into())
-            .chain(self.backend.themes().iter().map(|theme| palette_theme_name(theme).into()))
+            .chain(self.palette_themes.iter().map(|theme| palette_theme_name(theme).into()))
             .collect();
         let locked = crate::high_contrast_active(&ui).then(|| SharedString::from(t!("settings.palette_locked").to_string()));
         let palette_hint = self.palette_error.clone().unwrap_or_else(|| t!("settings.palette_hint").to_string());

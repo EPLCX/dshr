@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Read as _};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -199,7 +200,8 @@ impl Tool for WriteFile {
             }
         };
         let before = existing.unwrap_or_default();
-        match crate::write_atomic(path, content.clone()).await {
+        let content = Arc::new(content);
+        match crate::write_atomic(path, Arc::clone(&content)).await {
             Ok(()) if large => ToolOutput::ok(format!(
                 "Wrote {} ({} bytes; the previous version was {} bytes, too large to diff)",
                 input.path,
@@ -216,7 +218,7 @@ impl Tool for WriteFile {
 }
 
 /// 原文件超过这个大小时，`write_file` 不读进内存比较差异。
-const MAX_DIFF_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_DIFF_BYTES: u64 = 1024 * 1024;
 
 /// 大文件只看开头一段判断是不是纯 CRLF（取样截在最后一个换行处，免得切在 `\r\n` 中间）。
 async fn sample_is_crlf(path: &Path) -> bool {

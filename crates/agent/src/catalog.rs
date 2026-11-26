@@ -50,8 +50,23 @@ pub struct SessionCatalog {
 struct CachedSummary {
     modified: Option<SystemTime>,
     len: u64,
+    scan: SummaryScan,
+}
+
+/// 扫描一份日志读出的摘要，以及扫到了哪里：日志只会在末尾追加，下次只要从 `offset` 接着读新增的部分。
+#[derive(Clone, Default)]
+struct SummaryScan {
+    /// 已经读完的完整行（以换行结尾）的总字节数。
+    offset: u64,
     title: Option<String>,
+    first_user: Option<String>,
     workspace: Option<PathBuf>,
+}
+
+impl SummaryScan {
+    fn title(&self) -> Option<String> {
+        self.title.clone().or_else(|| self.first_user.clone())
+    }
 }
 
 impl SessionCatalog {
@@ -75,13 +90,15 @@ impl SessionCatalog {
                 let cached = match previous.remove(&id) {
                     // 没有修改时间可比时不信任缓存。
                     Some(cached) if modified.is_some() && cached.modified == modified && cached.len == len => cached,
-                    _ => {
-                        let (title, workspace) = read_summary(&log);
-                        CachedSummary { modified, len, title, workspace }
+                    // 变长了（正在进行的会话又追加了事件）：只读新增的部分。
+                    Some(cached) if modified.is_some() && len >= cached.len && len >= cached.scan.offset => {
+                        CachedSummary { modified, len, scan: read_summary(&log, cached.scan) }
                     }
+                    // 新会话，或者日志变短、被换掉了：从头读。
+                    _ => CachedSummary { modified, len, scan: read_summary(&log, SummaryScan::default()) },
                 };
-                let title = cached.title.clone().unwrap_or_else(|| "（空会话）".into());
-                let workspace = cached.workspace.clone();
+                let title = cached.scan.title().unwrap_or_else(|| "（空会话）".into());
+                let workspace = cached.scan.workspace.clone();
                 next.insert(id.clone(), cached);
                 Some(SessionSummary { id, title, modified, log, workspace })
             })
@@ -161,37 +178,51 @@ fn uuid_suffix() -> String {
 
 /// 标题与工作目录。日志里绝大部分内容是工具输出，和这两项无关：逐行先看事件类型，
 /// 只解析标题、工作目录和第一条用户消息这几种行，其余的行不做 JSON 解析。
-fn read_summary(log: &Path) -> (Option<String>, Option<PathBuf>) {
-    let Ok(file) = File::open(log) else {
-        return (None, None);
-    };
+///
+/// 从 `scan.offset` 接着读（从头读时传默认值）。读不下去的日志没有摘要，下次从头再读。
+fn read_summary(log: &Path, scan: SummaryScan) -> SummaryScan {
+    read_summary_from(log, scan).unwrap_or_default()
+}
+
+fn read_summary_from(log: &Path, mut scan: SummaryScan) -> Option<SummaryScan> {
+    use std::io::{Seek, SeekFrom};
+    let mut file = File::open(log).ok()?;
+    file.seek(SeekFrom::Start(scan.offset)).ok()?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut line = Vec::new();
-    let (mut title, mut first_user, mut workspace) = (None, None, None);
     loop {
         line.clear();
         // 先只读这一行的开头认出类型；用不着的行把剩下的部分跳过去，不拷进缓冲区。
         // 不然缓冲区会被撑到最长那一行那么大（一整块工具输出常常就在一行里）。
-        let complete = match read_line_start(&mut reader, &mut line, KIND_PREFIX) {
-            Ok(Some(complete)) => complete,
-            Ok(None) => break,
-            // 与原来一样：读不下去的日志没有摘要。
-            Err(_) => return (None, None),
+        let complete = match read_line_start(&mut reader, &mut line, KIND_PREFIX).ok()? {
+            Some(complete) => complete,
+            None => break,
         };
         let wanted = match event_kind(&line) {
             Some(kind) => {
                 kind == b"session/title"
-                    || (kind == b"session/workspace" && workspace.is_none())
-                    || (kind == b"user/message" && first_user.is_none())
+                    || (kind == b"session/workspace" && scan.workspace.is_none())
+                    || (kind == b"user/message" && scan.first_user.is_none())
             }
             // 看不出类型（字段顺序不同的日志、空行）：交给完整解析判断。
             None => true,
         };
+        let mut length = line.len() as u64;
+        let mut ended = line.last() == Some(&b'\n');
         if !complete {
-            let rest = if wanted { reader.read_until(b'\n', &mut line).map(drop) } else { skip_line(&mut reader) };
-            if rest.is_err() {
-                return (None, None);
+            if wanted {
+                reader.read_until(b'\n', &mut line).ok()?;
+                length = line.len() as u64;
+                ended = line.last() == Some(&b'\n');
+            } else {
+                let (skipped, newline) = skip_line(&mut reader).ok()?;
+                length += skipped;
+                ended = newline;
             }
+        }
+        // 以换行结尾的行才算读完；最后半行（写入者正在写）照常看一眼，下次再从它开头读。
+        if ended {
+            scan.offset += length;
         }
         if !wanted {
             continue;
@@ -200,13 +231,13 @@ fn read_summary(log: &Path) -> (Option<String>, Option<PathBuf>) {
             continue;
         };
         match event.body {
-            EventBody::SessionTitle { title: latest } => title = Some(latest),
-            EventBody::SessionWorkspace { path } if workspace.is_none() => workspace = Some(PathBuf::from(path)),
-            EventBody::UserMessage { text } if first_user.is_none() => first_user = Some(first_line_title(&text)),
+            EventBody::SessionTitle { title: latest } => scan.title = Some(latest),
+            EventBody::SessionWorkspace { path } if scan.workspace.is_none() => scan.workspace = Some(PathBuf::from(path)),
+            EventBody::UserMessage { text } if scan.first_user.is_none() => scan.first_user = Some(first_line_title(&text)),
             _ => {}
         }
     }
-    (title.or(first_user), workspace)
+    Some(scan)
 }
 
 /// 不解析 JSON，直接从一行日志的开头取出顶层的 `type`。
@@ -253,21 +284,23 @@ fn read_line_start(reader: &mut impl BufRead, line: &mut Vec<u8>, limit: usize) 
     }
 }
 
-/// 跳过这一行剩下的部分（连同换行符），不拷贝。
-fn skip_line(reader: &mut impl BufRead) -> std::io::Result<()> {
+/// 跳过这一行剩下的部分（连同换行符），不拷贝。返回跳过的字节数，以及是不是遇到了换行（否则是读到了文件末尾）。
+fn skip_line(reader: &mut impl BufRead) -> std::io::Result<(u64, bool)> {
+    let mut skipped = 0;
     loop {
         let available = reader.fill_buf()?;
         if available.is_empty() {
-            return Ok(());
+            return Ok((skipped, false));
         }
         match available.iter().position(|byte| *byte == b'\n') {
             Some(newline) => {
                 reader.consume(newline + 1);
-                return Ok(());
+                return Ok((skipped + newline as u64 + 1, true));
             }
             None => {
                 let consumed = available.len();
                 reader.consume(consumed);
+                skipped += consumed as u64;
             }
         }
     }
@@ -318,6 +351,54 @@ mod tests {
         assert_eq!(list_sessions(dir.path())[0].workspace, Some(PathBuf::from("/work/app")));
     }
 
+    fn summary(path: &Path) -> (Option<String>, Option<PathBuf>) {
+        let scan = read_summary(path, SummaryScan::default());
+        (scan.title(), scan.workspace)
+    }
+
+    #[test]
+    fn summary_scan_resumes_after_appends_and_torn_lines() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = session_log_path(dir.path(), "s");
+        let mut log = SessionLog::create(&path).unwrap();
+        log.append(EventBody::ToolResult { call_id: "c".into(), output: "x".repeat(100_000).into(), is_error: false }).unwrap();
+        log.append(EventBody::UserMessage { text: "第一问".into() }).unwrap();
+        let scan = read_summary(&path, SummaryScan::default());
+        assert_eq!(scan.offset, std::fs::metadata(&path).unwrap().len());
+        assert_eq!(scan.title().as_deref(), Some("第一问"));
+
+        // 接着读：只看新增的部分，之前读到的保留。
+        log.append(EventBody::SessionWorkspace { path: "/w".into() }).unwrap();
+        log.append(EventBody::ToolResult { call_id: "d".into(), output: "y".repeat(100_000).into(), is_error: false }).unwrap();
+        drop(log);
+        let scan = read_summary(&path, scan);
+        assert_eq!((scan.title().as_deref(), scan.workspace.as_deref()), (Some("第一问"), Some(Path::new("/w"))));
+        assert_eq!(scan.offset, std::fs::metadata(&path).unwrap().len());
+
+        // 写了一半的行（长的、不想要的）：不算读完，补全之后从它开头再读。
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let line = format!(
+            "{{\"seq\":9,\"time\":1,\"type\":\"tool/result\",\"data\":{{\"call_id\":\"e\",\"output\":\"{}\"}}}}\n",
+            "z".repeat(1000)
+        );
+        file.write_all(&line.as_bytes()[..500]).unwrap();
+        let torn = read_summary(&path, scan.clone());
+        assert_eq!(torn.offset, scan.offset);
+        file.write_all(&line.as_bytes()[500..]).unwrap();
+        file.write_all(b"{\"seq\":10,\"time\":1,\"type\":\"session/title\",\"data\":{\"title\":\"t\"}}\n").unwrap();
+        let scan = read_summary(&path, torn);
+        assert_eq!(scan.offset, std::fs::metadata(&path).unwrap().len());
+        assert_eq!(scan.title().as_deref(), Some("t"));
+
+        // 侧边栏：变长的日志只读新增部分，结果和从头读一样。
+        let catalog = SessionCatalog::default();
+        assert_eq!(catalog.list(dir.path())[0].title, "t");
+        file.write_all(b"{\"seq\":11,\"time\":1,\"type\":\"session/title\",\"data\":{\"title\":\"u\"}}\n").unwrap();
+        assert_eq!(catalog.list(dir.path())[0].title, "u");
+        assert_eq!(catalog.list(dir.path())[0].workspace.as_deref(), Some(Path::new("/w")));
+    }
+
     #[test]
     fn summary_scan_matches_full_parse() {
         let dir = tempfile::tempdir().unwrap();
@@ -335,7 +416,7 @@ mod tests {
         log.append(EventBody::UserMessage { text: "第二问".into() }).unwrap();
         log.append(EventBody::SessionWorkspace { path: "/work/b".into() }).unwrap();
         drop(log);
-        assert_eq!(read_summary(&path), (Some("真正的第一问".into()), Some(PathBuf::from("/work/a"))));
+        assert_eq!(summary(&path), (Some("真正的第一问".into()), Some(PathBuf::from("/work/a"))));
 
         // 字段顺序不同、带空格的行（其它程序写的）走完整解析，结果一样；坏行跳过。
         use std::io::Write as _;
@@ -345,7 +426,7 @@ mod tests {
             .unwrap()
             .write_all(b"\n{\"data\": {\"title\": \"other\"}, \"type\": \"session/title\", \"time\": 1, \"seq\": 9}\nnot json\n")
             .unwrap();
-        assert_eq!(read_summary(&path).0.as_deref(), Some("other"));
+        assert_eq!(summary(&path).0.as_deref(), Some("other"));
 
         assert_eq!(event_kind(br#"{"seq":1,"time":2,"type":"tool/result","data":{"type":"x"}}"#), Some(&b"tool/result"[..]));
         assert_eq!(event_kind(br#"{"seq":1,"data":{"type":"text"},"type":"user/message"}"#), None);
@@ -366,8 +447,8 @@ mod tests {
         log.append(EventBody::ToolResult { call_id: "d".into(), output: "y".repeat(100).into(), is_error: false }).unwrap();
         drop(log);
         let expected_title: String = long_title.chars().take(TITLE_CHARS).collect();
-        assert_eq!(read_summary(&path), (Some(expected_title), Some(PathBuf::from(format!("/work/{}", "d".repeat(300))))));
-        assert_eq!(list_sessions_cached(dir.path())[0].workspace, read_summary(&path).1);
+        assert_eq!(summary(&path), (Some(expected_title), Some(PathBuf::from(format!("/work/{}", "d".repeat(300))))));
+        assert_eq!(list_sessions_cached(dir.path())[0].workspace, summary(&path).1);
     }
 
     #[test]
@@ -387,7 +468,7 @@ mod tests {
         assert_eq!(titles(&catalog), [("a".into(), "会话 A".into()), ("b".into(), "会话 B".into())]);
 
         // 把 a 的缓存换成一个记号：日志没变时应当沿用缓存而不是重读。
-        catalog.cache.lock().unwrap().get_mut("a").unwrap().title = Some("来自缓存".into());
+        catalog.cache.lock().unwrap().get_mut("a").unwrap().scan.title = Some("来自缓存".into());
         assert_eq!(titles(&catalog)[0].1, "来自缓存");
 
         // 日志有了新内容（大小变了）就重读；没变的 b 不受影响。
