@@ -78,12 +78,12 @@ impl EventObserver for JsObserver {
             }
             return;
         }
-        let data = serde_json::to_value(&event.body).ok().and_then(|value| value.get("data").cloned()).unwrap_or(Value::Null);
-        let text = data.to_string();
-        let data = if text.chars().count() > MAX_DATA_CHARS {
-            Value::String(format!("{}… [truncated]", text.chars().take(MAX_DATA_CHARS).collect::<String>()))
-        } else {
-            data
+        // 取出 `data`（不再复制一份），超长时换成截断的文本：大事件（图片、整份文件）只序列化到上限为止。
+        let data =
+            serde_json::to_value(&event.body).ok().and_then(|mut value| value.get_mut("data").map(Value::take)).unwrap_or(Value::Null);
+        let data = match super::hooks::clipped_json(&data, MAX_DATA_CHARS) {
+            Some(clipped) => Value::String(clipped),
+            None => data,
         };
         let agent = session.log_path.parent().and_then(|dir| dir.file_name()).is_some_and(|name| name == "agents");
         let payload = json!({
