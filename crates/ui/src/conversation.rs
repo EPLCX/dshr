@@ -3805,22 +3805,13 @@ impl Render for ConversationView {
         // 不设底色：底色由外面的对话面板画（自绘标题栏时它左上角是圆角，这里再铺一层方的就盖住了）。
         let root = v_flex().flex_1().size_full().min_w(px(0.)).relative();
 
-        // 首页：标题与输入卡片一起，在可用区域中偏上居中。打开已有会话、日志还在加载时不画首页
-        // （否则首页先闪一下再换成对话内容），只画空的对话区和底部的输入卡片。
+        // 首页：标语在可用区域中居中，输入卡片和选项行与对话页一样固定在底部，发出第一条消息时位置不变。
+        // 打开已有会话、日志还在加载时不画首页（否则首页先闪一下再换成对话内容），只画空的对话区和底部的输入卡片。
         if self.shows_home() {
             let hero = self.render_hero(cx);
-            return root.child(
-                v_flex().flex_1().items_center().justify_center().pb(px(space::XXXL * 2.)).child(
-                    // 和对话页的输入区一样：最大宽度里含左右内边距，发出第一条消息时输入卡片不变宽窄。
-                    v_flex()
-                        .w_full()
-                        .max_w(px(size::CONTENT_MAX_WIDTH))
-                        .px(px(space::XXL))
-                        .gap(px(space::XXXL))
-                        .child(hero)
-                        .child(div().id(COMPOSER_SLOT).w_full().child(composer)),
-                ),
-            );
+            return root
+                .child(v_flex().flex_1().min_h(px(0.)).items_center().justify_center().px(px(space::XXL)).child(hero))
+                .child(composer_slot(composer));
         }
         // 读屏软件连着时不缓存（原因同 `WorkspaceView::render`）。
         let transcript = if window.is_a11y_active() {
@@ -3828,20 +3819,15 @@ impl Render for ConversationView {
         } else {
             self.transcript_view.clone().cached(StyleRefinement::default().flex_1().min_h(px(0.)).w_full()).into_any_element()
         };
-        root.child(transcript).child(
-            // 和首页包着输入卡片的那一层用同一个 id：发出第一条消息、首页换成对话页时，输入框在元素树里的
-            // 路径不变，无障碍节点也就不变。路径一变，讲述人会把输入框当成新获得焦点的控件再读一遍，
-            // 正好盖过“已发送，正在回复”。
-            div()
-                .id(COMPOSER_SLOT)
-                .w_full()
-                .max_w(px(size::CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .px(px(space::XXL))
-                .pb(px(space::XL))
-                .child(composer),
-        )
+        root.child(transcript).child(composer_slot(composer))
     }
+}
+
+/// 底部的输入区：首页和对话页用同一个包装（同一个 id、同样的宽度和边距）。发出第一条消息、首页换成对话页时，
+/// 输入框在元素树里的路径不变，无障碍节点也就不变。路径一变，讲述人会把输入框当成新获得焦点的控件再读一遍，
+/// 正好盖过“已发送，正在回复”。
+fn composer_slot(composer: Entity<ComposerView>) -> Stateful<Div> {
+    div().id(COMPOSER_SLOT).w_full().max_w(px(size::CONTENT_MAX_WIDTH)).mx_auto().px(px(space::XXL)).pb(px(space::XL)).child(composer)
 }
 
 /// `/`、`@` 候选列表的外观：和弹出菜单一样（圆角 `LG`、内边距 4、描边、浮层阴影），最多 8 行高，再多就滚动。
