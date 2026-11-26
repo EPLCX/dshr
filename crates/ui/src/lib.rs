@@ -584,7 +584,11 @@ pub(crate) fn apply_theme(preference: ThemePreference, window: &mut Window, cx: 
 /// 插件藏起来的（`status:<id>`）不读。
 fn read_status(ui: &UiRegistry, backend: &Backend) -> Vec<StatusLine> {
     let hidden = backend.hidden_entries();
-    ui.status_items().iter().filter(|item| !hidden.contains(&format!("status:{}", item.id))).map(|item| (item.read)(backend)).collect()
+    ui.status_items()
+        .iter()
+        .filter(|item| !hidden.contains(&format!("status:{}", item.id)))
+        .filter_map(|item| (item.read)(backend))
+        .collect()
 }
 
 /// 插件加在侧边栏的一个入口。
@@ -738,6 +742,8 @@ pub struct WorkspaceView {
     session_search_leaving: Option<Entity<session_search::SessionSearchView>>,
     /// 点过“显示更多”的分组现在显示几个会话；没有记录的分组显示 [`SIDEBAR_PAGE`] 个。
     sidebar_limits: HashMap<Option<PathBuf>, usize>,
+    /// 侧边栏会话列表的滚动：键盘焦点移到看不见的行时把它滚进来（见 `reveal::reveal_in`）。
+    sidebar_scroll: ScrollHandle,
     /// 打开设置时存在；关闭时丢弃，下次打开重新读取配置。
     settings: Option<(Entity<SettingsView>, Subscription)>,
     /// 刚关上、还在播放退场的设置弹窗；退场播完就丢掉。
@@ -835,6 +841,7 @@ impl WorkspaceView {
             session_search: None,
             session_search_leaving: None,
             sidebar_limits: HashMap::new(),
+            sidebar_scroll: ScrollHandle::new(),
             settings: None,
             settings_leaving: None,
             plugin_entries: Vec::new(),
@@ -1752,7 +1759,14 @@ impl WorkspaceView {
             .group("session-row")
             .pl(px(space::L))
             .child(
-                list_item(("session", index), None, session.title.clone(), selected, &p)
+                // 当前会话：强调色的浅底加左边一道强调色竖条，和悬停的灰底一眼分得开（竖条不靠颜色深浅，
+                // 高对比度配色下浅底不明显时也看得出来）。
+                design::list_item_with_fill(("session", index), None, session.title.clone(), selected, p.accent_soft, &p)
+                    .when(selected, |item| {
+                        item.child(
+                            div().absolute().left(px(0.)).top(px(space::S)).bottom(px(space::S)).w(px(3.)).rounded_full().bg(p.accent),
+                        )
+                    })
                     // 列表项 + 已选择：读屏软件读出哪个是当前会话（按钮角色不会读“已选择”）。
                     .role(Role::ListItem)
                     .aria_selected(selected)
@@ -2086,8 +2100,13 @@ impl WorkspaceView {
             self.sidebar_intro.set(Some(std::time::Instant::now()));
         }
         let mut list: Vec<AnyElement> = Vec::new();
+        let scroll = &self.sidebar_scroll;
         for (group_index, group) in self.groups().iter().enumerate() {
-            list.push(self.render_group_header(group_index, group, window, cx));
+            // 每一行都跟随焦点：Tab 走到列表下面看不见的地方时，列表跟着滚。
+            list.push(
+                reveal::reveal_in(scroll, ("reveal-workspace", group_index), self.render_group_header(group_index, group, window, cx))
+                    .into_any_element(),
+            );
             // 折叠、展开时高度收起、展开（会话行在里面，id 按分组，不随折叠变）。
             let reveal_id = match &group.path {
                 Some(path) => format!("workspace-reveal-{}", path.display()),
@@ -2122,7 +2141,10 @@ impl WorkspaceView {
                     || active_id.as_deref() == Some(session.id.as_str())
                     || self.session_state(&session.id, cx) != (false, false);
                 if keep {
-                    rows.push(self.render_session_row(index, session, window, cx));
+                    let row = self.render_session_row(index, session, window, cx);
+                    rows.push(
+                        reveal::reveal_in(scroll, ElementId::Name(format!("reveal-session-{}", session.id).into()), row).into_any_element(),
+                    );
                 } else {
                     hidden += 1;
                 }
@@ -2130,9 +2152,10 @@ impl WorkspaceView {
             if hidden > 0 {
                 let path = group.path.clone();
                 rows.push(
-                    h_flex()
-                        .pl(px(space::L))
-                        .child(
+                    reveal::reveal_in(
+                        scroll,
+                        ("reveal-more", group_index),
+                        h_flex().pl(px(space::L)).child(
                             list_item(("sessions-more", group_index), None, t!("sidebar.show_more", count = hidden).to_string(), false, &p)
                                 .flex_1()
                                 .min_w(px(0.))
@@ -2141,8 +2164,9 @@ impl WorkspaceView {
                                     *this.sidebar_limits.entry(path.clone()).or_insert(SIDEBAR_PAGE) += SIDEBAR_PAGE;
                                     cx.notify();
                                 })),
-                        )
-                        .into_any_element(),
+                        ),
+                    )
+                    .into_any_element(),
                 );
             }
             list.push(motion::reveal(reveal_id, phase, v_flex().gap(px(2.)).children(rows)));
@@ -2216,6 +2240,7 @@ impl WorkspaceView {
                     .id("session-list")
                     .role(Role::List)
                     .aria_label(t!("sidebar.workspaces").to_string())
+                    .track_scroll(&self.sidebar_scroll)
                     .flex_1()
                     .min_h(px(0.))
                     .gap(px(2.))
@@ -2312,6 +2337,8 @@ impl Render for WorkspaceView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 先按最近一次的输入方式定下触屏模式：下面和子视图取的调色板都带着它。
         design::update_touch_mode(window, cx);
+        // 按键之后晚一两帧才移过去的焦点（打开菜单、弹窗）也算键盘的：在子视图画焦点框之前定下来。
+        design::settle_focus_source(window, cx);
         let p = palette(cx);
         // 侧边栏和对话区各自缓存：一边重绘（流式输出、悬停、菜单）不会带着另一边重新生成。
         // 缓存的视图不按内容测量，尺寸由这里给出（两个视图的根元素自己也撑满，不缓存时布局一样）。
@@ -2388,7 +2415,15 @@ impl Render for WorkspaceView {
                                 .on_click(cx.listener(|this, _, window, cx| this.close_plugin_page(window, cx))),
                         )),
                 )
-                .child(div().id("plugin-page-body").px(px(space::XXL)).pb(px(space::XXL)).overflow_y_scroll().child(page.view.clone()))
+                .child(
+                    div()
+                        .id("plugin-page-body")
+                        .track_scroll(page.view.read(cx).scroll_handle())
+                        .px(px(space::XXL))
+                        .pb(px(space::XXL))
+                        .overflow_y_scroll()
+                        .child(page.view.clone()),
+                )
                 .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::MEDIUM, phase, shadow::modal()))
                 .focus_trap("plugin-page-trap", &page.focus);
             title_bar::below(div().id("plugin-page-overlay").absolute())

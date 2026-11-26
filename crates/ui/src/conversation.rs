@@ -309,8 +309,8 @@ impl ConversationView {
         let options = TurnOptions {
             model: config.default_model().unwrap_or_else(|| ModelRef::new("deepseek", "deepseek-flash")),
             effort: config.model.effort,
-            permission: PermissionMode::default(),
-            preset: Preset::default(),
+            permission: default_permission(&config),
+            preset: default_preset(&config),
             plugin_preset: None,
         };
 
@@ -580,13 +580,7 @@ impl ConversationView {
     /// 打开会话时恢复上次选的模式、权限、模型（日志里最后一条 `session/options`）。
     /// 字符串认不出的部分保留当前值：比如记录里选过的插件预设后来被卸载了。
     fn apply_stored_options(&mut self, stored: &dshr_agent::SessionOptions) {
-        let preset = match stored.preset.as_str() {
-            "plan" => Some(Preset::Plan),
-            "review" => Some(Preset::Review),
-            "create" => Some(Preset::Create),
-            "standard" => Some(Preset::Standard),
-            _ => None,
-        };
+        let preset = preset_from_id(&stored.preset);
         match &stored.plugin_preset {
             Some(key) => {
                 if let Some((plugin, id)) = key.split_once('/')
@@ -3628,8 +3622,22 @@ fn file_label(path: &str) -> String {
     std::path::Path::new(path).file_name().map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned())
 }
 
-/// 预设写进日志的名字（`session/options` 事件）。
-fn preset_id(preset: Preset) -> &'static str {
+/// 新会话的权限模式、预设：设置里“新会话默认设置”选的，没选（或认不出）时用内置默认值。
+pub(crate) fn default_permission(config: &dshr_config::Config) -> PermissionMode {
+    config.model.permission.as_deref().and_then(PermissionMode::from_id).unwrap_or_default()
+}
+
+pub(crate) fn default_preset(config: &dshr_config::Config) -> Preset {
+    config.model.preset.as_deref().and_then(preset_from_id).unwrap_or_default()
+}
+
+/// [`preset_id`] 反过来。
+pub(crate) fn preset_from_id(id: &str) -> Option<Preset> {
+    Preset::ALL.into_iter().find(|preset| preset_id(*preset) == id)
+}
+
+/// 预设写进日志的名字（`session/options` 事件），也是配置里 `model.preset` 的写法。
+pub(crate) fn preset_id(preset: Preset) -> &'static str {
     match preset {
         Preset::Standard => "standard",
         Preset::Plan => "plan",
@@ -3649,7 +3657,7 @@ fn options_event_body(options: &TurnOptions) -> dshr_core::EventBody {
     }
 }
 
-fn preset_label(preset: Preset) -> String {
+pub(crate) fn preset_label(preset: Preset) -> String {
     match preset {
         Preset::Standard => t!("preset.standard"),
         Preset::Plan => t!("preset.plan"),
@@ -3678,7 +3686,7 @@ fn preset_icon(preset: Preset) -> IconName {
     }
 }
 
-fn permission_label(mode: PermissionMode) -> String {
+pub(crate) fn permission_label(mode: PermissionMode) -> String {
     match mode {
         PermissionMode::Manual => t!("permission.manual"),
         PermissionMode::Workspace => t!("permission.workspace"),
@@ -4155,9 +4163,32 @@ mod menu_tests {
         // Tab、方向键派发成动作，不经过元素的按键监听，也要算键盘焦点（焦点框要显示回来）。
         press(cx, fixture.window, "tab");
         assert!(crate::design::focus_from_keyboard());
+        // 方向键把焦点从一条消息挪到下一条：算键盘焦点。
+        let view = fixture.view.clone();
+        let first = cx.update(|cx| view.read(cx).message_rows().next()).unwrap();
+        let handle = cx.update(|cx| view.read(cx).message_focus.get(&first).cloned()).unwrap();
+        step(cx, fixture.window, |window, cx| handle.focus(window, cx));
         cx.update_window(fixture.window, |_, window, _| crate::design::set_focus_from_keyboard(false, window)).unwrap();
         press(cx, fixture.window, "down");
+        let still_first = cx.update_window(fixture.window, |_, window, _| handle.is_focused(window)).unwrap();
+        assert!(!still_first, "焦点应该移到了下一条消息");
         assert!(crate::design::focus_from_keyboard());
+    }
+
+    #[gpui::test]
+    fn typing_does_not_count_as_keyboard_focus(cx: &mut TestAppContext) {
+        let fixture = open(cx, 1);
+        // 鼠标点进输入框（焦点不是键盘挪过来的），然后打字：焦点没动，不该冒出焦点框。
+        let view = fixture.view.clone();
+        step(cx, fixture.window, |window, cx| {
+            let input = view.read(cx).input.clone();
+            gpui_kit::Focusable::focus_handle(input.read(cx), cx).focus(window, cx);
+        });
+        cx.update_window(fixture.window, |_, window, _| crate::design::set_focus_from_keyboard(false, window)).unwrap();
+        press(cx, fixture.window, "a b");
+        assert!(!crate::design::focus_from_keyboard(), "打字不挪焦点，不算键盘焦点");
+        press(cx, fixture.window, "tab");
+        assert!(crate::design::focus_from_keyboard(), "Tab 总算");
     }
 
     #[gpui::test]

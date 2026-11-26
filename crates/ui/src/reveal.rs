@@ -8,32 +8,41 @@
 //! 嵌套时最里层先处理（它先完成 prepaint），外层看到这次焦点已经处理过就不再动。
 
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use gpui_kit::*;
 
-/// 当前要跟随焦点滚动的容器（设置页的正文），和最近一次已经处理过的焦点。
+/// [`reveal`] 默认跟随的滚动容器（设置页的正文）。
 #[derive(Default)]
 struct RevealScope {
     scroll: Option<ScrollHandle>,
-    revealed: Rc<RefCell<Option<FocusHandle>>>,
 }
 
 impl Global for RevealScope {}
 
-/// 设置哪个滚动容器跟随焦点。由持有容器的视图在渲染时调用。
-pub fn follow_focus_in(scroll: &ScrollHandle, cx: &mut App) {
-    let revealed = cx.try_global::<RevealScope>().map(|scope| scope.revealed.clone()).unwrap_or_default();
-    cx.set_global(RevealScope { scroll: Some(scroll.clone()), revealed });
+thread_local! {
+    /// 最近一次已经处理过的焦点（所有滚动容器共用：焦点同一时刻只在一处，处理过一次就不再动）。
+    static REVEALED: RefCell<Option<FocusHandle>> = const { RefCell::new(None) };
 }
 
-/// 焦点进到 `child` 里时，保证它在滚动容器里看得见。`id` 在同一层里要唯一。
+/// 设置 [`reveal`] 跟随哪个滚动容器。由持有容器的视图在渲染时调用。
+pub fn follow_focus_in(scroll: &ScrollHandle, cx: &mut App) {
+    cx.set_global(RevealScope { scroll: Some(scroll.clone()) });
+}
+
+/// 焦点进到 `child` 里时，保证它在 [`follow_focus_in`] 设的滚动容器里看得见。`id` 在同一层里要唯一。
 pub fn reveal(id: impl Into<ElementId>, child: impl IntoElement) -> Reveal {
-    Reveal { id: id.into(), child: child.into_any_element() }
+    Reveal { id: id.into(), scroll: None, child: child.into_any_element() }
+}
+
+/// 同 [`reveal`]，但直接指定滚动容器（容器要 `track_scroll` 同一个句柄）。
+/// 同时有几个滚动容器都要跟随焦点时用这个（侧边栏的会话列表、插件页面、弹窗的正文……）。
+pub fn reveal_in(scroll: &ScrollHandle, id: impl Into<ElementId>, child: impl IntoElement) -> Reveal {
+    Reveal { id: id.into(), scroll: Some(scroll.clone()), child: child.into_any_element() }
 }
 
 pub struct Reveal {
     id: ElementId,
+    scroll: Option<ScrollHandle>,
     child: AnyElement,
 }
 
@@ -83,7 +92,10 @@ impl Element for Reveal {
         // 只把句柄挂在派发树上，用来判断焦点是否在这一块里；不加鼠标、Tab 的行为。
         window.set_focus_handle(&handle, cx);
         self.child.prepaint(window, cx);
-        reveal_if_focused(&handle, bounds, window, cx);
+        let scroll = self.scroll.clone().or_else(|| cx.try_global::<RevealScope>().and_then(|scope| scope.scroll.clone()));
+        if let Some(scroll) = scroll {
+            reveal_if_focused(&handle, &scroll, bounds, window, cx);
+        }
     }
 
     fn paint(
@@ -103,25 +115,23 @@ impl Element for Reveal {
 /// 离视口边缘留的距离，焦点框不贴边。
 const MARGIN: f32 = 24.;
 
-fn reveal_if_focused(handle: &FocusHandle, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
-    let Some(scope) = cx.try_global::<RevealScope>() else {
-        return;
-    };
-    let Some(scroll) = scope.scroll.clone() else {
-        return;
-    };
+fn reveal_if_focused(handle: &FocusHandle, scroll: &ScrollHandle, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
     if !handle.contains_focused(window, cx) {
         return;
     }
     let Some(focused) = window.focused(cx) else {
         return;
     };
-    {
-        let mut last = scope.revealed.borrow_mut();
+    let already = REVEALED.with(|last| {
+        let mut last = last.borrow_mut();
         if last.as_ref() == Some(&focused) {
-            return;
+            return true;
         }
         *last = Some(focused);
+        false
+    });
+    if already {
+        return;
     }
     let view = scroll.bounds();
     if let Some(y) = target_offset(scroll.offset().y, scroll.max_offset().y, view, bounds) {
@@ -165,7 +175,7 @@ mod tests {
         ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window, div, point, px, size,
     };
 
-    use super::{follow_focus_in, reveal, target_offset};
+    use super::{follow_focus_in, reveal, reveal_in, target_offset};
 
     /// 300px 高的滚动区里 20 个 60px 高、可 Tab 到的行。
     struct Page {
@@ -224,6 +234,58 @@ mod tests {
         draw(cx, window);
         draw(cx, window);
         assert_eq!(scroll.offset().y, px(0.));
+    }
+
+    /// 两个并排的滚动区（像侧边栏和弹窗的正文），各自用 [`reveal_in`] 跟随焦点。
+    struct TwoLists {
+        left: ScrollHandle,
+        right: ScrollHandle,
+        items: Vec<FocusHandle>,
+    }
+
+    impl Render for TwoLists {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let list = |name: &'static str, scroll: &ScrollHandle, items: &[FocusHandle]| {
+                div().id(name).track_scroll(scroll).overflow_y_scroll().h(px(300.)).w(px(200.)).flex().flex_col().children(
+                    items.iter().enumerate().map(|(index, handle)| {
+                        reveal_in(scroll, (name, index), div().id(("item", index)).track_focus(handle).flex_none().h(px(60.)).w_full())
+                    }),
+                )
+            };
+            div().size_full().flex().child(list("left", &self.left, &self.items[..20])).child(list("right", &self.right, &self.items[20..]))
+        }
+    }
+
+    #[gpui::test]
+    fn each_list_follows_focus_with_its_own_scroll_handle(cx: &mut TestAppContext) {
+        let (window, page) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(Default::default(), cx, |_, cx| {
+                cx.new(|cx| TwoLists {
+                    left: ScrollHandle::new(),
+                    right: ScrollHandle::new(),
+                    items: (0..40).map(|_| cx.focus_handle().tab_stop(true)).collect(),
+                })
+            })
+            .unwrap()
+        });
+        draw(cx, window);
+        let (left, right) = cx.update(|cx| (page.read(cx).left.clone(), page.read(cx).right.clone()));
+
+        // 右边一列的第 15 行：只有右边滚，左边不动。
+        let target = cx.update(|cx| page.read(cx).items[34].clone());
+        cx.update_window(window, |_, window, cx| target.focus(window, cx)).unwrap();
+        draw(cx, window);
+        draw(cx, window);
+        assert!(right.offset().y < px(0.), "右边应该滚了");
+        assert_eq!(left.offset().y, px(0.), "左边不动");
+
+        // 再到左边一列的最后一行。
+        let target = cx.update(|cx| page.read(cx).items[19].clone());
+        cx.update_window(window, |_, window, cx| target.focus(window, cx)).unwrap();
+        draw(cx, window);
+        draw(cx, window);
+        assert!(left.offset().y < px(0.), "左边应该滚了");
     }
 
     fn rect(y: f32, height: f32) -> Bounds<gpui_kit::Pixels> {

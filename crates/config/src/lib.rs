@@ -101,6 +101,12 @@ pub struct ModelConfig {
     pub effort: Option<ReasoningEffort>,
     /// 模型上下文窗口（tokens），超过 3/4 时压缩较早的轮次。
     pub context_window: u32,
+    /// 新会话默认的权限模式（`manual` / `workspace` / `auto_review` / `full_access`）；不写时是“工作区内修改”。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission: Option<String>,
+    /// 新会话默认的预设（`standard` / `plan` / `review` / `create`）；不写时是“标准”。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
 }
 
 /// 思考等级，按 OpenAI 协议的 `reasoning_effort` 发送（DeepSeek 认 `off` / `low` / `high` / `max`）。
@@ -128,7 +134,7 @@ impl ReasoningEffort {
 
 impl Default for ModelConfig {
     fn default() -> Self {
-        Self { default: DEFAULT_MODEL.into(), effort: None, context_window: 128_000 }
+        Self { default: DEFAULT_MODEL.into(), effort: None, context_window: 128_000, permission: None, preset: None }
     }
 }
 
@@ -623,6 +629,18 @@ mod tests {
         assert!(config.plugins.is_empty());
         config.set_plugin_value("missing", "key", None);
         assert!(config.plugins.is_empty());
+    }
+
+    #[test]
+    fn new_session_permission_and_preset_round_trip() {
+        let mut config = Config::default();
+        let written = toml::to_string(&config).unwrap();
+        assert!(!written.contains("permission") && !written.contains("preset"), "没设置时不写：{written}");
+        config.model.permission = Some("full_access".into());
+        config.model.preset = Some("plan".into());
+        let read: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(read.model.permission.as_deref(), Some("full_access"));
+        assert_eq!(read.model.preset.as_deref(), Some("plan"));
     }
 
     #[test]

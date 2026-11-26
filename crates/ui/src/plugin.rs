@@ -140,12 +140,15 @@ pub struct SidebarItem {
 /// 点了侧边栏入口之后做的事。
 pub type SidebarAction = Rc<dyn Fn(&mut Window, &mut App)>;
 
+/// 读一行状态（见 [`StatusItem::read`]）。
+pub type ReadStatus = Rc<dyn Fn(&Backend) -> Option<StatusLine>>;
+
 /// 侧边栏底部的一行状态：圆点加文字。
 #[derive(Clone)]
 pub struct StatusItem {
     pub id: &'static str,
-    /// 读当前状态；窗口打开和设置保存后各调一次，不在每帧调用。
-    pub read: Rc<dyn Fn(&Backend) -> StatusLine>,
+    /// 读当前状态；窗口打开和设置保存后各调一次，不在每帧调用。`None`：没什么要说的，不显示这一行。
+    pub read: ReadStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,7 +320,7 @@ mod tests {
 
         fn apply_ui(&self, cx: &mut UiScope<'_>) {
             cx.composer_control(ComposerControl::PresetMenu);
-            cx.status_item(StatusItem { id: self.0, read: Rc::new(|_| StatusLine { label: String::new(), ok: true }) });
+            cx.status_item(StatusItem { id: self.0, read: Rc::new(|_| Some(StatusLine { label: String::new(), ok: true })) });
         }
     }
 
