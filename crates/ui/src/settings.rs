@@ -1460,7 +1460,10 @@ impl SettingsView {
             .role(Role::TabList)
             .aria_label(t!("settings.title").to_string())
             .aria_orientation(Orientation::Vertical)
-            .w(px(size::MODAL_NAV_WIDTH))
+            // 弹窗变窄（窗口窄）时导航一起变窄，给正文留出空间：约为弹窗宽度的四分之一，140–220。
+            .w(relative(0.24))
+            .min_w(px(140.))
+            .max_w(px(size::MODAL_NAV_WIDTH))
             .flex_none()
             .px(px(space::S))
             .gap(px(space::XS))

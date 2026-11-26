@@ -27,8 +27,10 @@ pub mod radius {
     pub const MD: f32 = 6.;
     /// 卡片、菜单、下拉列表、面板、代码块。
     pub const LG: f32 = 8.;
-    /// 输入卡片、弹窗、用户消息气泡。
+    /// 弹窗、用户消息气泡。
     pub const XL: f32 = 12.;
+    /// 只用于输入卡片和占用同一位置的审批面板：整个窗口里最显眼的输入区，圆角比卡片、弹窗大一档。
+    pub const COMPOSER: f32 = 18.;
 }
 
 /// 控件、图标尺寸与布局常量。
@@ -51,6 +53,8 @@ pub mod size {
     pub const SIDEBAR_WIDTH: f32 = 260.;
     /// 收起后的侧边栏：一列图标按钮。
     pub const SIDEBAR_RAIL_WIDTH: f32 = 56.;
+    /// 窗口比这窄时侧边栏自动收成图标栏（不改用户的设置），对话区至少留出约 580。
+    pub const SIDEBAR_AUTO_COLLAPSE: f32 = 840.;
     /// 消息列与输入卡片的最大宽度（含左右各 24 的内边距，正文约 752）。
     pub const CONTENT_MAX_WIDTH: f32 = 800.;
     pub const MODAL_WIDTH: f32 = 960.;
@@ -507,15 +511,18 @@ pub fn setting_row(
     p: &Palette,
 ) -> Stateful<Div> {
     let title = title.into();
+    // 放不下时控件换到标题下面一行（窗口窄时），标题至少留 160，不会被挤成一字一行。
     h_flex()
         .id(id)
+        .flex_wrap()
         .py(px(space::M))
-        .gap(px(space::L))
+        .gap_x(px(space::L))
+        .gap_y(px(space::S))
         .items_center()
         .child(
             v_flex()
                 .flex_1()
-                .min_w(px(0.))
+                .min_w(px(160.))
                 .gap(px(2.))
                 .child(div().text_label().child(readable(title)))
                 .when_some(desc, |column, desc| column.child(hint(desc, Tone::Neutral, p))),
@@ -1318,6 +1325,16 @@ pub trait ControlSize: gpui_kit::component::Sizable + Styled + Sized {
     fn control_sm(self) -> Self {
         self.small().min_h(px(size::CONTROL_SM)).min_w(px(size::CONTROL_SM))
     }
+    /// 空间不够时允许收缩，最窄到 `min_width`（组件库按钮默认不收缩）。标签要放进 [`truncated`]，
+    /// 才会显示省略号而不是被截断。
+    fn shrinkable(self, min_width: f32) -> Self {
+        self.flex_shrink(1.).min_w(px(min_width))
+    }
+}
+
+/// 可以截断的按钮标签：宽度不够时末尾显示省略号。配合 [`ControlSize::shrinkable`]。
+pub fn truncated(label: impl Into<SharedString>) -> Div {
+    div().flex_shrink(1.).min_w(px(0.)).truncate().child(label.into())
 }
 
 impl ControlSize for gpui_kit::component::button::Button {}
@@ -1584,6 +1601,40 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    menu_popover_in(id, open, anchor, trigger, on_open_change, initial, body, None, window, cx)
+}
+
+/// 同 [`menu_popover`]，但触发按钮在空间不够时可以收缩，最窄到 `min_width`（如输入卡片下方的选项行）。
+/// 触发按钮自己也要允许收缩（见 [`ControlSize::shrinkable`]）。
+#[allow(clippy::too_many_arguments)]
+pub fn shrinking_menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    open: bool,
+    anchor: Anchor,
+    trigger: T,
+    on_open_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    initial: usize,
+    body: impl Fn(&MenuFocus, &mut Window, &mut App) -> AnyElement + 'static,
+    min_width: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    menu_popover_in(id, open, anchor, trigger, on_open_change, initial, body, Some(min_width), window, cx)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn menu_popover_in<T: gpui_kit::component::Selectable + IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    open: bool,
+    anchor: Anchor,
+    trigger: T,
+    on_open_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    initial: usize,
+    body: impl Fn(&MenuFocus, &mut Window, &mut App) -> AnyElement + 'static,
+    shrink_to: Option<f32>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     use gpui_kit::component::popover::Popover;
 
     let id = id.into();
@@ -1608,6 +1659,7 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
         // 打开时焦点落在当前选中的项上（而不是菜单本身），方向键马上就能用，读屏软件读出当前选项。
         .track_focus(&hold_focus)
         .on_open_change(on_open_change)
+        .when(shrink_to.is_some(), |popover| popover.trigger_style(StyleRefinement::default().flex().min_w(px(0.))))
         .trigger(trigger)
         .content(move |_, window, cx| {
             let p = palette(cx);
@@ -1635,7 +1687,10 @@ pub fn menu_popover<T: gpui_kit::component::Selectable + IntoElement + 'static>(
                 shadow::menu(&p),
             )
         });
-    div().relative().flex_none().child(popover).into_any_element()
+    match shrink_to {
+        Some(min_width) => div().relative().flex().flex_shrink(1.).min_w(px(min_width)).child(popover).into_any_element(),
+        None => div().relative().flex_none().child(popover).into_any_element(),
+    }
 }
 
 /// 一个不占位置的元素：它画出来之后（这一帧画完）调用一次 `then`。用来把焦点交给刚出现的东西——

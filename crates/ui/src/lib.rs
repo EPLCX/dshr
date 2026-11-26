@@ -89,8 +89,9 @@ pub(crate) const LANGUAGES: &[(&str, &str)] = &[
 ];
 
 const WORKSPACE_SIZE: (f32, f32) = (1200., 800.);
-/// 工作区窗口能缩到的最小尺寸：侧边栏加上一列能放下输入卡片的对话区。
-const WORKSPACE_MIN_SIZE: (f32, f32) = (870., 520.);
+/// 工作区窗口能缩到的最小尺寸：图标栏加上一列能放下输入卡片的对话区（窄于
+/// [`size::SIDEBAR_AUTO_COLLAPSE`] 时侧边栏自动收成图标栏，输入卡片下方的选项行收缩、滚动）。
+const WORKSPACE_MIN_SIZE: (f32, f32) = (560., 440.);
 /// 默认尺寸放不下时，窗口最多占屏幕可用区域的比例。
 const MAX_SCREEN_FRACTION: f32 = 0.85;
 
@@ -749,8 +750,12 @@ pub struct WorkspaceView {
     collapsed: HashSet<Option<PathBuf>>,
     /// 侧边栏收起成一列图标按钮（`ui.sidebar_collapsed`，重启后保留）。
     sidebar_collapsed: bool,
-    /// 侧边栏现在的宽度（收起、展开时有过渡）：每帧在 `render` 里算好，侧边栏视图按它画。
+    /// 侧边栏现在的宽度：每帧在 `render` 里算好，侧边栏视图按它画。
     sidebar_width: std::cell::Cell<f32>,
+    /// 窗口窄于 [`size::SIDEBAR_AUTO_COLLAPSE`]：侧边栏自动收成图标栏（不写配置），每帧在 `render` 里算。
+    narrow: std::cell::Cell<bool>,
+    /// 窄窗口里点了“展开侧边栏”：完整的侧边栏以抽屉形式盖在对话区上，不挤压对话区。不写配置。
+    sidebar_drawer: bool,
     /// 打开着的“搜索会话”弹窗。
     session_search: Option<(Entity<session_search::SessionSearchView>, Subscription)>,
     /// 点过“显示更多”的分组现在显示几个会话；没有记录的分组显示 [`SIDEBAR_PAGE`] 个。
@@ -843,6 +848,8 @@ impl WorkspaceView {
             collapsed: HashSet::new(),
             sidebar_collapsed,
             sidebar_width: std::cell::Cell::new(if sidebar_collapsed { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH }),
+            narrow: std::cell::Cell::new(false),
+            sidebar_drawer: false,
             session_search: None,
             sidebar_limits: HashMap::new(),
             sidebar_scroll: ScrollHandle::new(),
@@ -1229,6 +1236,8 @@ impl WorkspaceView {
             self.stash_composer(cx);
             self.restore_composer(&view, window, cx);
         }
+        // 从抽屉里选了会话：抽屉关上，露出对话。
+        self.sidebar_drawer = false;
         self.active = view;
         self.prune(cx);
         self.focus_active(window, cx);
@@ -1394,8 +1403,14 @@ impl WorkspaceView {
         }
     }
 
-    /// 收起或展开侧边栏，记进配置。
+    /// 收起或展开侧边栏，记进配置。窄窗口里侧边栏总是图标栏，这时改为打开、关上抽屉，不写配置。
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        if self.narrow.get() {
+            self.sidebar_drawer = !self.sidebar_drawer;
+            self.session_menu = None;
+            cx.notify();
+            return;
+        }
         self.sidebar_collapsed = !self.sidebar_collapsed;
         let collapsed = self.sidebar_collapsed;
         if let Err(error) = self.backend.update_config(|config| config.ui.sidebar_collapsed = collapsed) {
@@ -2056,11 +2071,43 @@ impl WorkspaceView {
             .into_any_element()
     }
 
+    /// 侧边栏现在是不是图标栏：用户收起了，或者窗口太窄。
+    fn rail_shown(&self) -> bool {
+        self.sidebar_collapsed || self.narrow.get()
+    }
+
+    /// 窄窗口里展开的侧边栏：盖在对话区上，点外面、按 Esc、选中会话或窗口变宽时关上。即时出现（布局变化不做动画）。
+    fn render_sidebar_drawer(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !(self.sidebar_drawer && self.narrow.get()) {
+            return None;
+        }
+        let p = palette(cx);
+        let panel = div()
+            .id("sidebar-drawer")
+            .occlude()
+            .absolute()
+            .top_0()
+            .left_0()
+            .h_full()
+            .w(px(size::SIDEBAR_WIDTH))
+            .bg(p.sidebar)
+            .border_r_1()
+            .border_color(p.border)
+            .shadow(shadow::modal(&p))
+            .child(self.render_sidebar_full(window, cx));
+        // 抽屉外面铺一层透明的点击区：点外面关上抽屉，这一下不落到对话区上。
+        let outside = div().id("sidebar-drawer-outside").absolute().inset_0().occlude().on_click(cx.listener(|this, _, _, cx| {
+            this.sidebar_drawer = false;
+            cx.notify();
+        }));
+        Some(div().absolute().inset_0().child(outside).child(panel).into_any_element())
+    }
+
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let width = self.sidebar_width.get();
         // 宽度在过渡：外层按当前宽度裁切，里面按收起或展开时的宽度排版，内容不会被挤得换行。
-        let inner = if self.sidebar_collapsed { self.render_sidebar_rail(window, cx) } else { self.render_sidebar_full(window, cx) };
+        let inner = if self.rail_shown() { self.render_sidebar_rail(window, cx) } else { self.render_sidebar_full(window, cx) };
         div()
             .w(px(width))
             .h_full()
@@ -2310,8 +2357,15 @@ impl Render for WorkspaceView {
         // 另一边一重绘，没重绘的这一边就从无障碍树里整个消失（例如一输入文字，侧边栏就读不到了）。
         // 只有读屏软件连着时才有这份开销；它连上时 GPUI 会强制重绘一次，这里随之切换。
         let cache = !window.is_a11y_active();
+        // 窗口太窄时侧边栏自动收成图标栏；变宽后回到用户自己的设置，抽屉随之关上。
+        let narrow = window.viewport_size().width.as_f32() < size::SIDEBAR_AUTO_COLLAPSE;
+        if narrow != self.narrow.get() {
+            self.narrow.set(narrow);
+            self.sidebar_drawer &= narrow;
+            self.sidebar.update(cx, |_, cx| cx.notify());
+        }
         // 收起、展开侧边栏即时切换宽度（布局变化不做动画，对话区不用逐帧重排）。
-        let sidebar_width = if self.sidebar_collapsed { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH };
+        let sidebar_width = if self.rail_shown() { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH };
         if (self.sidebar_width.get() - sidebar_width).abs() > f32::EPSILON {
             self.sidebar_width.set(sidebar_width);
             // 缓存的侧边栏按新宽度重画。
@@ -2435,6 +2489,13 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(Self::on_search_sessions))
             // 插件命令的快捷键（和内置快捷键冲突的不生效）。
             .on_key_down(cx.listener(Self::on_plugin_shortcut))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if this.sidebar_drawer && event.keystroke.key == "escape" {
+                    cx.stop_propagation();
+                    this.sidebar_drawer = false;
+                    cx.notify();
+                }
+            }))
             .text_color(p.text)
             // 平滑滚动层放在最前：捕获阶段按绘制顺序派发，它得先于对话区的滚动容器拿到滚轮事件。
             .child(self.scroll.layer(cx))
@@ -2463,6 +2524,7 @@ impl Render for WorkspaceView {
             )
             // 盖在侧边栏和对话区上面，但在弹窗下面：弹窗开着时焦点陷阱把 Tab 留在弹窗里。
             .child(self.render_skip_links(window, cx))
+            .children(self.render_sidebar_drawer(window, cx))
             .children(overlay)
             .children(plugin_page)
             .children(search_overlay)

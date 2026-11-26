@@ -21,6 +21,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::design::ControlSize as _;
+use gpui_kit::component::Sizable as _;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -29,7 +30,7 @@ use crate::backend::{Backend, ModelChoice, TurnOptions, UiApprover};
 use crate::design::motion::Edge;
 use crate::design::{
     MenuFocus, Tone, Typography as _, badge, brand_mark, card, description, divider, heading, hint, hover_fill, menu_choice, menu_item,
-    menu_popover, mono_font, motion, palette, pressable, radius, readable_with_id, size, space, with_focus_ring,
+    menu_popover, mono_font, motion, palette, pressable, radius, readable_with_id, size, space, truncated, with_focus_ring,
 };
 use crate::plugin::{ComposerControl, PanelContext, UiRegistry};
 use crate::transcript::{PluginViewResolver, Row, ToolRow, ToolStatus, Transcript, TurnFooter, tail_lines};
@@ -83,6 +84,27 @@ const TRANSCRIPT_CONTEXT: &str = "Transcript";
 const ANNOUNCE_AFTER_SEND: Duration = Duration::from_millis(400);
 /// 输入卡片外面那一层的 id（首页和对话页共用，见 `render`）。
 const COMPOSER_SLOT: &str = "composer-slot";
+
+/// 输入卡片下方选项行（工作区、预设、权限）里每个按钮最窄收到这么宽：图标 + 箭头，标签全部变成省略号。
+const OPTION_MIN_WIDTH: f32 = 44.;
+
+/// 选项行里的按钮。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OptionSlot {
+    Workspace,
+    Preset,
+    Permission,
+}
+
+/// 选项行按钮的焦点句柄。预设、权限用菜单的触发句柄（`menu_popover` 按同一个 id 取，必须是同一个）。
+fn option_focus(slot: OptionSlot, window: &mut Window, cx: &mut App) -> FocusHandle {
+    let id = match slot {
+        OptionSlot::Workspace => "workspace-chip",
+        OptionSlot::Preset => "preset-menu",
+        OptionSlot::Permission => "permission-menu",
+    };
+    crate::design::menu_trigger_focus(id, window, cx)
+}
 /// Tab 往前找有控件的行时，最多试这么多行（每试一行要等它画出来）。
 const TAB_SEARCH_LIMIT: usize = 64;
 
@@ -224,6 +246,8 @@ pub struct ConversationView {
     model_menu_page: ModelMenuPage,
     /// 模型菜单里可滚动的模型列表：打开菜单、用方向键移动时把当前项滚进视口。
     model_scroll: ScrollHandle,
+    /// 输入卡片下方选项行（放不下时横向滚动）。
+    options_scroll: ScrollHandle,
     permission_menu_open: bool,
     preset_menu_open: bool,
     /// 折叠起来的面板（输入卡片上方，如计划面板），按面板 id。
@@ -302,7 +326,7 @@ impl ConversationView {
         };
 
         let input = cx.new(|cx| {
-            TextareaState::new(window, cx).placeholder(t!("conversation.placeholder").to_string()).submit_on_enter(true).auto_grow(2, 10)
+            TextareaState::new(window, cx).placeholder(t!("conversation.placeholder").to_string()).submit_on_enter(true).auto_grow(1, 10)
         });
         let conversation = cx.weak_entity();
         let transcript_view = cx.new(|_| TranscriptView { conversation: conversation.clone() });
@@ -361,6 +385,7 @@ impl ConversationView {
             model_menu_open: false,
             model_menu_page: ModelMenuPage::Models,
             model_scroll: ScrollHandle::new(),
+            options_scroll: ScrollHandle::new(),
             permission_menu_open: false,
             preset_menu_open: false,
             collapsed_panels: HashSet::new(),
@@ -1395,25 +1420,34 @@ impl ConversationView {
     }
 
     /// 输入卡片第一行左边的工作区选择（和附件标签同一行）。
-    fn render_context_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_context_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let label = match &self.workspace {
             Some(path) => path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned()),
             None => t!("conversation.choose_workspace").to_string(),
         };
         let name = t!("a11y.choice", group = t!("a11y.workspace_chip"), value = label).to_string();
-        h_flex().child(crate::design::framed(
-            "workspace-chip",
-            Button::new("workspace-chip")
-                .ghost()
-                .control_xs()
-                .icon(IconName::Folder)
-                .label(label)
-                .accessibility_label(name)
-                .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)))
-                .when_some(self.workspace.as_ref(), |button, path| button.tooltip(path.display().to_string()))
-                .disabled(self.is_running())
-                .on_click(cx.listener(|this, _, _, cx| this.choose_workspace(cx))),
-        ))
+        let focus = option_focus(OptionSlot::Workspace, window, cx);
+        // 外面再包一层可收缩的容器：选项行放不下时和预设、权限一起变窄。
+        div()
+            .flex()
+            .flex_shrink(1.)
+            .min_w(px(OPTION_MIN_WIDTH))
+            .child(crate::design::framed_handle(
+                focus.clone(),
+                Button::new("workspace-chip")
+                    .track_focus(&focus)
+                    .ghost()
+                    .control_sm()
+                    .shrinkable(OPTION_MIN_WIDTH)
+                    .icon(IconName::Folder)
+                    .child(truncated(label))
+                    .accessibility_label(name)
+                    .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)).flex_none())
+                    .when_some(self.workspace.as_ref(), |button, path| button.tooltip(path.display().to_string()))
+                    .disabled(self.is_running())
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_workspace(cx))),
+            ))
+            .into_any_element()
     }
 
     /// 权限模式菜单（输入卡片左下角，对应原版的“工作区内修改”）。
@@ -1421,18 +1455,19 @@ impl ConversationView {
         let current = self.options.permission;
         let view = cx.entity().downgrade();
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
-        let trigger_focus = crate::design::menu_trigger_focus("permission-menu", window, cx);
+        let trigger_focus = option_focus(OptionSlot::Permission, window, cx);
         let trigger = crate::design::framed_trigger_with(
             trigger_focus.clone(),
             Button::new("permission-trigger")
                 .track_focus(&trigger_focus)
                 .ghost()
                 .control_sm()
+                .shrinkable(OPTION_MIN_WIDTH)
                 .icon(permission_icon(current))
-                .label(permission_label(current))
+                .child(truncated(permission_label(current)))
                 // 只读“工作区内修改”听不出这是什么：带上“修改策略”。
                 .accessibility_label(t!("a11y.choice", group = t!("a11y.permission_menu"), value = permission_label(current)).to_string())
-                .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM))),
+                .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)).flex_none()),
         );
         let modes = [PermissionMode::Manual, PermissionMode::Workspace, PermissionMode::AutoReview, PermissionMode::FullAccess];
         let initial = modes.iter().position(|mode| *mode == current).unwrap_or(0);
@@ -1484,7 +1519,7 @@ impl ConversationView {
                 }))
                 .into_any_element()
         };
-        menu_popover(
+        crate::design::shrinking_menu_popover(
             "permission-menu",
             self.permission_menu_open,
             Anchor::BottomLeft,
@@ -1495,6 +1530,7 @@ impl ConversationView {
             }),
             initial,
             body,
+            OPTION_MIN_WIDTH,
             window,
             cx,
         )
@@ -1508,17 +1544,18 @@ impl ConversationView {
         let trigger_label = plugin_current.as_ref().map_or_else(|| preset_label(current), |preset| preset.label.clone());
         let view = cx.entity().downgrade();
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
-        let trigger_focus = crate::design::menu_trigger_focus("preset-menu", window, cx);
+        let trigger_focus = option_focus(OptionSlot::Preset, window, cx);
         let trigger = crate::design::framed_trigger_with(
             trigger_focus.clone(),
             Button::new("preset-trigger")
                 .track_focus(&trigger_focus)
                 .ghost()
                 .control_sm()
+                .shrinkable(OPTION_MIN_WIDTH)
                 .icon(preset_icon(current))
-                .label(trigger_label.clone())
+                .child(truncated(trigger_label.clone()))
                 .accessibility_label(t!("a11y.choice", group = t!("a11y.mode_menu"), value = trigger_label).to_string())
-                .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM))),
+                .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)).flex_none()),
         );
         let initial = match &plugin_current {
             Some(current) => plugin_presets
@@ -1613,7 +1650,7 @@ impl ConversationView {
                 }))
                 .into_any_element()
         };
-        menu_popover(
+        crate::design::shrinking_menu_popover(
             "preset-menu",
             self.preset_menu_open,
             Anchor::BottomLeft,
@@ -1624,6 +1661,7 @@ impl ConversationView {
             }),
             initial,
             body,
+            OPTION_MIN_WIDTH,
             window,
             cx,
         )
@@ -2172,9 +2210,12 @@ impl ConversationView {
         v_flex().gap(px(space::XS)).children(steered).children(rows).into_any_element()
     }
 
-    /// 输入区：工作区选择、错误、排队消息与输入卡片。
+    /// 输入区：错误、排队消息、输入卡片，以及卡片下方的选项行。
+    ///
+    /// 卡片里只有附件、“+”、文本框和发送按钮；工作区、预设、权限、模型放在卡片下方一行，
+    /// 层级上与输入内容分开（参考 ChatGPT、Claude 的输入区）。
     fn render_composer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let context_bar = self.render_context_bar(cx);
+        let workspace_chip = self.render_context_bar(window, cx);
         let queue = self.render_queue(cx);
         let panels = self.render_panels(window, cx);
         let slash_menu = self.render_slash_menu(cx).or_else(|| self.render_mention_menu(cx));
@@ -2191,6 +2232,15 @@ impl ConversationView {
         } else {
             None
         };
+        // 选项行放不下时横向滚动：用键盘移到一个被挡住的按钮上，把它滚进来。
+        let slots = [
+            Some(OptionSlot::Workspace),
+            preset_menu.is_some().then_some(OptionSlot::Preset),
+            permission_menu.is_some().then_some(OptionSlot::Permission),
+        ];
+        if let Some(index) = slots.iter().flatten().position(|slot| option_focus(*slot, window, cx).is_focused(window)) {
+            self.options_scroll.scroll_to_item(index);
+        }
         let chips = self.render_attachment_chips(cx);
         let attach = crate::design::framed(
             "attach",
@@ -2226,6 +2276,25 @@ impl ConversationView {
         if self.workspace.is_none() {
             column = column.child(div().px(px(space::XS)).child(hint(t!("conversation.no_workspace_hint").to_string(), Tone::Neutral, &p)));
         }
+        // 选项行：左边工作区、预设、权限（放不下时先收缩、再横向滚动），右边模型始终完整显示。
+        let options = h_flex()
+            .w_full()
+            .min_h(px(size::CONTROL_SM))
+            .gap(px(space::XS))
+            .child(
+                h_flex()
+                    .id("composer-options")
+                    .debug_selector(|| "composer-options".into())
+                    .flex_1()
+                    .min_w(px(0.))
+                    .gap(px(space::XS))
+                    .overflow_x_scroll()
+                    .track_scroll(&self.options_scroll)
+                    .child(workspace_chip)
+                    .children(preset_menu)
+                    .children(permission_menu),
+            )
+            .child(div().flex_none().debug_selector(|| "composer-model".into()).child(model_menu));
         // 有审批在等：输入卡片的位置换成审批面板（焦点自动移过去，键盘就能答）。
         if let Some(approval) = self.render_approval(window, cx) {
             return column.children(panels).child(queue).child(approval);
@@ -2242,9 +2311,11 @@ impl ConversationView {
         };
         // `/`、`@` 的候选列表浮在卡片上沿之上，不把卡片往下推。
         let suggestions = slash_menu.map(|menu| div().absolute().left_0().right_0().bottom_full().pb(px(space::XS)).occlude().child(menu));
+        let has_chips = !chips.is_empty();
         let card = v_flex()
+            .debug_selector(|| "composer-card".into())
             .w_full()
-            .rounded(px(radius::XL))
+            .rounded(px(radius::COMPOSER))
             .border_1()
             .border_color(border)
             .bg(p.surface)
@@ -2266,44 +2337,58 @@ impl ConversationView {
                 this.file_drag = false;
                 cx.notify();
             }))
-            // 第一行：工作区、附件。没选工作区时也能先输入，发送按钮在选好之前不可用。
-            .child(h_flex().flex_wrap().items_center().gap(px(space::XS)).child(context_bar).children(chips))
-            // 多行输入框默认把 Tab / Shift+Tab 当缩进、反缩进，键盘焦点就困在输入框里，
-            // 走不到发送、菜单和侧边栏。消息里用不到缩进：在外层先截住这两个动作，改成移动焦点。
-            .child(
-                div()
-                    .capture_action(|_: &IndentInline, window, cx| {
-                        cx.stop_propagation();
-                        window.focus_next(cx);
-                    })
-                    .capture_action(|_: &OutdentInline, window, cx| {
-                        cx.stop_propagation();
-                        window.focus_prev(cx);
-                    })
-                    // Ctrl+V 先问剪贴板：是图片或文件（比如截图、从文件管理器复制的文件）
-                    // 就加为附件，不让输入框当成纯文本处理。
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        let paste = event.keystroke.key == "v"
-                            && event.keystroke.modifiers.platform
-                            && !event.keystroke.modifiers.shift
-                            && !event.keystroke.modifiers.alt;
-                        if paste && this.paste_clipboard(window, cx) {
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .child(Textarea::new(&self.input).appearance(false).aria_label(t!("a11y.message_input").to_string()).text_content()),
-            )
+            // 有附件时，附件标签单独一行，排在输入行上面。
+            .when(has_chips, |card| card.child(h_flex().flex_wrap().items_center().gap(px(space::XS)).px(px(space::XS)).children(chips)))
+            // 输入行：“+”、文本框、发送。多行时两边的按钮贴着最后一行。
             .child(
                 h_flex()
+                    .items_end()
                     .gap(px(space::XS))
                     .child(attach)
-                    .children(preset_menu)
-                    .children(permission_menu)
-                    .child(div().flex_1())
-                    .child(model_menu)
+                    .child(
+                        // 多行输入框默认把 Tab / Shift+Tab 当缩进、反缩进，键盘焦点就困在输入框里，
+                        // 走不到发送、菜单和侧边栏。消息里用不到缩进：在外层先截住这两个动作，改成移动焦点。
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .capture_action(|_: &IndentInline, window, cx| {
+                                cx.stop_propagation();
+                                window.focus_next(cx);
+                            })
+                            .capture_action(|_: &OutdentInline, window, cx| {
+                                cx.stop_propagation();
+                                window.focus_prev(cx);
+                            })
+                            // Ctrl+V 先问剪贴板：是图片或文件（比如截图、从文件管理器复制的文件）
+                            // 就加为附件，不让输入框当成纯文本处理。
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                let paste = event.keystroke.key == "v"
+                                    && event.keystroke.modifiers.platform
+                                    && !event.keystroke.modifiers.shift
+                                    && !event.keystroke.modifiers.alt;
+                                if paste && this.paste_clipboard(window, cx) {
+                                    cx.stop_propagation();
+                                }
+                            }))
+                            .child(
+                                // 小号内边距（上下 2、左右 8）：单行时文本框与两边 28 高的按钮同高，文字与图标对齐。
+                                Textarea::new(&self.input)
+                                    .appearance(false)
+                                    .with_size(gpui_kit::component::Size::Small)
+                                    .aria_label(t!("a11y.message_input").to_string())
+                                    .text_content(),
+                            ),
+                    )
                     .child(send),
             );
-        column.children(panels).child(queue).child(div().relative().w_full().child(card).children(suggestions))
+        column.children(panels).child(queue).child(
+            v_flex()
+                .w_full()
+                .gap(px(space::XS))
+                .child(div().relative().w_full().child(card).children(suggestions))
+                // 选项行与卡片里的“+”左边对齐。
+                .child(div().px(px(space::XS)).child(options)),
+        )
     }
 
     /// 审批面板：在输入卡片的位置问用户是否允许这次工具调用。出现时焦点落在“允许”上；
@@ -2434,7 +2519,7 @@ impl ConversationView {
             .on_action(cx.listener(|this, _: &ApprovalAlways, window, cx| this.answer_approval(ApprovalChoice::Always, window, cx)))
             .on_action(cx.listener(|this, _: &ApprovalDeny, window, cx| this.answer_approval(ApprovalChoice::Deny, window, cx)))
             .w_full()
-            .rounded(px(radius::XL))
+            .rounded(px(radius::COMPOSER))
             .border_1()
             .border_color(p.warning)
             .bg(p.surface)
@@ -4207,10 +4292,32 @@ mod menu_tests {
 
     /// 比视口还高的一行（长回复）只在视口底边露出一小条时，Tab 走到它上面要把它滚出来。以前把“顶边在
     /// 视口顶边以下、又比视口高”当作看得见，焦点到了它上面列表却不动，看起来焦点丢了。
+    /// 窗口很窄时，输入卡片下方的选项行收缩、横向滚动，不超出卡片；模型菜单始终完整显示在右边。
+    #[gpui::test]
+    fn composer_options_fit_a_narrow_window(cx: &mut TestAppContext) {
+        let fixture = open(cx, 1);
+        let bounds = |cx: &mut TestAppContext, selector: &'static str| {
+            gpui_kit::VisualTestContext::from_window(fixture.window, cx).debug_bounds(selector)
+        };
+        draw(cx, fixture.window);
+        let wide = bounds(cx, "composer-model").expect("画了模型菜单");
+        for width in [500., 360.] {
+            cx.simulate_window_resize(fixture.window, gpui_kit::size(px(width), px(600.)));
+            draw(cx, fixture.window);
+            draw(cx, fixture.window);
+            let card = bounds(cx, "composer-card").expect("画了输入卡片");
+            let options = bounds(cx, "composer-options").expect("画了选项行");
+            let model = bounds(cx, "composer-model").expect("画了模型菜单");
+            assert!(options.right() <= model.left(), "{width}：选项行不压住模型菜单：{options:?} {model:?}");
+            assert!(model.right() <= card.right(), "{width}：模型菜单不超出卡片：{model:?} {card:?}");
+            assert_eq!(model.size.width, wide.size.width, "{width}：模型菜单不收缩");
+        }
+    }
+
     #[gpui::test]
     fn tab_scrolls_to_a_row_taller_than_the_viewport(cx: &mut TestAppContext) {
         let fixture = open(cx, 1);
-        long_transcript(cx, &fixture, 4);
+        long_transcript(cx, &fixture, 5);
         let view = fixture.view.clone();
         step(cx, fixture.window, |_, cx| {
             view.update(cx, |view, cx| {
@@ -4222,33 +4329,47 @@ mod menu_tests {
             })
         });
         draw(cx, fixture.window);
-        // 往下滚一点：这条长回复的顶边刚好在视口底边露出一小条（不到一行列表项高）。
-        let (viewport, footer) = read(cx, &fixture, |view| (view.viewport_bounds.get().unwrap(), view.row_bounds.borrow()[&15]));
+        // 往下滚到这条长回复的顶边刚好在视口底边露出一小条（不到一行列表项高）。
+        // 先按它现在的位置算出要滚多远（还没画出来就先往下滚一点再量）。
+        let tall_index = read(cx, &fixture, |view| view.transcript.rows.len() - 1);
+        let viewport = read(cx, &fixture, |view| view.viewport_bounds.get().unwrap());
         let sliver = px(crate::design::size::LIST_ITEM / 2.);
-        let tall_top = footer.bottom() + px(17.);
-        let distance = tall_top - (viewport.bottom() - sliver);
-        cx.update_window(fixture.window, |_, window, cx| {
-            window.dispatch_event(
-                gpui_kit::PlatformInput::Scroll(gpui_kit::ScrollEvent {
-                    position: point(px(500.), px(300.)),
-                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), -distance)),
-                    ..Default::default()
-                }),
-                cx,
-            );
-        })
-        .unwrap();
-        draw(cx, fixture.window);
-        draw(cx, fixture.window);
-        let tall = read(cx, &fixture, |view| view.row_bounds.borrow().get(&16).copied()).expect("长回复露出来了，画了它");
+        let scroll = |cx: &mut TestAppContext, by: gpui_kit::Pixels| {
+            cx.update_window(fixture.window, |_, window, cx| {
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::Scroll(gpui_kit::ScrollEvent {
+                        position: point(px(500.), px(300.)),
+                        delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), -by)),
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+            })
+            .unwrap();
+            draw(cx, fixture.window);
+            draw(cx, fixture.window);
+        };
+        for _ in 0..20 {
+            let top = read(cx, &fixture, |view| view.row_bounds.borrow().get(&tall_index).map(|bounds| bounds.top()));
+            let Some(top) = top.filter(|top| *top < viewport.bottom() + px(200.)) else {
+                scroll(cx, px(100.));
+                continue;
+            };
+            let distance = top - (viewport.bottom() - sliver);
+            if distance.abs() < px(1.) {
+                break;
+            }
+            scroll(cx, distance);
+        }
+        let tall = read(cx, &fixture, |view| view.row_bounds.borrow().get(&tall_index).copied()).expect("长回复露出来了，画了它");
         assert!(
             tall.top() < viewport.bottom() && tall.top() > viewport.bottom() - px(crate::design::size::LIST_ITEM),
-            "只露出一小条：{tall:?}"
+            "只露出一小条：{tall:?} {viewport:?}"
         );
         let last = read(cx, &fixture, |view| view.transcript.rows.len() - 1);
         // 从最后一轮的分叉按钮往后走一下：到那条长回复上（它是列表里当停靠点的消息）。
         step(cx, fixture.window, |window, cx| {
-            view.update(cx, |view, cx| view.row_handle(15, cx).focus(window, cx));
+            view.update(cx, |view, cx| view.row_handle(tall_index - 1, cx).focus(window, cx));
         });
         press_and_settle(cx, fixture.window, "tab");
         for _ in 0..3 {
