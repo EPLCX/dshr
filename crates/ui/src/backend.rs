@@ -1041,7 +1041,7 @@ pub struct PendingApproval {
     /// 必须由用户亲自确认（`Gate::Require`）：不能“本会话不再询问”，之前选过的也不算数。
     pub mandatory: bool,
     /// 工具调用的参数：审批面板据此把要授予的插件能力写成人能读懂的说法。
-    pub input: serde_json::Value,
+    pub input: std::sync::Arc<serde_json::Value>,
     pub respond: oneshot::Sender<Decision>,
 }
 

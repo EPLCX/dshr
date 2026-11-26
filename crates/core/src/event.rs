@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::message::{ContentBlock, StopReason, Usage};
 
 /// 会话日志中的一条持久事件：`{"seq":..,"time":..,"type":"..","data":{..}}`。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SessionEvent {
     pub seq: u64,
     /// Unix 毫秒时间戳。
@@ -15,7 +15,7 @@ pub struct SessionEvent {
     pub body: EventBody,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data")]
 pub enum EventBody {
     #[serde(rename = "turn/start")]
@@ -63,8 +63,10 @@ pub enum EventBody {
     /// 一次失败的模型请求；成功的那次直接记为 `assistant/message`。
     #[serde(rename = "assistant/attempt")]
     AssistantAttempt { attempt: u32, error: String },
+    /// `input` 用 `Arc` 共享：写 `write_file` 这类调用时参数就是整份文件内容，记进日志、推给界面都只加引用计数
+    /// （序列化形状不变）。
     #[serde(rename = "tool/call")]
-    ToolCall { call_id: String, name: String, input: Value },
+    ToolCall { call_id: String, name: String, input: Arc<Value> },
     #[serde(rename = "tool/result")]
     ToolResult {
         call_id: String,
@@ -110,7 +112,7 @@ pub enum EventBody {
     /// 用 [`EventBody::ext`] 构造，它会检查名字。
     #[serde(untagged)]
     Ext {
-        #[serde(rename = "type", deserialize_with = "deserialize_ext_kind")]
+        #[serde(rename = "type")]
         kind: String,
         #[serde(default)]
         data: Value,
@@ -142,15 +144,6 @@ const CORE_KINDS: [&str; 18] = [
 /// 是不是核心事件的类型名。
 pub fn is_core_kind(kind: &str) -> bool {
     CORE_KINDS.contains(&kind)
-}
-
-/// 读日志时：类型名是核心事件、但内容对不上的行不当成插件事件，留给 [`LogEntry::Unknown`]。
-fn deserialize_ext_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-    let kind = String::deserialize(deserializer)?;
-    if is_core_kind(&kind) {
-        return Err(serde::de::Error::custom(format_args!("`{kind}` 事件的内容格式不对")));
-    }
-    Ok(kind)
 }
 
 /// 插件事件的类型名不合规。
@@ -223,18 +216,245 @@ pub enum TurnEndReason {
 
 /// 读取日志时的一行：事件解析成 [`SessionEvent`]（本程序不认识的类型，如插件事件、原版新增的事件，
 /// 解析成 [`EventBody::Ext`]）；不是事件形状的行、内容对不上的核心事件原样保留。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum LogEntry {
     Known(SessionEvent),
     Unknown(Value),
 }
 
+impl<'de> Deserialize<'de> for LogEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        match SessionEvent::deserialize(&value) {
+            Ok(event) => Ok(Self::Known(event)),
+            Err(_) => Ok(Self::Unknown(value)),
+        }
+    }
+}
+
 impl LogEntry {
+    /// 解析日志的一行。先直接按事件解析（不经过中间结构）；不是事件形状的行再解析成 `Value` 原样保留。
+    pub fn parse(line: &str) -> serde_json::Result<Self> {
+        match serde_json::from_str::<SessionEvent>(line) {
+            Ok(event) => Ok(Self::Known(event)),
+            Err(_) => serde_json::from_str(line).map(Self::Unknown),
+        }
+    }
+
     pub fn known(&self) -> Option<&SessionEvent> {
         match self {
             Self::Known(event) => Some(event),
             Self::Unknown(_) => None,
         }
+    }
+}
+
+/// 核心事件的 `data` 怎么解析：和 [`EventBody`] 的变体一一对应（`remote` 派生会逐个字段对照类型，对不上编译不过）。
+/// 单独派生是因为 `EventBody` 里有 `#[serde(untagged)]` 的 `Ext`：serde 碰到它会先把整行缓存成中间结构再逐个试，
+/// 读日志慢一截。这里只有带标签的变体，由 [`SessionEvent`] 的反序列化按 `type` 直接把 `data` 解析进对应的变体。
+#[derive(Deserialize)]
+#[serde(remote = "EventBody")]
+enum CoreBody {
+    #[serde(rename = "turn/start")]
+    TurnStart { turn: u32 },
+    #[serde(rename = "turn/end")]
+    TurnEnd {
+        turn: u32,
+        reason: TurnEndReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    #[serde(rename = "step/start")]
+    StepStart { turn: u32, step: u32 },
+    #[serde(rename = "step/end")]
+    StepEnd { turn: u32, step: u32 },
+    #[serde(rename = "system/message")]
+    SystemMessage { text: Arc<str> },
+    #[serde(rename = "user/message")]
+    UserMessage { text: Arc<str> },
+    #[serde(rename = "user/attachment")]
+    UserAttachment {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<Arc<str>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data: Option<Arc<str>>,
+    },
+    #[serde(rename = "assistant/message")]
+    AssistantMessage {
+        model: String,
+        content: Vec<ContentBlock>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<StopReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Usage>,
+    },
+    #[serde(rename = "assistant/attempt")]
+    AssistantAttempt { attempt: u32, error: String },
+    #[serde(rename = "tool/call")]
+    ToolCall { call_id: String, name: String, input: Arc<Value> },
+    #[serde(rename = "tool/result")]
+    ToolResult {
+        call_id: String,
+        output: Arc<str>,
+        #[serde(default)]
+        is_error: bool,
+    },
+    #[serde(rename = "request/header")]
+    RequestHeader { provider: String, model: String },
+    #[serde(rename = "session/title")]
+    SessionTitle { title: String },
+    #[serde(rename = "session/workspace")]
+    SessionWorkspace { path: String },
+    #[serde(rename = "session/options")]
+    SessionOptions {
+        preset: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plugin_preset: Option<String>,
+        permission: String,
+        model_provider: String,
+        model: String,
+    },
+    #[serde(rename = "session/forked")]
+    SessionForked { from: String, turn: u32 },
+    #[serde(rename = "context/compaction")]
+    Compaction { summary: Arc<str>, upto_seq: u64 },
+    #[serde(rename = "turn/continue")]
+    TurnContinue { reason: ContinueReason },
+    #[serde(skip_deserializing)]
+    #[allow(dead_code)]
+    Ext { kind: String, data: Value },
+}
+
+impl<'de> Deserialize<'de> for SessionEvent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(EventVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for EventBody {
+    /// 单独的事件内容：`{"type":..,"data":..}`。
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(deserializer.deserialize_map(EventVisitor)?.body)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum Field {
+    Seq,
+    Time,
+    Type,
+    Data,
+    #[serde(other)]
+    Other,
+}
+
+/// 逐个字段读一行事件。`type` 在 `data` 前面时（本程序写的日志都是这样）`data` 直接解析进对应的变体；
+/// 反过来时先把 `data` 读成 `Value`。单独解析 [`EventBody`] 时没有 `seq`、`time`，记为 0。
+struct EventVisitor;
+
+impl<'de> serde::de::Visitor<'de> for EventVisitor {
+    type Value = SessionEvent;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a session event")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<SessionEvent, A::Error> {
+        use serde::de::Error as _;
+        let (mut seq, mut time, mut kind, mut body, mut early_data) = (None, None, None::<String>, None, None);
+        while let Some(field) = map.next_key::<Field>()? {
+            match field {
+                Field::Seq => seq = Some(map.next_value()?),
+                Field::Time => time = Some(map.next_value()?),
+                Field::Type => kind = Some(map.next_value()?),
+                Field::Data => match &kind {
+                    Some(kind) => body = Some(map.next_value_seed(DataSeed(kind))?),
+                    None => early_data = Some(map.next_value::<Value>()?),
+                },
+                Field::Other => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        let kind = kind.ok_or_else(|| A::Error::missing_field("type"))?;
+        let body = match body {
+            Some(body) => body,
+            None => {
+                serde::de::DeserializeSeed::deserialize(DataSeed(&kind), early_data.unwrap_or(Value::Null)).map_err(A::Error::custom)?
+            }
+        };
+        Ok(SessionEvent { seq: seq.unwrap_or_default(), time: time.unwrap_or_default(), body })
+    }
+}
+
+/// 按已经读到的 `type` 解析 `data`：核心事件解析进对应的变体（对不上就是错误，整行留给 [`LogEntry::Unknown`]），
+/// 其余的是插件事件，`data` 原样保留。
+struct DataSeed<'a>(&'a str);
+
+impl<'de> serde::de::DeserializeSeed<'de> for DataSeed<'_> {
+    type Value = EventBody;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<EventBody, D::Error> {
+        if is_core_kind(self.0) {
+            CoreBody::deserialize(Tagged { kind: self.0, data: deserializer })
+        } else {
+            Ok(EventBody::Ext { kind: self.0.to_owned(), data: Value::deserialize(deserializer)? })
+        }
+    }
+}
+
+/// 把“变体名 + 内容”交给按外部标签派生的 [`CoreBody`]：变体名是 `type`，内容由 `data` 的反序列化器直接提供。
+struct Tagged<'a, D> {
+    kind: &'a str,
+    data: D,
+}
+
+impl<'de, D: serde::Deserializer<'de>> serde::Deserializer<'de> for Tagged<'_, D> {
+    type Error = D::Error;
+
+    fn deserialize_any<V: serde::de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, D::Error> {
+        visitor.visit_enum(self)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf option unit
+        unit_struct newtype_struct seq tuple tuple_struct map struct enum identifier ignored_any
+    }
+}
+
+impl<'de, D: serde::Deserializer<'de>> serde::de::EnumAccess<'de> for Tagged<'_, D> {
+    type Error = D::Error;
+    type Variant = Content<D>;
+
+    fn variant_seed<V: serde::de::DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Content<D>), D::Error> {
+        let kind = serde::de::value::StrDeserializer::<D::Error>::new(self.kind);
+        Ok((seed.deserialize(kind)?, Content(self.data)))
+    }
+}
+
+struct Content<D>(D);
+
+impl<'de, D: serde::Deserializer<'de>> serde::de::VariantAccess<'de> for Content<D> {
+    type Error = D::Error;
+
+    fn unit_variant(self) -> Result<(), D::Error> {
+        serde::de::IgnoredAny::deserialize(self.0).map(|_| ())
+    }
+
+    fn newtype_variant_seed<T: serde::de::DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, D::Error> {
+        seed.deserialize(self.0)
+    }
+
+    fn tuple_variant<V: serde::de::Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value, D::Error> {
+        self.0.deserialize_tuple(len, visitor)
+    }
+
+    fn struct_variant<V: serde::de::Visitor<'de>>(self, fields: &'static [&'static str], visitor: V) -> Result<V::Value, D::Error> {
+        self.0.deserialize_struct("data", fields, visitor)
     }
 }

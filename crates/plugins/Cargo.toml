@@ -16,7 +16,6 @@ js = [
     "dep:base64",
     "dep:globset",
     "dep:ignore",
-    "dep:regex",
     "dep:futures",
     "dep:tokio-tungstenite",
 ]
@@ -41,7 +40,6 @@ getrandom = "0.3"
 notify = "8"
 globset = { workspace = true, optional = true }
 ignore = { workspace = true, optional = true }
-regex = { workspace = true, optional = true }
 sha2 = "0.10"
 # 插件包签名（`dshr plugin pack --sign`）。
 ed25519-dalek = "2"

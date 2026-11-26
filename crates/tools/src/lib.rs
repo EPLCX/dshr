@@ -19,7 +19,7 @@ pub use builtin::{ListDir, ReadFile, RunShell, WriteFile};
 pub use edit::{EditFile, unified_diff};
 pub use plan::{Plan, PlanStep, StepStatus, UPDATE_PLAN, UpdatePlan};
 pub use plugins::{BuiltinTools, FsPlugin, PlanPlugin, SearchPlugin, ShellPlugin};
-pub use search::{Glob, Grep, find_files};
+pub use search::{Glob, Grep, LineSearch, RegexMatcher, find_files};
 
 /// 工具执行环境。
 #[derive(Debug, Clone)]
@@ -326,10 +326,15 @@ impl ToolRegistry {
     }
 
     /// 快照里的工具，加上各个 [`ToolSources`] 当前提供的。
+    ///
+    /// 各个来源同时问：第一次问时来源可能要连接（如插件自带的 MCP 服务器），逐个等的话连接时间会叠加。
+    /// 结果仍按注册顺序合并，重名时后注册的生效。
     pub async fn load(snapshot: &Snapshot) -> Self {
         let mut registry = Self::from_snapshot(snapshot);
-        for source in snapshot.items::<ToolSources>() {
-            registry.tools.extend(source.tools().await.into_iter().map(|tool| (tool.name().to_owned(), tool)));
+        let sources = snapshot.items::<ToolSources>();
+        let loaded = futures::future::join_all(sources.iter().map(|source| source.tools())).await;
+        for tools in loaded {
+            registry.tools.extend(tools.into_iter().map(|tool| (tool.name().to_owned(), tool)));
         }
         registry
     }
@@ -398,7 +403,10 @@ pub(crate) fn to_crlf(text: &str) -> String {
 /// - 原文件的权限照搬；只读的文件照旧拒绝写（改名本身不看文件权限，不能借此绕过）。
 /// - 路径是符号链接时写到它指向的文件，链接本身保留。
 /// - 临时文件建不了（目录不可写）或改名失败（Windows 上文件正被别的程序打开）时退回直接写入。
-pub(crate) async fn write_atomic(path: PathBuf, content: String) -> std::io::Result<()> {
+///
+/// 内容可以是 `Arc<String>`：调用方写完还要用它算差异时，不用为写盘再复制一份。
+pub(crate) async fn write_atomic(path: PathBuf, content: impl Into<Arc<String>>) -> std::io::Result<()> {
+    let content = content.into();
     tokio::task::spawn_blocking(move || write_atomic_blocking(&path, content.as_bytes())).await.map_err(std::io::Error::other)?
 }
 
@@ -527,6 +535,56 @@ mod tests {
         assert_eq!(access(&ctx, "read_file", serde_json::json!({"path": secret})), Access::Read);
     }
 
+    #[tokio::test]
+    async fn tool_sources_load_concurrently_and_later_ones_win() {
+        struct Named(&'static str, &'static str);
+        #[async_trait::async_trait]
+        impl Tool for Named {
+            fn name(&self) -> &str {
+                self.0
+            }
+            fn description(&self) -> &str {
+                self.1
+            }
+            fn input_schema(&self) -> Value {
+                serde_json::json!({})
+            }
+            async fn execute(&self, _input: Value, _ctx: &ToolContext) -> ToolOutput {
+                ToolOutput::ok("")
+            }
+        }
+        /// 第一次问时要“连接”一会儿的来源。
+        struct Slow(&'static str);
+        #[async_trait::async_trait]
+        impl ToolSource for Slow {
+            async fn tools(&self) -> Vec<Arc<dyn Tool>> {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                vec![Arc::new(Named("shared", self.0)), Arc::new(Named(self.0, self.0))]
+            }
+        }
+        struct Sources;
+        impl dshr_context::Plugin for Sources {
+            fn manifest(&self) -> dshr_context::Manifest {
+                dshr_context::Manifest::new("test-sources")
+            }
+            fn apply(&self, cx: &mut dshr_context::Scope) -> anyhow::Result<()> {
+                for name in ["a", "b", "c"] {
+                    cx.contribute::<ToolSources>(Arc::new(Slow(name)));
+                }
+                Ok(())
+            }
+        }
+        let plugins = dshr_context::Context::new();
+        plugins.add(Sources).unwrap();
+
+        let started = std::time::Instant::now();
+        let registry = ToolRegistry::load(&plugins.snapshot()).await;
+        assert!(started.elapsed() < std::time::Duration::from_millis(800), "来源是逐个等的：{:?}", started.elapsed());
+        let names: Vec<_> = registry.specs().into_iter().map(|spec| spec.name).collect();
+        assert_eq!(names, ["a", "b", "c", "shared"]);
+        assert_eq!(registry.get("shared").unwrap().description(), "c");
+    }
+
     #[test]
     fn line_endings() {
         assert!(is_crlf("a\r\nb\r\n") && is_crlf("a\r\nb"));
@@ -543,16 +601,16 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt as _;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o751)).unwrap();
-            write_atomic(path.clone(), "new".into()).await.unwrap();
+            write_atomic(path.clone(), String::from("new")).await.unwrap();
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o751);
 
             // 写链接：内容进了它指向的文件，链接还是链接。
             std::os::unix::fs::symlink(&path, dir.path().join("link")).unwrap();
-            write_atomic(dir.path().join("link"), "via link".into()).await.unwrap();
+            write_atomic(dir.path().join("link"), String::from("via link")).await.unwrap();
             assert!(std::fs::symlink_metadata(dir.path().join("link")).unwrap().file_type().is_symlink());
             assert_eq!(std::fs::read_to_string(&path).unwrap(), "via link");
         }
-        write_atomic(dir.path().join("fresh.txt"), "x".into()).await.unwrap();
+        write_atomic(dir.path().join("fresh.txt"), String::from("x")).await.unwrap();
         assert_eq!(std::fs::read_to_string(dir.path().join("fresh.txt")).unwrap(), "x");
 
         // 只读文件照旧拒绝，内容不变。
@@ -561,7 +619,7 @@ mod tests {
         let mut permissions = std::fs::metadata(&locked).unwrap().permissions();
         permissions.set_readonly(true);
         std::fs::set_permissions(&locked, permissions).unwrap();
-        assert!(write_atomic(locked.clone(), "nope".into()).await.is_err());
+        assert!(write_atomic(locked.clone(), String::from("nope")).await.is_err());
         assert_eq!(std::fs::read_to_string(&locked).unwrap(), "keep");
 
         let leftovers: Vec<_> = std::fs::read_dir(dir.path())

@@ -3,12 +3,14 @@
 //! 线上协议的流式增量没有“内容块”概念，这里用 [`OpenAiStream`] 把它们折算成
 //! 与 Messages API 相同的 [`StreamEvent`] 序列，上层无需区分协议。
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use dshr_core::{ContentBlock, Role, StopReason};
+use dshr_core::{ContentBlock, ImageSource, Role, StopReason};
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::Value;
 
 use crate::types::{BlockKind, ChatRequest, EventStream, LlmError, Provider, StreamEvent, UsageUpdate};
 
@@ -125,104 +127,202 @@ where
     Box::pin(stream)
 }
 
-pub(crate) fn request_body(request: &ChatRequest) -> Value {
-    let mut body = json!({
-        "model": request.model,
-        "messages": to_openai_messages(request),
-        "stream": true,
-        "stream_options": {"include_usage": true},
-    });
-    if let Some(max_tokens) = request.max_tokens {
-        body["max_tokens"] = max_tokens.into();
-    }
-    if let Some(effort) = request.effort {
-        body["reasoning_effort"] = effort.as_str().into();
-    }
-    if !request.tools.is_empty() {
-        body["tools"] = request
+/// 请求体。字段都借用 [`ChatRequest`] 里的数据，直接序列化：不先复制成一棵 `Value` 树（每一步都要发整段上下文，
+/// 里面可能有整份文件内容和图片），图片的 data URI、工具参数的 JSON 字符串也是序列化时直接写出。
+pub(crate) fn request_body(request: &ChatRequest) -> WireRequest<'_> {
+    WireRequest {
+        model: &request.model,
+        messages: to_openai_messages(request),
+        stream: true,
+        stream_options: StreamOptions { include_usage: true },
+        max_tokens: request.max_tokens,
+        reasoning_effort: request.effort.map(|effort| effort.as_str()),
+        tools: request
             .tools
             .iter()
-            .map(|tool| {
-                json!({
-                    "type": "function",
-                    "function": {"name": tool.name, "description": tool.description, "parameters": tool.input_schema},
-                })
+            .map(|tool| WireTool {
+                kind: "function",
+                function: WireFunction { name: &tool.name, description: &tool.description, parameters: &tool.input_schema },
             })
-            .collect();
+            .collect(),
     }
-    body
+}
+
+#[derive(Serialize)]
+pub(crate) struct WireRequest<'a> {
+    model: &'a str,
+    messages: Vec<WireMessage<'a>>,
+    stream: bool,
+    stream_options: StreamOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<WireTool<'a>>,
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Serialize)]
+struct WireTool<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: WireFunction<'a>,
+}
+
+#[derive(Serialize)]
+struct WireFunction<'a> {
+    name: &'a str,
+    description: &'a str,
+    parameters: &'a Value,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "role", rename_all = "lowercase")]
+enum WireMessage<'a> {
+    System {
+        content: &'a str,
+    },
+    User {
+        content: UserContent<'a>,
+    },
+    Assistant {
+        /// 没有文本时发 `null`（不能省略）。
+        content: Option<Cow<'a, str>>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        tool_calls: Vec<WireCall<'a>>,
+    },
+    Tool {
+        tool_call_id: &'a str,
+        content: &'a str,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum UserContent<'a> {
+    Text(Cow<'a, str>),
+    Parts(Vec<UserPart<'a>>),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum UserPart<'a> {
+    Text { text: Cow<'a, str> },
+    ImageUrl { image_url: ImageUrl<'a> },
+}
+
+#[derive(Serialize)]
+struct ImageUrl<'a> {
+    url: DataUri<'a>,
+}
+
+/// `data:<media type>;base64,<data>`，序列化时直接写出，不先拼成字符串。
+struct DataUri<'a>(&'a ImageSource);
+
+impl Serialize for DataUri<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&format_args!("data:{};base64,{}", self.0.media_type, self.0.data))
+    }
+}
+
+#[derive(Serialize)]
+struct WireCall<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: WireCallFunction<'a>,
+}
+
+#[derive(Serialize)]
+struct WireCallFunction<'a> {
+    name: &'a str,
+    /// 参数是 JSON 文本（字符串），序列化时直接写出。
+    arguments: JsonText<'a>,
+}
+
+struct JsonText<'a>(&'a Value);
+
+impl Serialize for JsonText<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self.0)
+    }
+}
+
+/// 消息里的文本块，用空行连起来；只有一块时直接借用。
+fn joined_text(content: &[ContentBlock]) -> Cow<'_, str> {
+    let mut texts = content.iter().filter_map(|block| match block {
+        ContentBlock::Text { text } => Some(&**text),
+        _ => None,
+    });
+    let Some(first) = texts.next() else { return Cow::Borrowed("") };
+    match texts.next() {
+        None => Cow::Borrowed(first),
+        Some(second) => {
+            let mut joined = format!("{first}\n\n{second}");
+            for text in texts {
+                joined.push_str("\n\n");
+                joined.push_str(text);
+            }
+            Cow::Owned(joined)
+        }
+    }
 }
 
 /// 内容块 → OpenAI 消息：工具结果拆成独立的 `tool` 消息，且排在同一条用户消息的文本之前；
 /// 思考内容不回传。
-fn to_openai_messages(request: &ChatRequest) -> Vec<Value> {
+fn to_openai_messages(request: &ChatRequest) -> Vec<WireMessage<'_>> {
     let mut messages = Vec::new();
     if let Some(system) = &request.system {
-        messages.push(json!({"role": "system", "content": system}));
+        messages.push(WireMessage::System { content: system });
     }
     for message in &request.messages {
-        let text: String = message
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text } => Some(&**text),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let text = joined_text(&message.content);
         match message.role {
             Role::User => {
                 for block in &message.content {
                     if let ContentBlock::ToolResult { tool_use_id, content, .. } = block {
-                        messages.push(json!({"role": "tool", "tool_call_id": tool_use_id, "content": content}));
+                        messages.push(WireMessage::Tool { tool_call_id: tool_use_id, content });
                     }
                 }
                 // 图片（工具交回的）跟在工具消息后面，作为一条带 image_url 的 user 消息。
-                let images: Vec<Value> = message
+                let images: Vec<UserPart<'_>> = message
                     .content
                     .iter()
                     .filter_map(|block| match block {
-                        ContentBlock::Image { source } => Some(json!({
-                            "type": "image_url",
-                            "image_url": {"url": format!("data:{};base64,{}", source.media_type, source.data)},
-                        })),
+                        ContentBlock::Image { source } => Some(UserPart::ImageUrl { image_url: ImageUrl { url: DataUri(source) } }),
                         _ => None,
                     })
                     .collect();
                 if images.is_empty() {
                     if !text.is_empty() {
-                        messages.push(json!({"role": "user", "content": text}));
+                        messages.push(WireMessage::User { content: UserContent::Text(text) });
                     }
                 } else {
-                    let mut parts = Vec::new();
+                    let mut parts = Vec::with_capacity(images.len() + 1);
                     if !text.is_empty() {
-                        parts.push(json!({"type": "text", "text": text}));
+                        parts.push(UserPart::Text { text });
                     }
                     parts.extend(images);
-                    messages.push(json!({"role": "user", "content": parts}));
+                    messages.push(WireMessage::User { content: UserContent::Parts(parts) });
                 }
             }
             Role::Assistant => {
-                let calls: Vec<Value> = message
+                let tool_calls = message
                     .content
                     .iter()
                     .filter_map(|block| match block {
-                        ContentBlock::ToolUse { id, name, input } => Some(json!({
-                            "id": id,
-                            "type": "function",
-                            "function": {"name": name, "arguments": input.to_string()},
-                        })),
+                        ContentBlock::ToolUse { id, name, input } => {
+                            Some(WireCall { id, kind: "function", function: WireCallFunction { name, arguments: JsonText(input) } })
+                        }
                         _ => None,
                     })
                     .collect();
-                let mut assistant = json!({
-                    "role": "assistant",
-                    "content": if text.is_empty() { Value::Null } else { Value::String(text) },
-                });
-                if !calls.is_empty() {
-                    assistant["tool_calls"] = Value::Array(calls);
-                }
-                messages.push(assistant);
+                messages.push(WireMessage::Assistant { content: (!text.is_empty()).then_some(text), tool_calls });
             }
         }
     }
@@ -360,6 +460,54 @@ mod tests {
     use crate::accumulate::MessageAccumulator;
     use crate::types::{ReasoningEffort, ToolSpec};
     use dshr_core::Message;
+    use serde_json::json;
+
+    #[test]
+    fn images_and_multiple_text_blocks() {
+        let image = ImageSource { kind: "base64".into(), media_type: "image/png".into(), data: "QUJD".into() };
+        let request = ChatRequest {
+            model: "gpt".into(),
+            system: None,
+            messages: vec![
+                Message {
+                    role: Role::User,
+                    content: vec![
+                        ContentBlock::ToolResult { tool_use_id: "c1".into(), content: "截图".into(), is_error: false },
+                        ContentBlock::Image { source: image },
+                        ContentBlock::text("看看"),
+                        ContentBlock::text("这个"),
+                    ],
+                },
+                Message {
+                    role: Role::Assistant,
+                    content: vec![
+                        ContentBlock::text("好"),
+                        ContentBlock::ToolUse { id: "c2".into(), name: "w".into(), input: json!({"text": "a\"b"}).into() },
+                    ],
+                },
+            ],
+            tools: Vec::new(),
+            max_tokens: Some(10),
+            effort: None,
+        };
+        let body = serde_json::to_value(request_body(&request)).unwrap();
+        assert_eq!(
+            body["messages"],
+            json!([
+                {"role": "tool", "tool_call_id": "c1", "content": "截图"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "看看\n\n这个"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+                ]},
+                {"role": "assistant", "content": "好", "tool_calls": [
+                    {"id": "c2", "type": "function", "function": {"name": "w", "arguments": r#"{"text":"a\"b"}"#}}
+                ]},
+            ])
+        );
+        assert_eq!(body["max_tokens"], 10);
+        assert!(body.get("tools").is_none() && body.get("reasoning_effort").is_none());
+        assert_eq!(body["stream_options"], json!({"include_usage": true}));
+    }
 
     #[test]
     fn folds_deltas_into_blocks() {
@@ -462,7 +610,7 @@ mod tests {
             max_tokens: None,
             effort: Some(ReasoningEffort::High),
         };
-        let body = request_body(&request);
+        let body = serde_json::to_value(request_body(&request)).unwrap();
         assert_eq!(
             body["messages"],
             json!([
