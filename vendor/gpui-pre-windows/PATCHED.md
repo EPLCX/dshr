@@ -32,6 +32,18 @@ resize 里没有用 `ClearState()`：它会清掉初始化时只设置一次的�
 
 不打补丁时，窗口平时约 20MB，拖动一次之后会一直停在约 60MB。
 
+### Windows 10 上自绘标题栏时去掉左、右、下三边的边框线
+
+`src/events.rs` 的 `handle_calc_client_size`：隐藏系统标题栏（`appears_transparent`）时，客户区向上延伸到
+窗口顶端，左、右、下仍保留 `DefWindowProcW` 算出的边框。Windows 10 上这段边框外侧是看不见的调整大小区域，
+最里面 1 像素是 DWM 画的窗口边框线（约 `#707070`）。顶上那条被客户区盖住了，于是只剩左、右、下三条线，
+看着不对称。
+
+补丁：窗口不是最大化、并且系统是 Windows 10（内部版本号 < 22000，`is_windows_10`，只查一次）时，客户区在左、右、
+下各多延伸 1 物理像素（`WINDOWS_10_BORDER`），把这条线也盖住，四边都只剩 DWM 的阴影。调整大小的命中区域从
+8 像素变成 7 像素（96 DPI），仍由 `DefWindowProcW` 处理。Windows 11 的边框由 DWM 画在客户区上面、四边都有，
+不受影响，所以不改。
+
 ## 升级 gpui-pre 时
 
 先看上游 `DirectXRenderer::resize` 是否已经解绑并 Flush；已经修复就删掉 `vendor/gpui-pre-windows`

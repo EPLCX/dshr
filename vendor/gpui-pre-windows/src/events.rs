@@ -853,6 +853,17 @@ impl WindowsWindowInner {
             if self.state.is_maximized() {
                 let dpi = GetDpiForWindow(handle);
                 (*params).rgrc[0].top += get_frame_thicknessx(dpi);
+            } else if is_windows_10() {
+                // dshr patch: on Windows 10 the DWM draws a 1px window border in the innermost pixel of
+                // the left/right/bottom frame (the rest of the frame is the invisible resize area). The
+                // top frame now belongs to the client area, so the top border is gone while the other
+                // three remain. Extend the client area over that pixel on the other sides too, so the
+                // window has no border on any side (only the DWM shadow). Windows 11 draws its border
+                // over the client area on all four sides, so it is left alone there.
+                let rect = &mut (*params).rgrc[0];
+                rect.left -= WINDOWS_10_BORDER;
+                rect.right += WINDOWS_10_BORDER;
+                rect.bottom += WINDOWS_10_BORDER;
             }
             Some(result.0 as isize)
         }
@@ -1857,6 +1868,23 @@ pub(crate) fn current_modifiers() -> Modifiers {
 pub(crate) fn current_capslock() -> Capslock {
     let on = unsafe { GetKeyState(VK_CAPITAL.0 as i32) & 1 } > 0;
     Capslock { on }
+}
+
+/// Width of the visible window border the DWM draws on Windows 10, in physical pixels at any DPI.
+const WINDOWS_10_BORDER: i32 = 1;
+
+/// Windows 10 (build < 22000); Windows 11 draws the window border differently (see `handle_calc_client_size`).
+fn is_windows_10() -> bool {
+    static IS_WINDOWS_10: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IS_WINDOWS_10.get_or_init(|| {
+        use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+        let mut version = OSVERSIONINFOW {
+            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
+            ..Default::default()
+        };
+        let status = unsafe { windows::Wdk::System::SystemServices::RtlGetVersion(&mut version) };
+        status.is_ok() && version.dwBuildNumber < 22000
+    })
 }
 
 // there is some additional non-visible space when talking about window
