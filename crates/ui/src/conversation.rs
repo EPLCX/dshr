@@ -85,10 +85,15 @@ const ANNOUNCE_AFTER_SEND: Duration = Duration::from_millis(400);
 /// 输入卡片外面那一层的 id（首页和对话页共用，见 `render`）。
 const COMPOSER_SLOT: &str = "composer-slot";
 
-/// 输入卡片下方选项行（工作区、预设、权限）里每个按钮最窄收到这么宽：图标 + 箭头，标签全部变成省略号。
+/// 打开会话时分段重放日志：每段在界面线程上最多占这么久，然后让出一帧。
+const REPLAY_SLICE: Duration = Duration::from_millis(8);
+/// 每检查一次时间之间重放的事件数。
+const REPLAY_STEP: usize = 64;
+
+/// 工作区标签和输入卡片下方选项行（预设、权限）里每个按钮最窄收到这么宽：图标 + 箭头，标签全部变成省略号。
 const OPTION_MIN_WIDTH: f32 = 44.;
 
-/// 选项行里的按钮。
+/// 工作区标签和选项行里的按钮。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OptionSlot {
     Workspace,
@@ -619,39 +624,80 @@ impl ConversationView {
                 if this.session_id.as_deref() != Some(id.as_str()) {
                     return;
                 }
-                this.loading = false;
                 match opened {
                     Ok((session, views)) => {
-                        if let Some(stored) = session.stored_options() {
-                            this.apply_stored_options(&stored);
-                        }
-                        // 打开已有会话后，再在输入卡片上改选项时直接写回日志（见 `persist_options`）。
-                        let (event_tx, events) = mpsc::unbounded_channel();
-                        this.ui_event_sink = Some(event_tx);
-                        cx.spawn(async move |_, _cx| {
-                            // 实时事件由界面线程丢掉：对话区已经整份重放过日志。
-                            let mut events = events;
-                            while events.recv().await.is_some() {}
+                        // 日志在界面线程上分段重放（行里有插件的 `Rc`，不能放到后台线程）：每段最多占 [`REPLAY_SLICE`]，
+                        // 段与段之间让出，界面照常重画、响应输入（如收起侧边栏的动画）。放完之前 `loading` 保持为真。
+                        let transcript = Transcript::new(this.ui.clone()).with_plugin_views(views);
+                        let id = id.clone();
+                        cx.spawn(async move |this, cx| {
+                            let mut transcript = transcript;
+                            let total = session.events().len();
+                            let mut at = 0;
+                            while at < total {
+                                let started = std::time::Instant::now();
+                                while at < total && started.elapsed() < REPLAY_SLICE {
+                                    let end = (at + REPLAY_STEP).min(total);
+                                    transcript.replay_part(&session.events()[at..end]);
+                                    at = end;
+                                }
+                                if at < total {
+                                    // 让出一下：这期间可以画一帧、处理输入。
+                                    cx.background_executor().timer(Duration::from_millis(1)).await;
+                                    // 读的时候换了别的会话：作废。
+                                    let current =
+                                        this.read_with(cx, |this, _| this.session_id.as_deref() == Some(id.as_str())).unwrap_or(false);
+                                    if !current {
+                                        return;
+                                    }
+                                }
+                            }
+                            transcript.finish_replay();
+                            this.update(cx, |this, cx| this.finish_open(&id, session, transcript, cx)).ok();
                         })
                         .detach();
-                        this.transcript = Transcript::new(this.ui.clone()).with_plugin_views(views).replay(session.events());
-                        this.session = Some(session);
-                        this.error = this.error_after_open.take().filter(|(session, _)| *session == id).map(|(_, error)| error);
-                        this.message_focus.clear();
-                        this.current_message = None;
-                        let rows = this.transcript.rows.len();
-                        this.list.update(cx, |list, cx| {
-                            list.reset(rows, cx);
-                            list.scroll_to_end(cx);
-                        });
                     }
-                    Err(error) => this.error = Some(t!("conversation.open_failed", error = error).to_string()),
+                    Err(error) => {
+                        this.loading = false;
+                        this.error = Some(t!("conversation.open_failed", error = error).to_string());
+                    }
                 }
                 cx.notify();
             })
             .ok();
         })
         .detach();
+        cx.notify();
+    }
+
+    /// 日志重放完：换上对话内容，滚到底部。
+    fn finish_open(&mut self, id: &str, session: dshr_agent::Session, transcript: Transcript, cx: &mut Context<Self>) {
+        if self.session_id.as_deref() != Some(id) {
+            return;
+        }
+        self.loading = false;
+        if let Some(stored) = session.stored_options() {
+            self.apply_stored_options(&stored);
+        }
+        // 打开已有会话后，再在输入卡片上改选项时直接写回日志（见 `persist_options`）。
+        let (event_tx, events) = mpsc::unbounded_channel();
+        self.ui_event_sink = Some(event_tx);
+        cx.spawn(async move |_, _cx| {
+            // 实时事件由界面线程丢掉：对话区已经整份重放过日志。
+            let mut events = events;
+            while events.recv().await.is_some() {}
+        })
+        .detach();
+        self.transcript = transcript;
+        self.session = Some(session);
+        self.error = self.error_after_open.take().filter(|(session, _)| *session == id).map(|(_, error)| error);
+        self.message_focus.clear();
+        self.current_message = None;
+        let rows = self.transcript.rows.len();
+        self.list.update(cx, |list, cx| {
+            list.reset(rows, cx);
+            list.scroll_to_end(cx);
+        });
         cx.notify();
     }
 
@@ -1427,7 +1473,7 @@ impl ConversationView {
         };
         let name = t!("a11y.choice", group = t!("a11y.workspace_chip"), value = label).to_string();
         let focus = option_focus(OptionSlot::Workspace, window, cx);
-        // 外面再包一层可收缩的容器：选项行放不下时和预设、权限一起变窄。
+        // 外面再包一层可收缩的容器：窗口窄、文件夹名又长时变窄，名字末尾显示省略号。
         div()
             .flex()
             .flex_shrink(1.)
@@ -2223,7 +2269,9 @@ impl ConversationView {
     /// 卡片里只有附件、“+”、文本框和发送按钮；工作区、预设、权限、模型放在卡片下方一行，
     /// 层级上与输入内容分开（参考 ChatGPT、Claude 的输入区）。
     fn render_composer(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let workspace_chip = self.render_context_bar(window, cx);
+        // 工作区只在新会话（首页）里能选，放在输入卡片上方；会话开始后工作区就定了，不再占选项行的位置。
+        let home = self.shows_home();
+        let workspace_chip = home.then(|| self.render_context_bar(window, cx));
         let queue = self.render_queue(cx);
         let panels = self.render_panels(window, cx);
         let slash_menu = self.render_slash_menu(cx).or_else(|| self.render_mention_menu(cx));
@@ -2241,11 +2289,7 @@ impl ConversationView {
             None
         };
         // 选项行放不下时横向滚动：用键盘移到一个被挡住的按钮上，把它滚进来。
-        let slots = [
-            Some(OptionSlot::Workspace),
-            preset_menu.is_some().then_some(OptionSlot::Preset),
-            permission_menu.is_some().then_some(OptionSlot::Permission),
-        ];
+        let slots = [preset_menu.is_some().then_some(OptionSlot::Preset), permission_menu.is_some().then_some(OptionSlot::Permission)];
         if let Some(index) = slots.iter().flatten().position(|slot| option_focus(*slot, window, cx).is_focused(window)) {
             self.options_scroll.scroll_to_item(index);
         }
@@ -2281,10 +2325,13 @@ impl ConversationView {
                 "composer-error-enter",
             ));
         }
+        if let Some(chip) = workspace_chip {
+            column = column.child(h_flex().px(px(space::XS)).child(chip));
+        }
         if self.workspace.is_none() {
             column = column.child(div().px(px(space::XS)).child(hint(t!("conversation.no_workspace_hint").to_string(), Tone::Neutral, &p)));
         }
-        // 选项行：左边工作区、预设、权限（放不下时先收缩、再横向滚动），右边模型始终完整显示。
+        // 选项行：左边预设、权限（放不下时先收缩、再横向滚动），右边模型始终完整显示。
         let options = h_flex()
             .w_full()
             .min_h(px(size::CONTROL_SM))
@@ -2298,7 +2345,6 @@ impl ConversationView {
                     .gap(px(space::XS))
                     .overflow_x_scroll()
                     .track_scroll(&self.options_scroll)
-                    .child(workspace_chip)
                     .children(preset_menu)
                     .children(permission_menu),
             )

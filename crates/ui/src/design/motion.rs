@@ -591,6 +591,11 @@ pub fn tween(id: impl Into<ElementId>, target: f32, window: &mut Window, cx: &mu
     gpui_kit::base::motion::transition(TransitionId::from(id.into()), target, Transition::new(FAST).easing(STANDARD), window, cx)
 }
 
+/// 同 [`tween`]，时长另给（如侧边栏收起、展开用 [`BASE`]）。
+pub fn tween_for(id: impl Into<ElementId>, target: f32, duration: Duration, window: &mut Window, cx: &mut App) -> f32 {
+    gpui_kit::base::motion::transition(TransitionId::from(id.into()), target, Transition::new(duration).easing(STANDARD), window, cx)
+}
+
 /// 四分之一圈（收起朝右的箭头展开后朝下）。
 pub const QUARTER_TURN: f32 = FRAC_PI_2;
 /// 半圈（收起朝上的箭头展开后朝下）。

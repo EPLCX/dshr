@@ -2365,8 +2365,10 @@ impl Render for WorkspaceView {
             self.sidebar_drawer &= narrow;
             self.sidebar.update(cx, |_, cx| cx.notify());
         }
-        // 收起、展开侧边栏即时切换宽度（布局变化不做动画，对话区不用逐帧重排）。
-        let sidebar_width = if self.rail_shown() { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH };
+        // 收起、展开侧边栏时宽度过渡（`BASE`，标准曲线；减少动态效果时即时）。外层按当前宽度裁切，
+        // 里面按收起或展开后的宽度排版（见 `render_sidebar`），内容不会被挤得换行。
+        let expanded = motion::tween_for("sidebar-width", if self.rail_shown() { 0. } else { 1. }, motion::BASE, window, cx);
+        let sidebar_width = size::SIDEBAR_RAIL_WIDTH + (size::SIDEBAR_WIDTH - size::SIDEBAR_RAIL_WIDTH) * expanded;
         if (self.sidebar_width.get() - sidebar_width).abs() > f32::EPSILON {
             self.sidebar_width.set(sidebar_width);
             // 缓存的侧边栏按新宽度重画。

@@ -327,13 +327,24 @@ impl Transcript {
         Self::new(ui).replay(events)
     }
 
-    /// 把历史事件依次放进来；之后没有待通知的变化。
+    /// 把历史事件依次放进来；之后没有待通知的变化。界面上打开会话时分段放（见 `ConversationView::open_session`）。
+    #[cfg(test)]
     pub fn replay<'a>(mut self, events: impl IntoIterator<Item = &'a SessionEvent>) -> Self {
+        self.replay_part(events);
+        self.finish_replay();
+        self
+    }
+
+    /// 分段重放：放进一段历史事件（长会话分几帧放完，界面不卡）。全部放完后调用 [`Self::finish_replay`]。
+    pub fn replay_part<'a>(&mut self, events: impl IntoIterator<Item = &'a SessionEvent>) {
         for event in events {
             self.apply_durable(event);
         }
+    }
+
+    /// 分段重放结束：重放过程中记下的变化不用通知（界面拿到的是完整的结果）。
+    pub fn finish_replay(&mut self) {
         self.dirty.clear();
-        self
     }
 
     /// 不在行里的界面状态（面板据此渲染）。
@@ -1225,6 +1236,37 @@ mod tests {
         // 从历史重建的记录没有待通知的变化。
         let events = [SessionEvent { seq: 1, time: 0, body: EventBody::UserMessage { text: "hi".into() } }];
         assert!(Transcript::from_events(Rc::default(), &events).take_dirty().is_empty());
+    }
+
+    /// 打开会话时分段重放（每段长短不一，可能把一轮从中间切开），结果和一次放完一样。
+    #[test]
+    fn replaying_in_parts_matches_replaying_at_once() {
+        let mut events = Vec::new();
+        for turn in 0..20u32 {
+            let seq = |offset: u64| u64::from(turn) * 4 + offset;
+            events
+                .push(SessionEvent { seq: seq(0), time: 0, body: EventBody::UserMessage { text: format!("第 {turn} 个问题").into() } });
+            events.push(SessionEvent {
+                seq: seq(1),
+                time: 0,
+                body: EventBody::ToolCall { call_id: format!("c{turn}"), name: "run_shell".into(), input: json!({}).into() },
+            });
+            events.push(SessionEvent {
+                seq: seq(2),
+                time: 0,
+                body: EventBody::TurnEnd { turn, reason: TurnEndReason::Completed, error: None },
+            });
+        }
+        let whole = Transcript::from_events(builtin_ui(), &events);
+        for step in [1, 2, 5, 7, 64] {
+            let mut parts = Transcript::new(builtin_ui());
+            for chunk in events.chunks(step) {
+                parts.replay_part(chunk);
+            }
+            parts.finish_replay();
+            assert_eq!(format!("{:?}", parts.rows), format!("{:?}", whole.rows), "每段 {step} 个事件");
+            assert!(parts.take_dirty().is_empty());
+        }
     }
 
     #[test]
