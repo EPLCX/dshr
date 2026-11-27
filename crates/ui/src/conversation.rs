@@ -21,6 +21,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::design::ControlSize as _;
+use crate::design::HoverFill as _;
 use gpui_kit::component::Sizable as _;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -29,8 +30,8 @@ use crate::announce::{announce, announce_after};
 use crate::backend::{Backend, ModelChoice, TurnOptions, UiApprover};
 use crate::design::motion::Edge;
 use crate::design::{
-    MenuFocus, Tone, Typography as _, badge, brand_mark, card, description, divider, heading, hint, hover_fill, menu_choice, menu_item,
-    menu_popover, mono_font, motion, palette, pressable, radius, readable_with_id, size, space, truncated, with_focus_ring,
+    MenuFocus, Tone, Typography as _, badge, brand_mark, card, description, divider, heading, hint, menu_choice, menu_item, menu_popover,
+    mono_font, motion, palette, pressable, radius, readable_with_id, size, space, truncated, with_focus_ring,
 };
 use crate::plugin::{ComposerControl, PanelContext, UiRegistry};
 use crate::transcript::{PluginViewResolver, Row, ToolRow, ToolStatus, Transcript, TurnFooter, tail_lines};
@@ -931,7 +932,7 @@ impl ConversationView {
                 .px(px(space::S))
                 .rounded(px(radius::SM))
                 .cursor_pointer()
-                .child(hover_fill(&p, radius::SM, false))
+                .hover_fill(&p, radius::SM, false)
                 .child(div().flex_none().text_caption().text_color(p.text_secondary).child(source))
                 .child(div().flex_none().text_label().child(row.item.title.clone()))
                 .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(detail))
@@ -968,7 +969,7 @@ impl ConversationView {
                 .px(px(space::S))
                 .rounded(px(radius::SM))
                 .cursor_pointer()
-                .child(hover_fill(&p, radius::SM, false))
+                .hover_fill(&p, radius::SM, false)
                 .child(div().flex_none().text_label().text_mono(mono_font(cx)).child(label))
                 .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(item.description.clone()))
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -1546,7 +1547,7 @@ impl ConversationView {
                     .items_start()
                     .rounded(px(radius::SM))
                     .cursor_pointer()
-                    .child(hover_fill(&p, radius::SM, false))
+                    .hover_fill(&p, radius::SM, false)
                     .child(Icon::new(permission_icon(mode)).size(px(size::ICON_MD)).mt(px(2.)))
                     .child(
                         // min_w(0) 让说明在菜单宽度内换行，而不是把菜单撑开。
@@ -1638,7 +1639,7 @@ impl ConversationView {
                         .items_start()
                         .rounded(px(radius::SM))
                         .cursor_pointer()
-                        .child(hover_fill(&p, radius::SM, false))
+                        .hover_fill(&p, radius::SM, false)
                         .child(Icon::new(preset_icon(preset)).size(px(size::ICON_MD)).mt(px(2.)))
                         .child(v_flex().flex_1().min_w(px(0.)).child(div().text_label().child(preset_label(preset))).child(hint(
                             preset_description(preset),
@@ -1678,7 +1679,7 @@ impl ConversationView {
                     .items_start()
                     .rounded(px(radius::SM))
                     .cursor_pointer()
-                    .child(hover_fill(&p, radius::SM, false))
+                    .hover_fill(&p, radius::SM, false)
                     .child(Icon::new(IconName::Bot).size(px(size::ICON_MD)).mt(px(2.)))
                     .child(
                         v_flex()
@@ -2062,7 +2063,6 @@ impl ConversationView {
                     motion::highlight("send-state", transparent_black(), size::CONTROL_SM / 2., false)
                         .hover_color(white().opacity(0.14))
                         .pressed_color(black().opacity(0.14))
-                        .smooth()
                         .outset(2.),
                 )
             });
@@ -2491,7 +2491,7 @@ impl ConversationView {
                         .rounded(px(radius::MD))
                         .cursor_pointer()
                         .when(active, |item| item.bg(p.selected))
-                        .child(hover_fill(&p, radius::MD, false))
+                        .hover_fill(&p, radius::MD, false)
                         .child(
                             div()
                                 .w(px(size::ICON_MD))
@@ -2834,7 +2834,7 @@ impl ConversationView {
             .cursor_pointer()
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx))
             .relative()
-            .child(hover_fill(&p, size::CONTROL_MD / 2., false).smooth())
+            .hover_fill(&p, size::CONTROL_MD / 2., false)
             .child(Icon::new(IconName::ArrowDown).size(px(size::ICON_MD)))
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_latest(window, cx)));
         let row = div().absolute().left_0().right_0().bottom(px(space::L)).flex().justify_center().child(button);
@@ -3360,7 +3360,7 @@ impl ConversationView {
             .gap(px(space::S))
             .cursor_pointer()
             .relative()
-            .child(hover_fill(&p, radius::LG, false))
+            .hover_fill(&p, radius::LG, false)
             .on_click(cx.listener(move |this, _, _, cx| {
                 let expanded = this.transcript.toggle_tool(&toggle_id);
                 this.sync_rows(cx);

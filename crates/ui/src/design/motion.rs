@@ -1,7 +1,7 @@
 //! 动效。规则见 `docs/design.md` §5.5；这里是唯一的实现位置，视图不直接写时长、缓动和位移。
 //!
-//! 基调：动效只服务于控件反馈和浮层出现。导航、换页、布局变化即时完成；按钮的悬停、按下以 `FAST` 渐变，
-//! 列表项即时；
+//! 基调：动效只服务于控件反馈和浮层出现。导航、换页、布局变化即时完成；悬停、按下以 `FAST` 渐变，
+//! 键盘移动的高亮即时；
 //! 任何动画都不推迟内容出现（没有延迟、没有错峰），不用过冲；浮层关上时立即移除，不挡输入。
 //! 任何信息都不能只靠动画表达。
 //! 开启“减少动态效果”时没有动画：元素直接以最终状态出现、消失；循环动画停在起始帧。
@@ -271,6 +271,28 @@ impl Tint {
         if let Some(color) = pressed_color.filter(|_| press > 0.) {
             window.paint_quad(fill(bounds, color.opacity(press)).corner_radii(radius));
         }
+        self.listen(hitbox, pressed_color.is_some(), window);
+    }
+
+    /// 高对比度下的组件库按钮：不叠底色（会盖住按钮自己固定颜色的文字），悬停时在内侧画 2px 描边，
+    /// 按住时加粗到 3px。即时生效。
+    pub fn paint_ring(&self, bounds: Bounds<Pixels>, radius: Pixels, color: Hsla, hitbox: &Hitbox, window: &mut Window) {
+        let state = &self.0;
+        let over = hitbox.is_hovered(window) && !window.last_input_was_touch();
+        state.hovered.set(over);
+        let width = match (over, over && state.pressed.get()) {
+            (_, true) => Some(3.),
+            (true, false) => Some(2.),
+            _ => None,
+        };
+        if let Some(width) = width {
+            window.paint_quad(quad(bounds, radius, transparent_black(), px(width), color, BorderStyle::Solid));
+        }
+        self.listen(hitbox, true, window);
+    }
+
+    /// 指针进出、按下松开时重画所在的视图（缓存的视图不会自己重画）。
+    fn listen(&self, hitbox: &Hitbox, track_press: bool, window: &mut Window) {
         let view = window.current_view();
         {
             let (hitbox, tint) = (hitbox.clone(), self.clone());
@@ -284,7 +306,7 @@ impl Tint {
                 }
             });
         }
-        if pressed_color.is_some() {
+        if track_press {
             let (hitbox, tint) = (hitbox.clone(), self.clone());
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture && event.button == MouseButton::Left && hitbox.is_hovered(window) {
@@ -306,8 +328,8 @@ impl Tint {
 /// 悬停、按下、选中时的底色，画在控件的最底层。放在控件的第一个子元素（铺满控件），控件本身不再设
 /// `bg` / `hover`。悬停按这一层自己的范围判断，被别的浮层盖住时不算悬停。
 ///
-/// 悬停、按下默认即时生效（列表行、菜单项：键盘上下移动时不拖影）；按钮用 [`Highlight::smooth`]
-/// 以 [`FAST`] 渐变。选中状态的切换可以用 [`Highlight::animate`] 要求过渡（如发送与停止之间的底色交替）。
+/// 悬停、按下以 [`FAST`] 渐变（减少动态效果时即时）。键盘移动的高亮走选中色（`active`），默认即时，
+/// 上下移动时不拖影；选中状态的切换可以用 [`Highlight::animate`] 要求过渡（如发送与停止之间的底色交替）。
 pub struct Highlight {
     id: ElementId,
     /// 选中（`active`）时的底色。
@@ -334,7 +356,7 @@ pub fn highlight(id: impl Into<ElementId>, color: Hsla, radius: f32, active: boo
         active,
         outset: px(0.),
         transition: None,
-        smooth: false,
+        smooth: true,
     }
 }
 
@@ -360,12 +382,6 @@ impl Highlight {
     /// 选中状态变化时用 `duration` 过渡（标准曲线）；默认即时。
     pub fn animate(mut self, duration: Duration) -> Self {
         self.transition = Some(duration);
-        self
-    }
-
-    /// 悬停、按下的底色以 [`FAST`] 渐变（按钮用；列表行、菜单项保持即时）。
-    pub fn smooth(mut self) -> Self {
-        self.smooth = true;
         self
     }
 

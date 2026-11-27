@@ -91,6 +91,8 @@ pub struct Palette {
     pub pressed: Hsla,
     /// 输入框、下拉触发框、描边按钮的描边（正文色 16%，比卡片描边 `border` 清楚）。高对比度时等于 `border`。
     pub control_border: Hsla,
+    /// 用的是高对比度配色：列表项悬停改用不透明的深一档底色、按钮改为加粗描边，见 [`HoverFill`]、`FocusFrame`。
+    pub high_contrast: bool,
 }
 
 pub fn palette(cx: &App) -> Palette {
@@ -111,6 +113,7 @@ fn derive_roles(p: &mut Palette, high_contrast: bool) {
     p.pressed = p.text.opacity(0.09);
     // 高对比度的 `border` 已经按 3:1 校验过，直接用它。
     p.control_border = if high_contrast { p.border } else { p.text.opacity(0.16) };
+    p.high_contrast = high_contrast;
 }
 
 /// 最近一次输入是不是来自触摸屏，由窗口的根视图每帧开头按 `Window::last_input_was_touch` 更新
@@ -299,6 +302,7 @@ fn base_palette(cx: &App, dark: bool) -> Palette {
         hover: transparent_black(),
         pressed: transparent_black(),
         control_border: transparent_black(),
+        high_contrast: false,
     }
 }
 
@@ -997,10 +1001,20 @@ impl Element for FocusFrame {
         let radius = cx.theme().radius;
         let p = palette(cx);
         if self.open {
-            window.paint_quad(fill(bounds, p.pressed).corner_radii(radius));
+            if p.high_contrast {
+                window.paint_quad(quad(bounds, radius, transparent_black(), px(2.), p.text, BorderStyle::Solid));
+            } else {
+                window.paint_quad(fill(bounds, p.pressed).corner_radii(radius));
+            }
         }
         if let (Some(hitbox), Some(tint)) = (state.tint.as_ref(), self.tint_state.as_ref()) {
-            tint.read(cx).clone().paint(bounds, radius, true, (Some(p.hover), Some(p.pressed)), hitbox, window, cx);
+            let tint = tint.read(cx).clone();
+            if p.high_contrast {
+                // 高对比度：按钮的文字颜色由组件库固定，叠不透明的底色会盖住它，改为加粗描边。
+                tint.paint_ring(bounds, radius, p.text, hitbox, window);
+            } else {
+                tint.paint(bounds, radius, true, (Some(p.hover), Some(p.pressed)), hitbox, window, cx);
+            }
         }
         let hitbox = &mut state.focus_hitbox;
         // 组件库的按钮按下鼠标时 `prevent_default`，点了也不拿焦点（为了不把焦点从输入框抢走）：
@@ -1093,12 +1107,7 @@ pub fn switch(id: impl Into<ElementId>, checked: bool, p: &Palette) -> Pressable
             inset: px(INSET),
         })
         // 悬停、按下时在轨道上叠一层（画在轨道上面，轨道是实色）。
-        .child(
-            motion::highlight("switch-state", transparent_black(), TRACK_H / 2., false)
-                .hover_color(p.hover)
-                .pressed_color(p.pressed)
-                .smooth(),
-        )
+        .child(motion::highlight("switch-state", transparent_black(), TRACK_H / 2., false).hover_color(p.hover).pressed_color(p.pressed))
 }
 
 /// 自己画焦点框的元素（不是 [`pressable`]，如会话消息、下拉框）用：按是否聚焦给它加上焦点框。
@@ -1277,17 +1286,26 @@ impl gpui_kit::component::Selectable for Pressable {
     }
 }
 
-/// 基于 [`pressable`] 的控件的悬停、按下、选中底色。作为控件的第一个子元素，控件本身不再设
-/// `bg` / `hover`；铺满整个控件（含 2px 透明焦点框），和直接设 `bg` 一样大。
-/// 悬停叠 `hover`、按住叠 `pressed`（都即时生效）；`selected` 时一直铺 `selected`（选中、菜单打开）。
-pub fn hover_fill(p: &Palette, corner: f32, selected: bool) -> motion::Highlight {
-    hover_fill_with(p.selected, p, corner, selected)
+/// 列表项、行的悬停、按下、选中底色（画在最底层的 [`motion::Highlight`]），作为行自己的方法调用。
+///
+/// 平时悬停叠 `hover`、按下叠 `pressed`（正文色 5% / 9%），以 `FAST` 渐变。高对比度时半透明的叠层在纯白、纯黑底上
+/// 几乎看不出来，改用配色里更深一档的不透明底色：悬停铺 `sunken`、按下铺 `selected`。这两种底色上的所有文字颜色
+/// 都按 7:1 校验过（见测试 `high_contrast_meets_aaa`），文字不用变色。
+pub trait HoverFill: ParentElement + InteractiveElement + Sized {
+    fn hover_fill(self, p: &Palette, corner: f32, selected: bool) -> Self {
+        self.hover_fill_with(p.selected, p, corner, selected)
+    }
+
+    /// 同 [`HoverFill::hover_fill`]，选中时的底色另给（如侧边栏里正在看的会话用强调色的浅底）。
+    fn hover_fill_with(self, selected_fill: Hsla, p: &Palette, corner: f32, selected: bool) -> Self {
+        let (hover, pressed) = if p.high_contrast { (p.sunken, p.selected) } else { (p.hover, p.pressed) };
+        self.child(
+            motion::highlight("hover-fill", selected_fill, corner, selected).hover_color(hover).pressed_color(pressed).outset(FOCUS_BORDER),
+        )
+    }
 }
 
-/// 同 [`hover_fill`]，选中时的底色另给（如侧边栏里正在看的会话用强调色的浅底）。
-pub fn hover_fill_with(selected_fill: Hsla, p: &Palette, corner: f32, selected: bool) -> motion::Highlight {
-    motion::highlight("hover-fill", selected_fill, corner, selected).hover_color(p.hover).pressed_color(p.pressed).outset(FOCUS_BORDER)
-}
+impl<T: ParentElement + InteractiveElement + Sized> HoverFill for T {}
 
 /// 导航项（设置弹窗左侧）。调用方再加 `on_click`。
 ///
@@ -1312,7 +1330,7 @@ pub fn nav_item(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Int
         .text_label()
         .relative()
         .when(!selected, |item| item.font_weight(FontWeight::NORMAL))
-        .child(hover_fill(p, radius::MD, selected))
+        .hover_fill(p, radius::MD, selected)
         .child(Icon::new(icon).size(px(size::ICON_MD)))
         .child(label)
 }
@@ -1355,7 +1373,7 @@ pub fn list_item_with_fill(
         .text_body()
         .relative()
         .when(selected, |item| item.font_weight(FontWeight::MEDIUM))
-        .child(hover_fill_with(selected_fill, p, radius::MD, selected))
+        .hover_fill_with(selected_fill, p, radius::MD, selected)
         .when_some(icon, |item, icon| item.child(Icon::new(icon).size(px(size::ICON_MD))))
         .child(div().flex_1().min_w(px(0.)).truncate().child(label))
 }
@@ -1383,7 +1401,7 @@ pub fn menu_item(
         .text_body()
         .relative()
         .when(selected, |item| item.font_weight(FontWeight::MEDIUM))
-        .child(hover_fill(p, radius::SM, false))
+        .hover_fill(p, radius::SM, false)
         .when_some(icon, |item, icon| item.child(Icon::new(icon).size(px(size::ICON_MD))))
         .child(div().flex_1().min_w(px(0.)).truncate().child(label))
 }
@@ -2148,5 +2166,21 @@ mod tests {
             let ratio = contrast(color("on_accent"), color("accent"));
             assert!(ratio >= 7., "{mode}: on_accent on accent is {ratio:.2}:1");
         }
+    }
+
+    /// 高对比度配色下调色板带着标志（列表项悬停据此改用深一档的底色、按钮改为描边），默认配色不带。
+    #[gpui::test]
+    fn palette_knows_high_contrast(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(super::PaletteOverride::default());
+            assert!(!super::palette(cx).high_contrast);
+            let theme = crate::backend::builtin_high_contrast_theme();
+            let mut over = super::PaletteOverride::parse(&theme.light, &theme.dark).unwrap();
+            over.high_contrast = true;
+            cx.set_global(over);
+            let p = super::palette(cx);
+            assert!(p.high_contrast);
+        });
     }
 }

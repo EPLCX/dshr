@@ -50,14 +50,15 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::design::ControlSize as _;
+use crate::design::HoverFill as _;
 
 pub use backend::Backend;
 pub use cards::{AccountUi, FsUi, PermissionUi, PlanUi, PresetsUi, builtin_ui_plugins};
 pub use conversation::{ConversationEvent, ConversationView};
 pub use design::Palette;
 use design::{
-    Tone, Typography as _, brand_mark, heading, hint, hover_fill, list_item, menu_popover, motion, palette, pressable, radius,
-    readable_with_id, shadow, size, space, status_dot,
+    Tone, Typography as _, brand_mark, heading, hint, list_item, menu_popover, motion, palette, pressable, radius, readable_with_id,
+    shadow, size, space, status_dot,
 };
 pub use plugin::{
     ClickHandler, ComposerControl, ComposerPanel, PageBuilder, PageContent, PanelContext, RowData, SettingsPage, SidebarAction,
@@ -1826,15 +1827,18 @@ impl WorkspaceView {
             .cursor_pointer()
             .text_label()
             .relative()
-            .child(hover_fill(&p, radius::MD, false))
-            .child(motion::turn(
-                Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)).text_color(p.text_secondary),
-                ("workspace-turn", index),
-                !collapsed,
-                motion::QUARTER_TURN,
-                window,
-                cx,
-            ))
+            .hover_fill(&p, radius::MD, false)
+            .child(
+                motion::turn(
+                    Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)),
+                    ("workspace-turn", index),
+                    !collapsed,
+                    motion::QUARTER_TURN,
+                    window,
+                    cx,
+                )
+                .text_color(p.text_secondary),
+            )
             .child(Icon::new(IconName::Folder).size(px(size::ICON_MD)).text_color(p.text_secondary))
             .child(div().flex_1().min_w(px(0.)).truncate().child(name.clone()))
             .on_click(cx.listener(move |this, _, _, cx| {

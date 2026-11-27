@@ -18,6 +18,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::design::ControlSize as _;
+use crate::design::HoverFill as _;
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
@@ -404,7 +405,7 @@ impl PluginPageView {
                                     .rounded(px(radius::MD))
                                     .cursor_pointer()
                                     // 悬停、按下底色铺满整行，带圆角。
-                                    .child(crate::design::hover_fill(&p, radius::MD, false))
+                                    .hover_fill(&p, radius::MD, false)
                                     .on_click(
                                         cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)),
                                     )
@@ -823,13 +824,13 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
             .rounded(px(radius::SM))
             .when(mark.is_some(), |cell| cell.bg(p.accent_soft))
             .child(div().text_caption().child(day.to_string()))
-            .children(mark.map(|mark| div().text_caption().text_color(p.accent).truncate().child(mark)));
+            .children(mark.map(|mark| div().text_caption().truncate().text_color(p.accent).child(mark)));
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());
-                let hover_bg = p.hover;
                 cell.cursor_pointer()
-                    .hover(move |style| style.bg(hover_bg))
+                    .relative()
+                    .hover_fill(&p, radius::SM, false)
                     .on_click(move |_, window, cx| pick(date.clone(), window, cx))
                     .into_any_element()
             }
