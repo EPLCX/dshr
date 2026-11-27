@@ -551,8 +551,8 @@ impl InstallDialog {
                 h_flex()
                     .gap(px(space::S))
                     .justify_end()
-                    .child(crate::design::framed_handle(self.cancel_focus.clone(), cancel))
-                    .child(crate::design::framed("install-allow", install)),
+                    .child(crate::design::framed_handle(self.cancel_focus.clone(), cancel).tint("install-deny"))
+                    .child(crate::design::framed("install-allow", install).inert(locked.is_some() || blocked)),
             )
     }
 }
@@ -583,13 +583,13 @@ impl Render for InstallDialog {
             .w(px(DIALOG_WIDTH))
             .max_w(relative(0.94))
             .max_h(relative(0.9))
-            .rounded(px(radius::XXL))
+            .rounded(px(radius::XL))
             .bg(p.raised)
             .border_1()
             .border_color(p.border)
             .text_color(p.text)
             .overflow_hidden()
-            .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::MEDIUM, self.phase, shadow::modal()))
+            .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::SHORT, self.phase, shadow::modal(&p)))
             .child(div().px(px(space::XXL)).pt(px(space::XL)).pb(px(space::M)).child(header))
             .child(
                 v_flex()
