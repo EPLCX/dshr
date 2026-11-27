@@ -3372,7 +3372,7 @@ impl ConversationView {
                     .min_w(px(0.))
                     .truncate()
                     .text_mono(mono.clone())
-                    .text_color(p.text_secondary)
+                    .row_color(p.text_secondary, &p)
                     .child(SharedString::from(tool.input.clone())),
             )
             .children(summary)
@@ -3380,7 +3380,7 @@ impl ConversationView {
             // 能展开的卡片在最右边放一个箭头，展开时转向下。
             .when(expandable, |header| {
                 header.child(motion::turn(
-                    Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)).text_color(p.text_secondary),
+                    Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)).row_color(p.text_secondary, &p),
                     ("tool-turn", index),
                     tool.expanded,
                     motion::QUARTER_TURN,
