@@ -3857,7 +3857,7 @@ impl Render for ConversationView {
 /// 输入框在元素树里的路径不变，无障碍节点也就不变。路径一变，讲述人会把输入框当成新获得焦点的控件再读一遍，
 /// 正好盖过“已发送，正在回复”。
 fn composer_slot(composer: Entity<ComposerView>) -> Stateful<Div> {
-    div().id(COMPOSER_SLOT).w_full().max_w(px(size::CONTENT_MAX_WIDTH)).mx_auto().px(px(space::XXL)).pb(px(space::XL)).child(composer)
+    div().id(COMPOSER_SLOT).w_full().max_w(px(size::CONTENT_MAX_WIDTH)).mx_auto().px(px(space::XXL)).pb(px(space::M)).child(composer)
 }
 
 /// `/`、`@` 候选列表的外观：和弹出菜单一样（圆角 `LG`、内边距 4、描边、浮层阴影），最多 8 行高，再多就滚动。
