@@ -246,7 +246,8 @@ pub fn apply_palette_to_theme(p: &Palette, colors: &mut gpui_kit::component::The
     colors.danger = p.danger;
     colors.success = p.success;
     colors.warning = p.warning;
-    colors.selection = p.accent_soft;
+    // 文本选区：高对比度时用选定色的 40%（跟随系统主题时 `accent_soft` 就是背景色，选区看不出来），文字仍可读。
+    colors.selection = if p.high_contrast { p.selected.opacity(0.4) } else { p.accent_soft };
     // 关着的开关：轨道要和底色分得开（非文字元素至少 3:1）；开着的是强调色。
     colors.switch = p.text_secondary;
     colors.switch_thumb = p.surface;
@@ -1379,7 +1380,8 @@ pub fn nav_item(id: impl Into<ElementId>, icon: impl Into<Icon>, label: impl Int
         .cursor_pointer()
         .text_label()
         .relative()
-        .when(!selected, |item| item.font_weight(FontWeight::NORMAL))
+        // 当前页加粗（不论是否高对比度），其他页常规字重。
+        .font_weight(if selected { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
         .hover_fill(p, radius::MD, selected)
         .child(Icon::new(icon).size(px(size::ICON_MD)))
         .child(label)
@@ -1422,7 +1424,8 @@ pub fn list_item_with_fill(
         .cursor_pointer()
         .text_body()
         .relative()
-        .when(selected, |item| item.font_weight(FontWeight::MEDIUM))
+        // 选中的会话加粗（不论是否高对比度）。
+        .when(selected, |item| item.font_weight(FontWeight::SEMIBOLD))
         .hover_fill_with(selected_fill, p, radius::MD, selected)
         .when_some(icon, |item, icon| item.child(Icon::new(icon).size(px(size::ICON_MD))))
         .child(div().flex_1().min_w(px(0.)).truncate().child(label))
@@ -2266,6 +2269,8 @@ mod tests {
             for color in [p.raised, p.sidebar, p.sunken] {
                 assert_eq!(color, p.surface);
             }
+            // 选定文本的文字色在选定底色上看得清。
+            assert!(super::contrast(p.on_selected, p.selected) >= 4.5);
             // 按钮悬停的描边用选定色（与 Windows 一致）。
             assert_eq!(super::hc_line(&p), p.selected);
         });

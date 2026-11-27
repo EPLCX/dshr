@@ -2484,7 +2484,7 @@ impl ConversationView {
                         .min_h(px(size::LIST_ITEM))
                         .rounded(px(radius::MD))
                         .cursor_pointer()
-                        .when(active, |item| item.bg(p.selected))
+                        .when(active, |item| item.bg(p.selected).text_color(p.on_selected))
                         .hover_fill(&p, radius::MD, false)
                         .child(
                             div()
@@ -3204,6 +3204,8 @@ impl ConversationView {
                         .py(px(space::S))
                         .rounded(px(radius::XL))
                         .bg(p.selected)
+                        // 选中底色上的文字（跟随系统对比度主题时是“选定文本”的文字色，如紫底白字）。
+                        .text_color(p.on_selected)
                         .text_content()
                         .child(readable_with_id(("user", index), text.clone())),
                 )
@@ -4487,14 +4489,20 @@ mod menu_tests {
 
     #[gpui::test]
     fn first_message_from_home_keeps_focus_in_the_input(cx: &mut TestAppContext) {
-        let fixture = open_with(cx, 1, true);
+        // 不启动演示模型（它在真实的后台线程上跑，测试调度器会判为不确定）：直接把发出去的第一条消息放进记录，
+        // 和会话事件到达时一样（`sync_rows`），首页随之换成对话页。
+        let fixture = open(cx, 1);
         let view = fixture.view.clone();
         let input = cx.update(|cx| gpui_kit::Focusable::focus_handle(view.read(cx).input.read(cx), cx));
-        step(cx, fixture.window, |window, cx| {
-            input.focus(window, cx);
+        step(cx, fixture.window, |window, cx| input.focus(window, cx));
+        draw(cx, fixture.window);
+        assert!(cx.update(|cx| view.read(cx).shows_home()));
+        step(cx, fixture.window, |_, cx| {
             view.update(cx, |view, cx| {
-                view.set_composer_text("你好", window, cx);
-                view.submit(window, cx);
+                view.session_id = Some("test".into());
+                view.transcript.rows.push(super::Row::User { text: "你好".into(), attachments: Vec::new() });
+                view.sync_rows(cx);
+                cx.notify();
             })
         });
         // 首页换成对话页、消息出现之后，焦点一直留在输入框里，没有移到消息上。
@@ -4508,7 +4516,7 @@ mod menu_tests {
                 .unwrap();
             assert!(in_input && !on_message, "焦点应该留在输入框");
         }
-        assert!(cx.update(|cx| view.read(cx).transcript.rows.iter().any(|row| matches!(row, super::Row::User { .. }))));
+        assert!(!cx.update(|cx| view.read(cx).shows_home()), "已经换成对话页");
     }
 
     #[gpui::test]

@@ -9,6 +9,7 @@
 use std::ops::Range;
 use std::time::{Duration, SystemTime};
 
+use crate::design::RowColor as _;
 use dshr_agent::SessionSummary;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::button::Button;
@@ -228,7 +229,11 @@ impl SessionSearchView {
         }
         let highlights: Vec<(Range<usize>, HighlightStyle)> = match_ranges(&session.title, query)
             .into_iter()
-            .map(|range| (range, HighlightStyle { color: Some(p.accent), font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() }))
+            .map(|range| {
+                // 高对比度：匹配的字只加粗，不换颜色（跟着行的文字色，高亮行上是 `on_selected`）。
+                let color = (!p.high_contrast).then_some(p.accent);
+                (range, HighlightStyle { color, font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() })
+            })
             .collect();
         let title = StyledText::new(session.title.clone()).with_highlights(highlights);
         let row = h_flex()
@@ -250,7 +255,7 @@ impl SessionSearchView {
             .border_2()
             .border_color(transparent_black())
             .cursor_pointer()
-            .when(highlighted, |row| row.bg(p.selected))
+            .when(highlighted, |row| row.bg(p.selected).text_color(p.on_selected))
             .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, window, cx| {
                 if this.highlighted != position && !window.last_input_was_touch() {
                     this.highlighted = position;
@@ -261,17 +266,17 @@ impl SessionSearchView {
                 this.highlighted = position;
                 this.open_highlighted(cx);
             }))
-            .child(Icon::new(IconName::ArrowRight).size(px(size::ICON_MD)).flex_none().text_color(if highlighted {
-                p.accent
-            } else {
-                p.text_secondary
-            }))
+            .child(crate::design::row_icon(
+                Icon::new(IconName::ArrowRight).size(px(size::ICON_MD)),
+                if highlighted { p.accent } else { p.text_secondary },
+                p,
+            ))
             .child(
                 v_flex()
                     .flex_1()
                     .min_w(px(0.))
                     .child(div().text_body().truncate().child(title))
-                    .child(div().text_caption().text_color(p.text_secondary).truncate().child(subtitle)),
+                    .child(div().text_caption().row_color(p.text_secondary, p).truncate().child(subtitle)),
             );
         with_focus_ring(row, focused, radius::MD, window, p).into_any_element()
     }

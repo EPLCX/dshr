@@ -114,7 +114,7 @@
 | **提示** | 中性用 `text.secondary`，成功 `status.success`，需要注意 `status.warning`，错误 `status.danger`。不用背景色块，除非是需要用户立刻处理的错误。 |
 | **卡片** | `surface.base` 底、`border.subtle` 描边、圆角 `LG`、内边距 `L`/`XL`。卡片标题用 `heading`。 |
 | **面板** | 用于成组的编辑区（如提供商表单）。`surface.sunken` 底、无描边、圆角 `LG`、内边距 `L`。 |
-| **列表项 / 导航项** | 最小高 32、圆角 `MD`、左右内边距 10；可带 16 图标，图标与文字间距 `S`；悬停叠 `hover`、按下叠 `pressed`，选中铺 `selected`（选中项悬停时再叠 `hover`），选中项文字用 `label` 字重。 |
+| **列表项 / 导航项** | 最小高 32、圆角 `MD`、左右内边距 10；可带 16 图标，图标与文字间距 `S`；悬停叠 `hover`、按下叠 `pressed`，选中铺 `selected`（选中项悬停时再叠 `hover`），选中项加粗（`SEMIBOLD`，不论是否高对比度）。凡是铺 `selected` 的地方（选中项、用户消息气泡、审批当前选项、搜索高亮行），文字都用 `on_selected`。 |
 | **状态点** | 8×8 圆点：`status.success` 表示可用，`text.secondary` 表示未配置。旁边配文字说明，不单靠颜色表达。 |
 | **徽标** | 圆角 `FULL`、`caption`、`accent.soft` 底 + `accent` 字。 |
 | **弹窗** | 遮罩 `scrim`；`surface.raised` 底 + `border.subtle` 描边（深色模式下靠它与页面分开）；圆角 `XL`；顶栏放标题（`title`）和右侧操作（打开配置文件、关闭），顶栏下方是左导航 + 右内容，两侧顶部对齐。 |
