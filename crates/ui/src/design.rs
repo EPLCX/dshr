@@ -1304,7 +1304,7 @@ impl gpui_kit::component::Selectable for Pressable {
 ///
 /// 平时悬停叠 `hover`、按下叠 `pressed`（正文色 5% / 9%），以 `FAST` 渐变。高对比度时按 Windows 对比度主题的做法：
 /// 悬停、按下、选中的行都铺“选定文本”的底色 `selected`，行的文字换成 `on_selected`（系统高对比白里是紫底白字；
-/// 内置高对比度配色里是浅蓝底黑字），即时切换。行里带颜色的文字、图标用 [`RowColor::row_color`] / [`row_icon`]，
+/// 内置高对比度配色里是黄底黑字），即时切换。行里带颜色的文字、图标用 [`RowColor::row_color`] / [`row_icon`]，
 /// 高对比度下跟着行的文字色走。
 pub trait HoverFill: ParentElement + InteractiveElement + Styled + Sized {
     fn hover_fill(self, p: &Palette, corner: f32, selected: bool) -> Self {
