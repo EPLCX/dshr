@@ -559,6 +559,19 @@ impl ProviderForm {
         });
     }
 
+    /// 显示 API Key 前的验证；已存进钥匙串的 Key 在验证后读出回显。
+    fn key_guard(&self) -> crate::secret_reveal::Guard {
+        let saved = matches!(self.key_status.active, Some((_, KeySource::Keyring)));
+        let loader = match &self.mode {
+            Mode::Edit(provider) if saved => {
+                let id = provider.id.clone();
+                Some(Arc::new(move || dshr_config::credentials::load_api_key(&id).ok().flatten()) as crate::secret_reveal::Loader)
+            }
+            _ => None,
+        };
+        crate::secret_reveal::Guard::Verify(loader)
+    }
+
     fn render_key(&self, cx: &mut Context<Self>) -> AnyElement {
         let resolved = self.resolved(cx);
         let p = palette(cx);
@@ -651,10 +664,16 @@ impl ProviderForm {
                 "reveal-api-key",
                 crate::design::framed_handle(
                     gpui_kit::Focusable::focus_handle(self.api_key.read(cx), cx),
-                    Input::new(&self.api_key).aria_label(self.label(t!("settings.api_key"))),
+                    Input::new(&self.api_key).aria_label(self.label(t!("settings.api_key"))).suffix(crate::secret_reveal::toggle(
+                        "toggle-api-key",
+                        &self.api_key,
+                        self.key_guard(),
+                        cx,
+                    )),
                 ),
             ))
             .child(status)
+            .children(crate::secret_reveal::error(&self.api_key).map(|error| hint(error.to_string(), Tone::Danger, &p)))
             .into_any_element()
     }
 
