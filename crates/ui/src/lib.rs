@@ -22,6 +22,7 @@ mod plugin_page;
 mod provider_form;
 mod reveal;
 mod schema_form;
+mod secret_reveal;
 mod session_search;
 mod settings;
 pub mod single_instance;

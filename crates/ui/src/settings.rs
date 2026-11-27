@@ -2220,7 +2220,15 @@ impl SettingsView {
                             .gap(px(space::S))
                             .child(div().flex_1().min_w(px(120.)).child(crate::design::framed_handle(
                                 gpui_kit::Focusable::focus_handle(state.input.read(cx), cx),
-                                Input::new(&state.input).aria_label(label),
+                                Input::new(&state.input).aria_label(label).suffix(crate::secret_reveal::toggle(
+                                    SharedString::from(format!("plugin-{index}-secret-toggle-{secret_index}")),
+                                    &state.input,
+                                    crate::secret_reveal::Guard::Verify(state.set.then(|| {
+                                        let (plugin, name) = (row.id, state.name.clone());
+                                        Arc::new(move || dshr_plugins::secrets::load(plugin, &name)) as crate::secret_reveal::Loader
+                                    })),
+                                    cx,
+                                )),
                             )))
                             .child(crate::design::framed(
                                 SharedString::from(format!("plugin-{index}-secret-save-{secret_index}")),

@@ -190,7 +190,12 @@ impl Render for WelcomeView {
                     .gap(px(space::S))
                     .child(crate::design::framed_handle(
                         gpui_kit::Focusable::focus_handle(self.api_key.read(cx), cx),
-                        Input::new(&self.api_key).aria_label(t!("settings.api_key").to_string()),
+                        Input::new(&self.api_key).aria_label(t!("settings.api_key").to_string()).suffix(crate::secret_reveal::toggle(
+                            "toggle-welcome-api-key",
+                            &self.api_key,
+                            crate::secret_reveal::Guard::None,
+                            cx,
+                        )),
                     ))
                     .child(hint(t!("welcome.api_key_hint").to_string(), Tone::Neutral, &p))
                     .children(self.error.clone().map(|error| motion::error_in(hint(error, Tone::Danger, &p), "welcome-error-enter"))),
