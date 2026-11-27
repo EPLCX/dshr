@@ -34,7 +34,7 @@
 
 1. **系统提示词**：
    - 内置的基础提示词（如何开展任务、如何使用工具、安全守则、如何回复），在会话开始时写进日志；
-   - 运行环境：工作区路径（是否 git 仓库）、操作系统和 `run_shell` 用的 shell（Windows 是 `cmd /C`，其他是 `sh -c`）；
+   - 运行环境：工作区路径（是否 git 仓库）、操作系统和 `run_shell` 用的 shell（Windows 默认 `cmd /C`，可选 PowerShell；其他是 `sh -c`）；
    - 全局和项目的 `AGENTS.md`，以及可用 Skills 的目录（见 [项目说明与 Skills](instructions-and-skills.md)）；
    - 插件追加的内容（插件的 `prompt` 导出）；
    - 当前预设的说明（规划、审查等）。
@@ -59,7 +59,7 @@
 | `glob` | 读取 | 按 glob 模式找文件（如 `src/**/*.rs`），遵守 `.gitignore`，最多 500 条 |
 | `write_file` | 写入 | 创建文件或整体替换内容，自动创建父目录 |
 | `edit_file` | 写入 | 把文件里一段精确匹配的文字替换成新文字（可 `replace_all`）；结果附带 diff |
-| `run_shell` | 执行 | 在工作区目录里运行命令（Windows `cmd /C`，其他 `sh -c`），没有终端和输入；默认 120 秒超时，超时连同子进程一起结束；输出保留开头和结尾，过长的部分截断 |
+| `run_shell` | 执行 | 在工作区目录里运行命令（Windows 默认 `cmd /C`，参数 `shell: "powershell"` 改用 PowerShell，脚本以 `-EncodedCommand` 原样传入，不受引号和 `$` 转义影响；其他平台 `sh -c`），没有终端和输入；默认 120 秒超时，超时连同子进程一起结束；输出保留开头和结尾，过长的部分截断 |
 | `update_plan` | 读取 | 创建或更新分步计划，显示在输入卡片上方的计划面板里 |
 | `delegate` | 读取 | 把一项独立的子任务交给子代理（见下文） |
 

@@ -7,7 +7,7 @@ mod plugins;
 mod search;
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +49,29 @@ impl ShellCommand {
     pub fn new(script: &str) -> Self {
         let (program, args) = dshr_sandbox::shell_command(script, Path::new(""), false);
         Self { script: script.to_owned(), program, args }
+    }
+
+    /// Windows PowerShell：脚本以 `-EncodedCommand`（UTF-16LE 的 Base64）传入，完全绕开命令行引号与转义规则，
+    /// 脚本里的 `"`、`$`、`'` 都原样到达 PowerShell。输出统一为 UTF-8，并关闭进度条（否则 stderr 里会混进 CLIXML）。
+    pub fn powershell(script: &str) -> Self {
+        use base64::Engine as _;
+        let prelude = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; ";
+        let utf16: Vec<u8> = prelude.encode_utf16().chain(script.encode_utf16()).flat_map(u16::to_le_bytes).collect();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
+        Self {
+            script: script.to_owned(),
+            program: "powershell".into(),
+            args: ["-NoProfile", "-NonInteractive", "-EncodedCommand"].into_iter().map(OsString::from).chain([encoded.into()]).collect(),
+        }
+    }
+
+    /// 还是未经改写的 `cmd /C <script>` 时返回脚本。Windows 上要把脚本原样（不经 Rust 的 `\"` 转义）交给 cmd，
+    /// 见 `run_shell`；被插件钩子改写过的命令返回 `None`，照常按参数列表启动。
+    pub fn plain_cmd_script(&self) -> Option<&OsStr> {
+        match self.args.as_slice() {
+            [flag, script] if self.program == "cmd" && flag == "/C" => Some(script),
+            _ => None,
+        }
     }
 }
 
