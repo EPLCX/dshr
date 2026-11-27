@@ -185,7 +185,7 @@ fn control(
     dim: f32,
     p: &crate::design::Palette,
 ) -> impl IntoElement {
-    let (hover_bg, hover_fg): (Hsla, Hsla) = if close { (rgb(CLOSE_HOVER).into(), white()) } else { (p.selected, p.text) };
+    let (hover_bg, hover_fg): (Hsla, Hsla) = if close { (rgb(CLOSE_HOVER).into(), white()) } else { (p.selected, p.on_selected) };
     div()
         .id(id)
         .relative()
