@@ -2231,6 +2231,7 @@ impl SettingsView {
                                     ),
                             )),
                     ))
+                    .children(crate::secret_reveal::error(&state.input).map(|error| hint(error.to_string(), Tone::Danger, &p)))
             });
             body = body
                 .child(divider(&p))

@@ -47,9 +47,22 @@ fn with_state<R>(input: &Entity<InputState>, f: impl FnOnce(&mut RevealState) ->
     STATES.with(|states| {
         let mut states = states.borrow_mut();
         let result = f(states.entry(input.entity_id()).or_default());
-        states.retain(|_, state| state.busy || state.loaded.is_some());
+        states.retain(|_, state| state.busy || state.loaded.is_some() || state.error.is_some());
         result
     })
+}
+
+/// 输入框最近一次验证失败的原因（给调用方显示成输入框下方的提示）。
+pub fn error(input: &Entity<InputState>) -> Option<SharedString> {
+    STATES.with(|states| states.borrow().get(&input.entity_id()).and_then(|state| state.error.clone()))
+}
+
+fn set_error(input: &Entity<InputState>, error: Option<SharedString>, cx: &mut App) {
+    if let Some(error) = &error {
+        announce(error.clone(), cx);
+    }
+    with_state(input, |state| state.error = error);
+    cx.refresh_windows();
 }
 
 fn recently_verified() -> bool {
@@ -60,6 +73,8 @@ fn recently_verified() -> bool {
 struct RevealState {
     /// 从存储读出并填进输入框的值；隐藏时若输入框仍是它就清空。
     loaded: Option<SharedString>,
+    /// 最近一次验证的错误，显示在输入框下方；下次点击时清除。
+    error: Option<SharedString>,
     /// 正在等系统验证，避免重复弹窗。
     busy: bool,
 }
@@ -79,6 +94,9 @@ pub fn toggle(id: impl Into<ElementId>, input: &Entity<InputState>, guard: Guard
 }
 
 fn on_click(input: &Entity<InputState>, guard: &Guard, window: &mut Window, cx: &mut App) {
+    if error(input).is_some() {
+        set_error(input, None, cx);
+    }
     if !input.read(cx).presentation().is_masked() {
         hide(input, window, cx);
         return;
@@ -101,7 +119,7 @@ fn on_click(input: &Entity<InputState>, guard: &Guard, window: &mut Window, cx: 
     if !auth::SUPPORTED {
         // 没有系统验证：只显示用户自己输入的内容。
         if empty {
-            announce(t!("secret.unavailable").to_string(), cx);
+            set_error(input, Some(t!("secret.unavailable").to_string().into()), cx);
         } else {
             show(input, None, window, cx);
         }
@@ -130,7 +148,7 @@ fn on_click(input: &Entity<InputState>, guard: &Guard, window: &mut Window, cx: 
                     Ok(true) => {
                         VERIFIED_AT.with(|at| at.set(Some(Instant::now())));
                         if input.read(cx).value().is_empty() && value.is_none() {
-                            announce(t!("secret.not_found").to_string(), cx);
+                            set_error(&input, Some(t!("secret.not_found").to_string().into()), cx);
                             return;
                         }
                         let value = value.map(SharedString::from);
@@ -140,7 +158,7 @@ fn on_click(input: &Entity<InputState>, guard: &Guard, window: &mut Window, cx: 
                     Ok(false) => {}
                     Err(error) => {
                         tracing::warn!(%error, "身份验证失败");
-                        announce(t!("secret.verify_failed").to_string(), cx);
+                        set_error(&input, Some(error.into()), cx);
                     }
                 }
             })
@@ -178,9 +196,11 @@ mod auth {
 
     use gpui_kit::Window;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, HANDLE, HWND, LUID, NO_ERROR};
+    use rust_i18n::t;
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, ERROR_LOGON_FAILURE, HANDLE, HWND, LUID, NO_ERROR};
     use windows_sys::Win32::Security::Authentication::Identity::{
-        LSA_STRING, LsaConnectUntrusted, LsaDeregisterLogonProcess, LsaFreeReturnBuffer, LsaLogonUser, SECURITY_LOGON_TYPE,
+        LSA_STRING, LsaConnectUntrusted, LsaDeregisterLogonProcess, LsaFreeReturnBuffer, LsaLogonUser, LsaNtStatusToWinError,
+        SECURITY_LOGON_TYPE,
     };
     use windows_sys::Win32::Security::Credentials::{CREDUI_INFOW, CREDUIWIN_ENUMERATE_CURRENT_USER, CredUIPromptForWindowsCredentialsW};
     use windows_sys::Win32::Security::{
@@ -203,8 +223,25 @@ mod auth {
         text.encode_utf16().chain([0]).collect()
     }
 
-    /// 阻塞直到用户完成或取消。取消、密码错误返回 `Ok(false)`。
+    /// 密码输错后最多重新弹出几次对话框。
+    const ATTEMPTS: usize = 3;
+
+    /// 阻塞直到用户完成或取消。取消返回 `Ok(false)`；密码错误时带着错误码重新弹出对话框
+    /// （对话框里显示“用户名或密码不正确”），多次错误后返回 `Err`（给用户看的文字）。
     pub fn verify(parent: isize, caption: &str, message: &str) -> Result<bool, String> {
+        let mut auth_error = 0u32;
+        for _ in 0..ATTEMPTS {
+            match prompt(parent, caption, message, auth_error)? {
+                None => return Ok(false),
+                Some(0) => return Ok(true),
+                Some(code) => auth_error = code,
+            }
+        }
+        Err(t!("secret.wrong_password").to_string())
+    }
+
+    /// 弹一次对话框并校验。`None` 是取消；`Some(0)` 通过；其他是 Win32 错误码（下次弹窗时显示）。
+    fn prompt(parent: isize, caption: &str, message: &str, auth_error: u32) -> Result<Option<u32>, String> {
         let (caption, message) = (wide(caption), wide(message));
         let info = CREDUI_INFOW {
             cbSize: size_of::<CREDUI_INFOW>() as u32,
@@ -221,7 +258,7 @@ mod auth {
         let code = unsafe {
             CredUIPromptForWindowsCredentialsW(
                 &info,
-                0,
+                auth_error,
                 &mut package,
                 null(),
                 0,
@@ -233,12 +270,12 @@ mod auth {
         };
         match code {
             NO_ERROR => {}
-            ERROR_CANCELLED => return Ok(false),
-            code => return Err(format!("CredUIPromptForWindowsCredentialsW: {code}")),
+            ERROR_CANCELLED => return Ok(None),
+            code => return Err(t!("secret.verify_error", code = code).to_string()),
         }
         // SAFETY: buffer 是 CredUI 分配的 size 字节，用完清零后用 CoTaskMemFree 释放。
         unsafe {
-            let result = logon(package, buffer, size);
+            let result = logon(package, buffer, size).map(Some);
             let bytes = buffer.cast::<u8>();
             for offset in 0..size as usize {
                 bytes.add(offset).write_volatile(0);
@@ -249,13 +286,14 @@ mod auth {
     }
 
     /// 用 CredUI 打包好的凭据登录一次，确认是当前用户。
-    unsafe fn logon(package: u32, buffer: *const c_void, size: u32) -> Result<bool, String> {
+    /// 返回 0 表示通过，否则是 Win32 错误码。
+    unsafe fn logon(package: u32, buffer: *const c_void, size: u32) -> Result<u32, String> {
         // SAFETY: 调用方保证 buffer 有 size 字节；返回的句柄、缓冲区都在本函数里释放。
         unsafe {
             let mut lsa: HANDLE = null_mut();
             let status = LsaConnectUntrusted(&mut lsa);
             if status != 0 {
-                return Err(format!("LsaConnectUntrusted: {status:#x}"));
+                return Err(t!("secret.verify_error", code = format!("{status:#x}")).to_string());
             }
             let origin = *b"dshr";
             let origin = LSA_STRING { Length: 4, MaximumLength: 4, Buffer: origin.as_ptr().cast_mut() };
@@ -290,7 +328,10 @@ mod auth {
             LsaDeregisterLogonProcess(lsa);
             if status != 0 {
                 tracing::debug!(status = format!("{status:#x}"), "LsaLogonUser 未通过");
-                return Ok(false);
+                return Ok(match LsaNtStatusToWinError(status) {
+                    0 => ERROR_LOGON_FAILURE,
+                    code => code,
+                });
             }
             let mut own: HANDLE = null_mut();
             let same = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut own) != 0 && same_user(token, own);
@@ -298,7 +339,7 @@ mod auth {
                 CloseHandle(own);
             }
             CloseHandle(token);
-            Ok(same)
+            Ok(if same { 0 } else { ERROR_LOGON_FAILURE })
         }
     }
 
@@ -333,6 +374,7 @@ mod auth {
     use objc2::runtime::Bool;
     use objc2_foundation::{NSError, NSString};
     use objc2_local_authentication::{LAContext, LAError, LAPolicy};
+    use rust_i18n::t;
 
     pub const SUPPORTED: bool = true;
 
@@ -340,7 +382,7 @@ mod auth {
         0
     }
 
-    /// 阻塞直到用户完成或取消。取消返回 `Ok(false)`。
+    /// 阻塞直到用户完成或取消。取消返回 `Ok(false)`；失败返回 `Err`（给用户看的文字）。
     pub fn verify(_parent: isize, _caption: &str, message: &str) -> Result<bool, String> {
         // SAFETY: LAContext 在本函数里创建、用到回调返回为止；回调只读 NSError。
         unsafe {
@@ -359,6 +401,10 @@ mod auth {
                             if [LAError::UserCancel, LAError::SystemCancel, LAError::AppCancel].contains(&LAError(error.code())) =>
                         {
                             Ok(false)
+                        }
+                        // 系统对话框里多次验证失败后才回调到这里：给出明确的“密码错误”提示。
+                        Some(error) if LAError(error.code()) == LAError::AuthenticationFailed => {
+                            Err(t!("secret.wrong_password").to_string())
                         }
                         Some(error) => Err(error.localizedDescription().to_string()),
                         None => Ok(false),

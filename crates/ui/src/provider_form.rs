@@ -673,6 +673,7 @@ impl ProviderForm {
                 ),
             ))
             .child(status)
+            .children(crate::secret_reveal::error(&self.api_key).map(|error| hint(error.to_string(), Tone::Danger, &p)))
             .into_any_element()
     }
 
