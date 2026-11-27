@@ -45,7 +45,7 @@ impl State {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| format!("cannot open database {name}: {error}"))?;
             }
-            if !path.exists() && super::host::folder_size(&self.data_dir) >= MAX_DATA_BYTES {
+            if !path.exists() && super::host::data_usage(&self.data_dir) >= MAX_DATA_BYTES {
                 return Err(format!("the plugin's data folder is full ({} MB)", MAX_DATA_BYTES / 1024 / 1024));
             }
             let connection = rusqlite::Connection::open(&path).map_err(|error| format!("cannot open database {name}: {error}"))?;

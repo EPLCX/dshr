@@ -164,8 +164,43 @@ fn clip(text: &str) -> String {
 }
 
 fn clip_value(value: &Value) -> Value {
-    let text = value.to_string();
-    if text.chars().count() <= MAX_PAYLOAD_CHARS { value.clone() } else { Value::String(clip(&text)) }
+    match clipped_json(value, MAX_PAYLOAD_CHARS) {
+        Some(clipped) => Value::String(clipped),
+        None => value.clone(),
+    }
+}
+
+/// `value` 的 JSON 文本超过 `max_chars` 个字符时，返回截断后的文本（末尾带 `… [truncated]`）；没超过时返回 `None`。
+///
+/// 序列化写到一个有上限的缓冲区里，写满就停：几 MB 的参数（整份文件、图片）不用先完整序列化一遍再数字符。
+pub(super) fn clipped_json(value: &Value, max_chars: usize) -> Option<String> {
+    struct Capped {
+        buf: Vec<u8>,
+        cap: usize,
+    }
+    impl std::io::Write for Capped {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            let room = self.cap - self.buf.len();
+            if data.len() > room {
+                self.buf.extend_from_slice(&data[..room]);
+                return Err(std::io::Error::other("full"));
+            }
+            self.buf.extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    // 一个字符最多 4 个字节：写满时缓冲区里一定有超过 `max_chars` 个字符。
+    let mut capped = Capped { buf: Vec::new(), cap: max_chars * 4 + 4 };
+    let complete = serde_json::to_writer(&mut capped, value).is_ok();
+    if complete && capped.buf.len() <= max_chars {
+        return None;
+    }
+    // 写满时最后一个字符可能被切开，有损转换只影响截断点之后的部分。
+    let text = String::from_utf8_lossy(&capped.buf);
+    text.char_indices().nth(max_chars).map(|(cut, _)| format!("{}… [truncated]", &text[..cut]))
 }
 
 /// 给钩子的参数补上 `session`（顶层会话 id）和 `agent`（`main` 或子代理名）。
@@ -391,12 +426,12 @@ impl TransformRequestHook for JsHooks {
         let payload = json!({ "model": request.model, "system": request.system, "messages": request.messages });
         let payload = with_identity(payload, &ctx.options, None);
         let job = Self::hook("transformRequest", payload);
-        let answer = self.answer("transformRequest", self.instance.call(job, Some(ctx.clone()), TRANSFORM_WAIT, self.permits).await);
+        let mut answer = self.answer("transformRequest", self.instance.call(job, Some(ctx.clone()), TRANSFORM_WAIT, self.permits).await);
         if let Some(system) = answer.get("system") {
             request.system = system.as_str().map(str::to_owned);
         }
-        if let Some(messages) = answer.get("messages") {
-            match serde_json::from_value::<Vec<dshr_core::Message>>(messages.clone()) {
+        if let Some(messages) = answer.get_mut("messages").map(Value::take) {
+            match serde_json::from_value::<Vec<dshr_core::Message>>(messages) {
                 Ok(messages) if !messages.is_empty() => request.messages = messages,
                 Ok(_) => tracing::warn!(plugin = self.plugin, "transformRequest 返回了空的消息列表，忽略"),
                 Err(error) => tracing::warn!(plugin = self.plugin, %error, "transformRequest 返回的消息格式不对，忽略"),
@@ -616,5 +651,24 @@ impl dshr_agent::EventLabel for ReviewedLabel {
         let verdict = if text("decision") == "allow" { "放行" } else { "拒绝" };
         let reason = data.get("reason").and_then(Value::as_str).map(|reason| format!("：{reason}")).unwrap_or_default();
         Some(format!("插件 {} 审查后{verdict}了 {}{reason}", text("plugin"), text("tool")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clipped_json;
+    use serde_json::json;
+
+    #[test]
+    fn clips_long_json_and_keeps_short_json() {
+        assert_eq!(clipped_json(&json!({"a": "xy"}), 10), None);
+        assert_eq!(clipped_json(&json!("0123456789"), 12), None);
+        assert_eq!(clipped_json(&json!("0123456789"), 5).as_deref(), Some("\"0123… [truncated]"));
+        // 多字节字符：按字符数截，不按字节。
+        let wide = json!("汉".repeat(100));
+        assert_eq!(clipped_json(&wide, 102), None);
+        assert_eq!(clipped_json(&wide, 4).as_deref(), Some("\"汉汉汉… [truncated]"));
+        let huge = json!({ "text": "x".repeat(10_000_000) });
+        assert_eq!(clipped_json(&huge, 8).as_deref(), Some("{\"text\":… [truncated]"));
     }
 }

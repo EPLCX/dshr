@@ -86,9 +86,12 @@ Push-Location $root
 try {
     $meta = cargo metadata --format-version 1 --locked | ConvertFrom-Json
     if ($LASTEXITCODE) { throw 'cargo metadata 失败' }
+    # 只排除工作区自身的 crate：按 workspace_members 判断，不能看 source 是否为空——
+    # `[patch.crates-io]` 指向 vendor/ 的依赖（如 gpui-pre-windows、gpui-pre-macos）也是本地路径，source 同样为空。
+    $members = [System.Collections.Generic.HashSet[string]]::new([string[]]$meta.workspace_members)
     $byKey = @{}
     foreach ($p in $meta.packages) {
-        if ($p.source) { $byKey["$($p.name) $($p.version)"] = $p }   # 跳过工作区自身的 crate
+        if (-not $members.Contains($p.id)) { $byKey["$($p.name) $($p.version)"] = $p }
     }
 
     $shipped = [System.Collections.Generic.HashSet[string]]::new()

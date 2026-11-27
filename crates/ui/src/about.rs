@@ -4,10 +4,12 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::{IconName, h_flex, v_flex};
 use gpui_kit::*;
 use rust_i18n::t;
+
+use crate::design::ControlSize as _;
 
 use crate::design::{
     Tone, Typography as _, brand_mark, card, description, field, hint, mono_font, palette, readable_with_id, section_header, size, space,
@@ -101,8 +103,8 @@ impl SettingsView {
                 h_flex().pl(px(120. + space::L)).child(crate::design::framed(
                     "about-open-repository",
                     Button::new("about-open-repository")
-                        .ghost()
-                        .small()
+                        .subtle(cx)
+                        .control_sm()
                         .icon(IconName::ExternalLink)
                         .label(t!("about.open_repository").to_string())
                         .tooltip(REPOSITORY)
@@ -129,7 +131,7 @@ impl SettingsView {
                 .child(description(t!("about.third_party_desc", count = crate_count()).to_string(), &p))
                 .child(h_flex().child(crate::design::framed(
                     "about-open-notices",
-                    Button::new("about-open-notices").outline().small().label(t!("about.open_notices").to_string()).on_click(cx.listener(
+                    Button::new("about-open-notices").control_sm().label(t!("about.open_notices").to_string()).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.about_error = open_notices(cx).err();
                             cx.notify();

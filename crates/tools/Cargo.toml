@@ -13,6 +13,7 @@ dshr-llm.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 base64 = "0.22"
+futures.workspace = true
 globset.workspace = true
 grep-regex.workspace = true
 grep-searcher.workspace = true

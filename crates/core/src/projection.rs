@@ -187,7 +187,7 @@ mod tests {
             ev(EventBody::TurnStart { turn: 1 }),
             ev(EventBody::UserMessage { text: "list files".into() }),
             ev(assistant(vec![ContentBlock::ToolUse { id: "c1".into(), name: "list_dir".into(), input: json!({"path": "."}).into() }])),
-            ev(EventBody::ToolCall { call_id: "c1".into(), name: "list_dir".into(), input: json!({}) }),
+            ev(EventBody::ToolCall { call_id: "c1".into(), name: "list_dir".into(), input: json!({}).into() }),
             ev(EventBody::ToolResult { call_id: "c1".into(), output: "a.txt".into(), is_error: false }),
             ev(assistant(vec![ContentBlock::text("done")])),
         ];

@@ -26,9 +26,9 @@ use rust_i18n::t;
 use crate::design::{motion, palette, size, space};
 
 /// 标题栏高度：和侧边栏顶上的品牌行一样高，两边对齐。
-pub const HEIGHT: f32 = size::NAV_ITEM;
+pub const HEIGHT: f32 = size::TITLE_BAR;
 /// 自绘标题栏时，对话面板左上角的圆角（外沿，含 1px 描边）。
-pub const PANEL_RADIUS: f32 = crate::design::radius::XL;
+pub const PANEL_RADIUS: f32 = crate::design::radius::LG;
 /// 面板里面贴着左上角画的东西用这个圆角（描边内侧），否则方角会盖住面板的圆角。没有面板时为 0。
 pub fn panel_inner_radius() -> f32 {
     if custom() { PANEL_RADIUS - 1. } else { 0. }
