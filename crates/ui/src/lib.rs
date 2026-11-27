@@ -428,11 +428,13 @@ pub(crate) fn apply_language(code: &str) {
 pub(crate) fn apply_palette(backend: &Backend, cx: &mut App) -> Result<(), String> {
     let ui = backend.ui_config();
     let high_contrast = high_contrast_active(&ui);
-    cx.set_global(SystemHighContrast(system_a11y::high_contrast()));
+    let system_colors = system_a11y::high_contrast_colors();
+    cx.set_global(SystemHighContrast(system_a11y::high_contrast(), system_colors));
     let key = ui.palette;
-    // 打开了高对比度（或跟随系统、系统开着）：用内置的高对比度配色，不管配色方案选的是什么。
+    // 打开了高对比度（或跟随系统、系统开着）：系统开着对比度主题时用系统的颜色，否则用内置的高对比度配色，
+    // 不管配色方案选的是什么。
     let theme = if high_contrast {
-        Some(backend::builtin_high_contrast_theme())
+        Some(system_colors.map_or_else(backend::builtin_high_contrast_theme, backend::system_high_contrast_theme))
     } else {
         (!key.is_empty()).then(|| backend.themes().into_iter().find(|theme| Backend::theme_key(theme) == key)).flatten()
     };
@@ -489,8 +491,8 @@ pub(crate) fn high_contrast_active(ui: &dshr_config::UiConfig) -> bool {
     }
 }
 
-/// 上次读到的系统高对比度设置（跟随系统时，变了才重新套配色）。
-struct SystemHighContrast(bool);
+/// 上次读到的系统高对比度设置和对比度主题的颜色（变了才重新套配色）。
+struct SystemHighContrast(bool, Option<system_a11y::SystemColors>);
 
 impl Global for SystemHighContrast {}
 
@@ -524,11 +526,12 @@ pub(crate) fn follow_system_settings(backend: &Backend, window: &mut Window, cx:
             cx.refresh_windows();
         }
     }
-    if ui.high_contrast != dshr_config::HighContrastPreference::System {
+    // 关着高对比度时不管系统；开着（或跟随系统）时，系统开关和对比度主题的颜色有一个变了就重新套配色。
+    if ui.high_contrast == dshr_config::HighContrastPreference::Off {
         return;
     }
-    let now = system_a11y::high_contrast();
-    if cx.try_global::<SystemHighContrast>().is_some_and(|last| last.0 == now) {
+    let now = (system_a11y::high_contrast(), system_a11y::high_contrast_colors());
+    if cx.try_global::<SystemHighContrast>().is_some_and(|last| (last.0, last.1) == now) {
         return;
     }
     refresh_palette(backend, window, cx).ok();
@@ -1750,7 +1753,7 @@ impl WorkspaceView {
             session.title.clone().into()
         };
         let status: Option<AnyElement> = if waiting {
-            Some(Icon::new(IconName::CircleAlert).size(px(size::ICON_SM)).text_color(p.warning).into_any_element())
+            Some(design::row_icon(Icon::new(IconName::CircleAlert).size(px(size::ICON_SM)), p.warning, &p).into_any_element())
         } else if running {
             // 静止的强调色圆点，不转圈：侧边栏里的循环动画每一帧都会让整个侧边栏重新生成，一轮运行多久就重建多久。
             // 正在看的会话在标题栏里转圈（见 `TitleView`）；读屏软件读到的名称里带着“运行中”。
@@ -1828,7 +1831,7 @@ impl WorkspaceView {
             .text_label()
             .relative()
             .hover_fill(&p, radius::MD, false)
-            .child(
+            .child(design::row_icon(
                 motion::turn(
                     Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)),
                     ("workspace-turn", index),
@@ -1836,10 +1839,11 @@ impl WorkspaceView {
                     motion::QUARTER_TURN,
                     window,
                     cx,
-                )
-                .text_color(p.text_secondary),
-            )
-            .child(Icon::new(IconName::Folder).size(px(size::ICON_MD)).text_color(p.text_secondary))
+                ),
+                p.text_secondary,
+                &p,
+            ))
+            .child(design::row_icon(Icon::new(IconName::Folder).size(px(size::ICON_MD)), p.text_secondary, &p))
             .child(div().flex_1().min_w(px(0.)).truncate().child(name.clone()))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if !this.collapsed.remove(&key) {

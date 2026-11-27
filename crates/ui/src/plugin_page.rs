@@ -19,6 +19,7 @@ use rust_i18n::t;
 
 use crate::design::ControlSize as _;
 use crate::design::HoverFill as _;
+use crate::design::RowColor as _;
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
@@ -389,7 +390,7 @@ impl PluginPageView {
                                 .gap(px(space::M))
                                 .rounded(px(radius::MD))
                                 .child(div().flex_1().min_w(px(0.)).text_body().child(title.clone()))
-                                .children(detail.clone().map(|detail| div().text_caption().text_color(p.text_secondary).child(detail)))
+                                .children(detail.clone().map(|detail| div().text_caption().row_color(p.text_secondary, &p).child(detail)))
                         };
                         match action {
                             // 能点的行是按钮：Tab 能走到，Enter / 空格触发；读屏软件读标题，详情作补充说明。
@@ -824,7 +825,7 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
             .rounded(px(radius::SM))
             .when(mark.is_some(), |cell| cell.bg(p.accent_soft))
             .child(div().text_caption().child(day.to_string()))
-            .children(mark.map(|mark| div().text_caption().truncate().text_color(p.accent).child(mark)));
+            .children(mark.map(|mark| div().text_caption().truncate().row_color(p.accent, &p).child(mark)));
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());

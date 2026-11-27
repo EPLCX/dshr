@@ -22,6 +22,7 @@ use rust_i18n::t;
 
 use crate::design::ControlSize as _;
 use crate::design::HoverFill as _;
+use crate::design::RowColor as _;
 use gpui_kit::component::Sizable as _;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -302,10 +303,6 @@ pub struct ConversationView {
     /// 每一行上次画在哪里，和消息列表的可视区域：Tab 走到的控件在视口外时把那一行滚进来。
     row_bounds: Rc<RefCell<HashMap<usize, Bounds<Pixels>>>>,
     viewport_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// 等这一行画出来就把焦点给这条消息（从首页发出第一条消息之后）。
-    pending_message_focus: Option<usize>,
-    /// 刚从首页发出第一条消息，等它出现在记录里。
-    focus_sent_message: bool,
     /// Tab 正要走进的那一行（已经滚过去、焦点先放在行上），等它画出来再走到它里面的控件。
     pending_tab: Option<PendingTab>,
     /// 键盘焦点刚走到这一行：等它这一帧画完，按画出来的位置判断要不要滚动（见 [`Self::reveal_row`]）。
@@ -423,8 +420,6 @@ impl ConversationView {
             jump_focus: cx.focus_handle(),
             pending_tab: None,
             pending_reveal: None,
-            pending_message_focus: None,
-            focus_sent_message: false,
             #[cfg(test)]
             rows_rendered: 0,
             _subscriptions: vec![subscription, observe_input, observe_list, observe_self],
@@ -437,14 +432,6 @@ impl ConversationView {
         let rows = self.transcript.rows.len();
         let dirty = self.transcript.take_dirty();
         self.last_message_row = self.transcript.rows.iter().rposition(is_message);
-        // 从首页发出的第一条消息出现了：等它画出来就把焦点给它。
-        if self.focus_sent_message
-            && let Some(index) = self.transcript.rows.iter().rposition(|row| matches!(row, Row::User { .. }))
-        {
-            self.focus_sent_message = false;
-            self.current_message = Some(index);
-            self.pending_message_focus = Some(index);
-        }
         // 行没了（换会话、重新载入）就丢掉它们的焦点句柄和位置。
         self.row_focus.retain(|index, _| *index < rows);
         self.message_focus.retain(|index, _| *index < rows);
@@ -933,9 +920,9 @@ impl ConversationView {
                 .rounded(px(radius::SM))
                 .cursor_pointer()
                 .hover_fill(&p, radius::SM, false)
-                .child(div().flex_none().text_caption().text_color(p.text_secondary).child(source))
+                .child(div().flex_none().text_caption().row_color(p.text_secondary, &p).child(source))
                 .child(div().flex_none().text_label().child(row.item.title.clone()))
-                .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(detail))
+                .child(div().flex_1().min_w(px(0.)).truncate().text_caption().row_color(p.text_secondary, &p).child(detail))
                 .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(picked.clone(), window, cx)))
         });
         Some(suggestion_list("mention-menu", rows.collect(), &p))
@@ -971,7 +958,9 @@ impl ConversationView {
                 .cursor_pointer()
                 .hover_fill(&p, radius::SM, false)
                 .child(div().flex_none().text_label().text_mono(mono_font(cx)).child(label))
-                .child(div().flex_1().min_w(px(0.)).truncate().text_caption().text_color(p.text_secondary).child(item.description.clone()))
+                .child(
+                    div().flex_1().min_w(px(0.)).truncate().text_caption().row_color(p.text_secondary, &p).child(item.description.clone()),
+                )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.input.update(cx, |input, cx| input.set_value(String::new(), window, cx));
                     this.run_plugin_command(picked.clone(), String::new(), window, cx);
@@ -1023,7 +1012,6 @@ impl ConversationView {
             return;
         }
         let attachments = self.attachments.clone();
-        let from_home = self.transcript.rows.is_empty();
         let accepted = if self.is_running() {
             self.queue.push((text, attachments));
             announce(t!("a11y.queued").to_string(), cx);
@@ -1034,10 +1022,8 @@ impl ConversationView {
         };
         // 没能开始（如缺少 API Key）时保留输入和附件，方便用户改好设置后直接重发。
         if accepted {
-            // 从新会话（首页）发出第一条消息：焦点放到刚发出的这句话上，接着就能用 ↑ / ↓ 在消息之间走、
-            // 读回复；Esc 回到输入框。等这一行画出来再给（见 `render_row`），讲述人才收得到。
-            // 这句话由会话事件加进记录（稍后才到），到了之后在 `sync_rows` 里接着处理。
-            self.focus_sent_message = from_home;
+            // 焦点留在输入框：首页换成对话页时输入框的元素路径不变（见 `composer_slot`），读屏软件不会再读一遍，
+            // 接着播报“已发送，正在回复”。要读消息时用 Tab / 方向键走过去。
             self.attachments.clear();
             self.input.update(cx, |input, cx| input.set_value(String::new(), window, cx));
         }
@@ -1557,7 +1543,9 @@ impl ConversationView {
                             &p,
                         )),
                     )
-                    .when(mode == current, |item| item.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)))
+                    .when(mode == current, |item| {
+                        item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                    })
                     .on_click(move |_, _, cx| {
                         view.update(cx, |this, cx| {
                             this.options.permission = mode;
@@ -1646,7 +1634,9 @@ impl ConversationView {
                             Tone::Neutral,
                             &p,
                         )))
-                        .when(chosen, |item| item.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)))
+                        .when(chosen, |item| {
+                            item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                        })
                         .on_click(move |_, _, cx| {
                             view.update(cx, |this, cx| {
                                 this.options.preset = preset;
@@ -1688,7 +1678,9 @@ impl ConversationView {
                             .child(div().text_label().child(preset.label.clone()))
                             .children((!preset.description.is_empty()).then(|| hint(preset.description.clone(), Tone::Neutral, &p))),
                     )
-                    .when(chosen, |item| item.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)))
+                    .when(chosen, |item| {
+                        item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                    })
                     .on_click(move |_, _, cx| {
                         view.update(cx, |this, cx| {
                             this.options.preset = Preset::Standard;
@@ -1897,7 +1889,7 @@ impl ConversationView {
                                 .focus_on_hover().track_focus(&menu.item(index, cx))
                                 // 读出提供商：同一个模型可能在两个提供商下都有（如截图里的 DeepSeek-V4.1-Flash）。
                                 .accessibility_label(format!("{} · {}", choice.provider_name, choice.label))
-                                .when(selected, |item| item.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)))
+                                .when(selected, |item| item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p)))
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
                                         this.options.model = reference.clone();
@@ -1978,7 +1970,9 @@ impl ConversationView {
                             // accesskit 的位置从 0 数，读屏时各平台的适配层再加 1。
                             .aria_position_in_set(index)
                             .aria_size_of_set(EFFORT_CHOICES.len())
-                            .when(checked, |item| item.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)))
+                            .when(checked, |item| {
+                                item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                            })
                             // 选好后回到模型列表，菜单不关：还可以接着换模型。
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
@@ -2497,14 +2491,16 @@ impl ConversationView {
                                 .w(px(size::ICON_MD))
                                 .flex_none()
                                 .text_caption()
-                                .text_color(p.text_secondary)
+                                .row_color(p.text_secondary, &p)
                                 .child(SharedString::from((index + 1).to_string())),
                         )
-                        .child(div().flex_1().min_w(px(0.)).text_body().text_color(color).child(label))
+                        .child(div().flex_1().min_w(px(0.)).text_body().row_color(color, &p).child(label))
                         .when(active, |item| {
-                            item.child(
-                                Icon::new(gpui_kit::assets::IconName::CornerDownLeft).size(px(size::ICON_SM)).text_color(p.text_secondary),
-                            )
+                            item.child(crate::design::row_icon(
+                                Icon::new(gpui_kit::assets::IconName::CornerDownLeft).size(px(size::ICON_SM)),
+                                p.text_secondary,
+                                &p,
+                            ))
                         })
                         .on_click(cx.listener(move |this, _, window, cx| this.answer_approval(choice, window, cx)))
                 },
@@ -3156,7 +3152,6 @@ impl ConversationView {
         let bounds = self.row_bounds.clone();
         // Tab 正等着这一行画出来：画完这一帧再走进去。
         let pending = self.pending_tab.as_ref().is_some_and(|pending| pending.row == index).then(|| cx.entity().downgrade());
-        let focus_message = (self.pending_message_focus == Some(index)).then(|| cx.entity().downgrade());
         let reveal = (self.pending_reveal == Some(index)).then(|| cx.entity().downgrade());
         let row = div()
             .id(("row", index))
@@ -3175,19 +3170,6 @@ impl ConversationView {
                         bounds.borrow_mut().insert(index, area);
                     },
                     move |_, _, window, cx| {
-                        if let Some(view) = focus_message.clone() {
-                            window.defer(cx, move |window, cx| {
-                                view.update(cx, |this, cx| {
-                                    if this.pending_message_focus.take() == Some(index) {
-                                        // 程序自己放的焦点（给读屏软件读）：默认不画焦点框，高可见性轮廓开启时照画。
-                                        crate::design::set_focus_from_keyboard(false, window);
-                                        this.message_handle(index, cx).focus(window, cx);
-                                        cx.notify();
-                                    }
-                                })
-                                .ok();
-                            });
-                        }
                         if let Some(view) = pending.clone() {
                             window.defer(cx, move |window, cx| {
                                 view.update(cx, |this, cx| this.finish_tab_into_row(index, window, cx)).ok();
@@ -3337,7 +3319,7 @@ impl ConversationView {
             Some(card) => card
                 .title
                 .clone()
-                .map(|title| div().flex_none().text_caption().text_color(p.text_secondary).child(title).into_any_element()),
+                .map(|title| div().flex_none().text_caption().row_color(p.text_secondary, &p).child(title).into_any_element()),
             None => tool_view.as_ref().and_then(|view| view.render_summary(tool, &p)),
         };
         let toggle_id = tool.call_id.clone();
@@ -4504,24 +4486,29 @@ mod menu_tests {
     }
 
     #[gpui::test]
-    fn first_message_from_home_gets_focus(cx: &mut TestAppContext) {
+    fn first_message_from_home_keeps_focus_in_the_input(cx: &mut TestAppContext) {
         let fixture = open_with(cx, 1, true);
         let view = fixture.view.clone();
+        let input = cx.update(|cx| gpui_kit::Focusable::focus_handle(view.read(cx).input.read(cx), cx));
         step(cx, fixture.window, |window, cx| {
+            input.focus(window, cx);
             view.update(cx, |view, cx| {
                 view.set_composer_text("你好", window, cx);
                 view.submit(window, cx);
             })
         });
-        draw(cx, fixture.window);
-        draw(cx, fixture.window);
-        let user_row = cx.update(|cx| view.read(cx).transcript.rows.iter().position(|row| matches!(row, super::Row::User { .. }))).unwrap();
-        let focused = cx
-            .update_window(fixture.window, |_, window, cx| {
-                view.read(cx).message_focus.get(&user_row).is_some_and(|handle| handle.is_focused(window))
-            })
-            .unwrap();
-        assert!(focused, "从首页发出第一条消息后，焦点应该在这句话上");
+        // 首页换成对话页、消息出现之后，焦点一直留在输入框里，没有移到消息上。
+        for _ in 0..4 {
+            draw(cx, fixture.window);
+            let (in_input, on_message) = cx
+                .update_window(fixture.window, |_, window, cx| {
+                    let view = view.read(cx);
+                    (input.is_focused(window), view.message_focus.values().any(|handle| handle.is_focused(window)))
+                })
+                .unwrap();
+            assert!(in_input && !on_message, "焦点应该留在输入框");
+        }
+        assert!(cx.update(|cx| view.read(cx).transcript.rows.iter().any(|row| matches!(row, super::Row::User { .. }))));
     }
 
     #[gpui::test]

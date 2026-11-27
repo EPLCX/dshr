@@ -385,6 +385,13 @@ impl Highlight {
         self
     }
 
+    /// 悬停、按下的底色即时切换（默认以 [`FAST`] 渐变）。高对比度下行的文字要和底色同时换，
+    /// 渐变的中途会有一段文字与底色对比度不够。
+    pub fn instant(mut self) -> Self {
+        self.smooth = false;
+        self
+    }
+
     /// 向外多铺这么宽：绝对定位从边框内侧算起，控件有边框（如焦点框）时用它铺满整个控件。
     pub fn outset(mut self, outset: f32) -> Self {
         self.outset = px(outset);

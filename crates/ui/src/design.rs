@@ -91,7 +91,10 @@ pub struct Palette {
     pub pressed: Hsla,
     /// 输入框、下拉触发框、描边按钮的描边（正文色 16%，比卡片描边 `border` 清楚）。高对比度时等于 `border`。
     pub control_border: Hsla,
-    /// 用的是高对比度配色：列表项悬停改用不透明的深一档底色、按钮改为加粗描边，见 [`HoverFill`]、`FocusFrame`。
+    /// 选中项（和高对比度下悬停的行）上的文字色，配在 `selected` 上。配色方案不设时等于 `text`；
+    /// 跟随系统的高对比度主题时是系统的“选定文本”文字色（如高对比白里的白字配紫底）。
+    pub on_selected: Hsla,
+    /// 用的是高对比度配色：行的悬停、选中铺 `selected`、文字取 `on_selected`，按钮改为加粗描边，见 [`HoverFill`]、`FocusFrame`。
     pub high_contrast: bool,
 }
 
@@ -114,6 +117,9 @@ fn derive_roles(p: &mut Palette, high_contrast: bool) {
     // 高对比度的 `border` 已经按 3:1 校验过，直接用它。
     p.control_border = if high_contrast { p.border } else { p.text.opacity(0.16) };
     p.high_contrast = high_contrast;
+    if p.on_selected.a == 0. {
+        p.on_selected = p.text;
+    }
 }
 
 /// 最近一次输入是不是来自触摸屏，由窗口的根视图每帧开头按 `Window::last_input_was_touch` 更新
@@ -200,6 +206,7 @@ impl PaletteOverride {
                 "warning" => &mut palette.warning,
                 "danger" => &mut palette.danger,
                 "focus_ring" => &mut palette.focus_ring,
+                "on_selected" => &mut palette.on_selected,
                 _ => continue,
             };
             *slot = *color;
@@ -249,7 +256,7 @@ pub fn apply_palette_to_theme(p: &Palette, colors: &mut gpui_kit::component::The
 }
 
 /// 配色方案能改的颜色（`Palette` 的字段名）。
-pub const PALETTE_KEYS: [&str; 15] = [
+pub const PALETTE_KEYS: [&str; 16] = [
     "text",
     "text_secondary",
     "surface",
@@ -265,6 +272,7 @@ pub const PALETTE_KEYS: [&str; 15] = [
     "warning",
     "danger",
     "focus_ring",
+    "on_selected",
 ];
 
 /// WCAG 对比度。
@@ -302,6 +310,8 @@ fn base_palette(cx: &App, dark: bool) -> Palette {
         hover: transparent_black(),
         pressed: transparent_black(),
         control_border: transparent_black(),
+        // 透明表示配色方案没设，`derive_roles` 里换成正文色。
+        on_selected: transparent_black(),
         high_contrast: false,
     }
 }
@@ -473,12 +483,15 @@ pub fn heading(text: impl Into<SharedString>, level: usize) -> Stateful<Div> {
 
 /// 一行提示文字。
 pub fn hint(text: impl Into<SharedString>, tone: Tone, p: &Palette) -> Div {
-    div().text_caption().text_color(tone.color(p)).child(readable(text))
+    // 中性的说明在高对比度下跟着所在行的文字色（见 `RowColor`）；成功、警告、错误保留颜色。
+    let hint = div().text_caption();
+    let hint = if tone == Tone::Neutral { hint.row_color(tone.color(p), p) } else { hint.text_color(tone.color(p)) };
+    hint.child(readable(text))
 }
 
 /// 正文说明（次要色）。
 pub fn description(text: impl Into<SharedString>, p: &Palette) -> Div {
-    div().text_body().text_color(p.text_secondary).child(readable(text))
+    div().text_body().row_color(p.text_secondary, p).child(readable(text))
 }
 
 /// 读屏软件读到的控件名称带上所属区块，如“MCP 服务器，名称”。
@@ -1002,7 +1015,7 @@ impl Element for FocusFrame {
         let p = palette(cx);
         if self.open {
             if p.high_contrast {
-                window.paint_quad(quad(bounds, radius, transparent_black(), px(2.), p.text, BorderStyle::Solid));
+                window.paint_quad(quad(bounds, radius, transparent_black(), px(2.), hc_line(&p), BorderStyle::Solid));
             } else {
                 window.paint_quad(fill(bounds, p.pressed).corner_radii(radius));
             }
@@ -1011,7 +1024,7 @@ impl Element for FocusFrame {
             let tint = tint.read(cx).clone();
             if p.high_contrast {
                 // 高对比度：按钮的文字颜色由组件库固定，叠不透明的底色会盖住它，改为加粗描边。
-                tint.paint_ring(bounds, radius, p.text, hitbox, window);
+                tint.paint_ring(bounds, radius, hc_line(&p), hitbox, window);
             } else {
                 tint.paint(bounds, radius, true, (Some(p.hover), Some(p.pressed)), hitbox, window, cx);
             }
@@ -1288,24 +1301,61 @@ impl gpui_kit::component::Selectable for Pressable {
 
 /// 列表项、行的悬停、按下、选中底色（画在最底层的 [`motion::Highlight`]），作为行自己的方法调用。
 ///
-/// 平时悬停叠 `hover`、按下叠 `pressed`（正文色 5% / 9%），以 `FAST` 渐变。高对比度时半透明的叠层在纯白、纯黑底上
-/// 几乎看不出来，改用配色里更深一档的不透明底色：悬停铺 `sunken`、按下铺 `selected`。这两种底色上的所有文字颜色
-/// 都按 7:1 校验过（见测试 `high_contrast_meets_aaa`），文字不用变色。
-pub trait HoverFill: ParentElement + InteractiveElement + Sized {
+/// 平时悬停叠 `hover`、按下叠 `pressed`（正文色 5% / 9%），以 `FAST` 渐变。高对比度时按 Windows 对比度主题的做法：
+/// 悬停、按下、选中的行都铺“选定文本”的底色 `selected`，行的文字换成 `on_selected`（系统高对比白里是紫底白字；
+/// 内置高对比度配色里是浅蓝底黑字），即时切换。行里带颜色的文字、图标用 [`RowColor::row_color`] / [`row_icon`]，
+/// 高对比度下跟着行的文字色走。
+pub trait HoverFill: ParentElement + InteractiveElement + Styled + Sized {
     fn hover_fill(self, p: &Palette, corner: f32, selected: bool) -> Self {
         self.hover_fill_with(p.selected, p, corner, selected)
     }
 
     /// 同 [`HoverFill::hover_fill`]，选中时的底色另给（如侧边栏里正在看的会话用强调色的浅底）。
     fn hover_fill_with(self, selected_fill: Hsla, p: &Palette, corner: f32, selected: bool) -> Self {
-        let (hover, pressed) = if p.high_contrast { (p.sunken, p.selected) } else { (p.hover, p.pressed) };
+        if p.high_contrast {
+            let on_selected = p.on_selected;
+            let layer = motion::highlight("hover-fill", p.selected, corner, selected)
+                .hover_color(p.selected)
+                .pressed_color(p.selected)
+                .instant()
+                .outset(FOCUS_BORDER);
+            let row = self.child(layer);
+            let row = if selected { row.text_color(on_selected) } else { row };
+            return row.hover(move |style| style.text_color(on_selected));
+        }
         self.child(
-            motion::highlight("hover-fill", selected_fill, corner, selected).hover_color(hover).pressed_color(pressed).outset(FOCUS_BORDER),
+            motion::highlight("hover-fill", selected_fill, corner, selected)
+                .hover_color(p.hover)
+                .pressed_color(p.pressed)
+                .outset(FOCUS_BORDER),
         )
     }
 }
 
-impl<T: ParentElement + InteractiveElement + Sized> HoverFill for T {}
+/// 高对比度下按钮悬停、展开时描边的颜色：跟随系统对比度主题时用“选定文本”的底色（与 Windows 按钮悬停一致）；
+/// 内置配色的选中底色很浅，描不出来，用正文色。
+fn hc_line(p: &Palette) -> Hsla {
+    if p.on_selected != p.text { p.selected } else { p.text }
+}
+
+/// 行里带颜色的文字、图标用它设颜色：高对比度下不设，跟着行的文字色走（行被悬停、选中时换成 `on_selected`）。
+///
+/// 不能用 `group_hover` 换颜色：文字的颜色在排版时就定了，那时还不知道所在的行是否被悬停。跟随系统的高对比度主题里
+/// 次要文字、状态颜色本来都等于正文色，不丢信息。
+pub trait RowColor: Styled + Sized {
+    fn row_color(self, color: Hsla, p: &Palette) -> Self {
+        if p.high_contrast { self } else { self.text_color(color) }
+    }
+}
+
+impl<T: Styled + Sized> RowColor for T {}
+
+/// 行里带颜色的图标（见 [`RowColor`]）：颜色放在外面一层上，图标不设颜色时取文字色。
+pub fn row_icon(icon: impl IntoElement, color: Hsla, p: &Palette) -> Div {
+    h_flex().flex_none().row_color(color, p).child(icon)
+}
+
+impl<T: ParentElement + InteractiveElement + Styled + Sized> HoverFill for T {}
 
 /// 导航项（设置弹窗左侧）。调用方再加 `on_click`。
 ///
@@ -2181,6 +2231,43 @@ mod tests {
             cx.set_global(over);
             let p = super::palette(cx);
             assert!(p.high_contrast);
+            // 内置配色没设 `on_selected`：等于正文色。
+            assert_eq!(p.on_selected, p.text);
+        });
+    }
+
+    /// 跟随 Windows 的“高对比白”：选中、悬停是紫底白字，链接深蓝，次要文字和状态色都是文本色，底色都是背景色。
+    #[gpui::test]
+    fn system_high_contrast_colors_become_the_palette(cx: &mut gpui::TestAppContext) {
+        let white = crate::system_a11y::SystemColors {
+            window: 0xFFFFFF,
+            window_text: 0x000000,
+            highlight: 0x37006E,
+            highlight_text: 0xFFFFFF,
+            hot_light: 0x00009F,
+            gray_text: 0x600000,
+            button_face: 0xFFFFFF,
+            button_text: 0x000000,
+        };
+        let theme = crate::backend::system_high_contrast_theme(white);
+        let mut over = super::PaletteOverride::parse(&theme.light, &theme.dark).expect("系统颜色是合法的配色");
+        over.high_contrast = true;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(over);
+            let p = super::palette(cx);
+            let hex = |color: u32| gpui_kit::Hsla::from(gpui_kit::rgb(color));
+            assert_eq!(p.selected, hex(0x37006E));
+            assert_eq!(p.on_selected, hex(0xFFFFFF));
+            assert_eq!(p.accent, hex(0x00009F));
+            for color in [p.text_secondary, p.danger, p.warning, p.success, p.border] {
+                assert_eq!(color, p.text);
+            }
+            for color in [p.raised, p.sidebar, p.sunken] {
+                assert_eq!(color, p.surface);
+            }
+            // 按钮悬停的描边用选定色（与 Windows 一致）。
+            assert_eq!(super::hc_line(&p), p.selected);
         });
     }
 }

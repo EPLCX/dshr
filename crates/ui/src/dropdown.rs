@@ -452,6 +452,8 @@ impl DropdownState {
                     .map(|option| crate::design::with_focus_ring(option, self.options[index].is_focused(window), radius::SM, window, &p))
                     // 高亮项的底色有过渡（铺到焦点框外沿）。悬停就是高亮（见 `hover`），只有一项亮着。
                     .child(motion::highlight("option-fill", hover_bg, radius::SM, highlighted).without_hover().outset(2.))
+                    // 高对比度：高亮项是“选定文本”的配色（`selected` 底、`on_selected` 字）。
+                    .when(p.high_contrast && highlighted, |option| option.text_color(p.on_selected))
                     // 和系统组合框一样：鼠标移到哪一项，哪一项就是高亮项并获得焦点，读屏软件随之读出它
                     // （不只是键盘）。之后按 Enter、方向键也从这一项接着走。
                     .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, window, cx| this.hover(index, window, cx)))
@@ -468,7 +470,9 @@ impl DropdownState {
                             view.update(cx, |this, cx| this.focus_highlighted(window, cx)).ok();
                         }))
                     })
-                    .when(selected, |option| option.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)));
+                    .when(selected, |option| {
+                        option.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                    });
                 [header.map(IntoElement::into_any_element), Some(option.into_any_element())]
             })
             .flatten();

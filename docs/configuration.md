@@ -248,6 +248,7 @@ text = "#E8F0EA"
 | `on_accent` | 强调色上面的文字和图标 |
 | `success` / `warning` / `danger` | 成功、需要注意、错误 |
 | `focus_ring` | 键盘焦点框 |
+| `on_selected` | 选中项（和高对比度下悬停的行）上的文字；不写时等于 `text` |
 
 颜色写成 `#rrggbb`。写了不认识的键、颜色格式不对，或者 `text` 和 `surface` 的对比度低于 4.5:1 时，整套方案被拒绝，
 界面用默认配色，原因显示在设置页的“配色方案”下面。插件也可以导出配色方案（见 [插件 API 参考](plugin-api.md#themes)）。
