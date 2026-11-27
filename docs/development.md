@@ -143,6 +143,8 @@ pwsh scripts/third-party-notices.ps1 -Check   # 只检查是否最新，过期�
 ```
 
 - 范围：工作区全部成员在 Windows x64、macOS（Apple 芯片与 Intel）上的普通依赖；dev / build 依赖不进最终程序，不列入。
+  用 `[patch.crates-io]` 换成本地 `vendor/` 副本的补丁版依赖（如 `gpui-pre-windows`）照样列入：脚本按 `cargo metadata`
+  的 `workspace_members` 区分工作区自身的 crate，不看 `source` 是否为空（本地路径依赖的 `source` 都是空的）。
 - 许可证全文取自各 crate 发布包里自带的 LICENSE / COPYING / NOTICE 文件，相同文本只保留一份。
 - 带 C 源码或数据的组件单独说明：QuickJS-ng、Zstandard（按 BSD 使用）、AWS-LC、Lucide 图标、Unicode 字符数据。
   新引入这类依赖时，在脚本的 `$bundled` 和 `$extraLicenseFiles` 里登记。

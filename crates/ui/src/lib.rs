@@ -43,21 +43,23 @@ use std::sync::Arc;
 use dshr_agent::SessionSummary;
 use dshr_config::{MotionPreference, ThemePreference};
 use gpui_kit::base::FocusTrapElement as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::design::ControlSize as _;
+use crate::design::HoverFill as _;
+
 pub use backend::Backend;
 pub use cards::{AccountUi, FsUi, PermissionUi, PlanUi, PresetsUi, builtin_ui_plugins};
 pub use conversation::{ConversationEvent, ConversationView};
 pub use design::Palette;
-use design::motion::Edge;
 use design::{
-    Tone, Typography as _, brand_mark, heading, hint, hover_fill, list_item, menu_item_enter, menu_popover, motion, palette, pressable,
-    radius, readable_with_id, shadow, size, space, status_dot,
+    Tone, Typography as _, brand_mark, heading, hint, list_item, menu_popover, motion, palette, pressable, radius, readable_with_id,
+    shadow, size, space, status_dot,
 };
 pub use plugin::{
     ClickHandler, ComposerControl, ComposerPanel, PageBuilder, PageContent, PanelContext, RowData, SettingsPage, SidebarAction,
@@ -89,8 +91,9 @@ pub(crate) const LANGUAGES: &[(&str, &str)] = &[
 ];
 
 const WORKSPACE_SIZE: (f32, f32) = (1200., 800.);
-/// 工作区窗口能缩到的最小尺寸：侧边栏加上一列能放下输入卡片的对话区。
-const WORKSPACE_MIN_SIZE: (f32, f32) = (870., 520.);
+/// 工作区窗口能缩到的最小尺寸：图标栏加上一列能放下输入卡片的对话区（窄于
+/// [`size::SIDEBAR_AUTO_COLLAPSE`] 时侧边栏自动收成图标栏，输入卡片下方的选项行收缩、滚动）。
+const WORKSPACE_MIN_SIZE: (f32, f32) = (560., 440.);
 /// 默认尺寸放不下时，窗口最多占屏幕可用区域的比例。
 const MAX_SCREEN_FRACTION: f32 = 0.85;
 
@@ -426,16 +429,21 @@ pub(crate) fn apply_language(code: &str) {
 pub(crate) fn apply_palette(backend: &Backend, cx: &mut App) -> Result<(), String> {
     let ui = backend.ui_config();
     let high_contrast = high_contrast_active(&ui);
-    cx.set_global(SystemHighContrast(system_a11y::high_contrast()));
+    let system_colors = system_a11y::high_contrast_colors();
+    cx.set_global(SystemHighContrast(system_a11y::high_contrast(), system_colors));
     let key = ui.palette;
-    // 打开了高对比度（或跟随系统、系统开着）：用内置的高对比度配色，不管配色方案选的是什么。
+    // 打开了高对比度（或跟随系统、系统开着）：系统开着对比度主题时用系统的颜色，否则用内置的高对比度配色，
+    // 不管配色方案选的是什么。
     let theme = if high_contrast {
-        Some(backend::builtin_high_contrast_theme())
+        Some(system_colors.map_or_else(backend::builtin_high_contrast_theme, backend::system_high_contrast_theme))
     } else {
         (!key.is_empty()).then(|| backend.themes().into_iter().find(|theme| Backend::theme_key(theme) == key)).flatten()
     };
     let result = match theme {
-        Some(theme) => design::PaletteOverride::parse(&theme.light, &theme.dark),
+        Some(theme) => design::PaletteOverride::parse(&theme.light, &theme.dark).map(|mut over| {
+            over.high_contrast = high_contrast;
+            over
+        }),
         None => Ok(design::PaletteOverride::default()),
     };
     let result = match result {
@@ -484,8 +492,8 @@ pub(crate) fn high_contrast_active(ui: &dshr_config::UiConfig) -> bool {
     }
 }
 
-/// 上次读到的系统高对比度设置（跟随系统时，变了才重新套配色）。
-struct SystemHighContrast(bool);
+/// 上次读到的系统高对比度设置和对比度主题的颜色（变了才重新套配色）。
+struct SystemHighContrast(bool, Option<system_a11y::SystemColors>);
 
 impl Global for SystemHighContrast {}
 
@@ -508,11 +516,23 @@ pub(crate) fn follow_system_settings(backend: &Backend, window: &mut Window, cx:
             cx.refresh_windows();
         }
     }
-    if ui.high_contrast != dshr_config::HighContrastPreference::System {
+    // 减少动态效果：组件库只在启动时读一次系统设置（Windows、macOS 改了不通知）。只在“跟随系统”时重读：
+    // 选了“减少”或“完整”时用户的选择优先，不能让系统设置覆盖。
+    if ui.motion == dshr_config::MotionPreference::System {
+        let before = cx.reduce_motion();
+        gpui_kit::base::apply_system_reduce_motion(cx);
+        let now = cx.reduce_motion();
+        cx.set_global(SystemMotion(now));
+        if now != before {
+            cx.refresh_windows();
+        }
+    }
+    // 关着高对比度时不管系统；开着（或跟随系统）时，系统开关和对比度主题的颜色有一个变了就重新套配色。
+    if ui.high_contrast == dshr_config::HighContrastPreference::Off {
         return;
     }
-    let now = system_a11y::high_contrast();
-    if cx.try_global::<SystemHighContrast>().is_some_and(|last| last.0 == now) {
+    let now = (system_a11y::high_contrast(), system_a11y::high_contrast_colors());
+    if cx.try_global::<SystemHighContrast>().is_some_and(|last| (last.0, last.1) == now) {
         return;
     }
     refresh_palette(backend, window, cx).ok();
@@ -540,12 +560,15 @@ pub(crate) fn sync_theme(cx: &mut App) {
     let overridden = cx.try_global::<design::PaletteOverride>().is_some_and(|over| !over.is_empty(dark));
     let theme = gpui_kit::component::ActiveTheme::theme(cx);
     let needs_colors = overridden
-        && (theme.foreground != p.text || theme.background != p.surface || theme.input != p.border || theme.switch != p.text_secondary);
-    if theme.ring != ring || theme.font_size != font || theme.mono_font_size != mono || needs_colors {
+        && (theme.foreground != p.text || theme.background != p.surface || theme.border != p.border || theme.switch != p.text_secondary);
+    let needs_controls = !design::control_theme_applied(&p, theme);
+    if theme.ring != ring || theme.font_size != font || theme.mono_font_size != mono || needs_colors || needs_controls {
         Theme::update(cx, |theme| {
             if overridden {
                 design::apply_palette_to_theme(&p, &mut theme.colors);
             }
+            // 圆角、按钮与输入框的状态色：所有主题都按调色板设（`Theme::change` 每次都会把它们换回原始值）。
+            design::control_theme(&p, theme);
             theme.colors.ring = ring;
             theme.font_size = font;
             theme.mono_font_size = mono;
@@ -616,9 +639,6 @@ struct OpenInstallDialog {
     restore: Option<FocusHandle>,
     _subscription: Subscription,
 }
-
-/// 会话列表刚载入后多久之内新出现的行错峰滑入。
-const SIDEBAR_INTRO: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// 插件在状态栏放了内容时，多久重画一次状态行（内容可能随时间变化）。
 const STATUS_REFRESH: std::time::Duration = std::time::Duration::from_secs(10);
@@ -735,20 +755,20 @@ pub struct WorkspaceView {
     collapsed: HashSet<Option<PathBuf>>,
     /// 侧边栏收起成一列图标按钮（`ui.sidebar_collapsed`，重启后保留）。
     sidebar_collapsed: bool,
-    /// 侧边栏现在的宽度（收起、展开时有过渡）：每帧在 `render` 里算好，侧边栏视图按它画。
+    /// 侧边栏现在的宽度：每帧在 `render` 里算好，侧边栏视图按它画。
     sidebar_width: std::cell::Cell<f32>,
+    /// 窗口窄于 [`size::SIDEBAR_AUTO_COLLAPSE`]：侧边栏自动收成图标栏（不写配置），每帧在 `render` 里算。
+    narrow: std::cell::Cell<bool>,
+    /// 窄窗口里点了“展开侧边栏”：完整的侧边栏以抽屉形式盖在对话区上，不挤压对话区。不写配置。
+    sidebar_drawer: bool,
     /// 打开着的“搜索会话”弹窗。
     session_search: Option<(Entity<session_search::SessionSearchView>, Subscription)>,
-    /// 刚关上、还在播放退场的搜索弹窗。
-    session_search_leaving: Option<Entity<session_search::SessionSearchView>>,
     /// 点过“显示更多”的分组现在显示几个会话；没有记录的分组显示 [`SIDEBAR_PAGE`] 个。
     sidebar_limits: HashMap<Option<PathBuf>, usize>,
     /// 侧边栏会话列表的滚动：键盘焦点移到看不见的行时把它滚进来（见 `reveal::reveal_in`）。
     sidebar_scroll: ScrollHandle,
     /// 打开设置时存在；关闭时丢弃，下次打开重新读取配置。
     settings: Option<(Entity<SettingsView>, Subscription)>,
-    /// 刚关上、还在播放退场的设置弹窗；退场播完就丢掉。
-    settings_leaving: Option<Entity<SettingsView>>,
     /// 插件加在侧边栏的入口，和上次读它们时插件的组成。
     plugin_entries: Vec<PluginEntry>,
     plugins_generation: usize,
@@ -756,16 +776,10 @@ pub struct WorkspaceView {
     plugin_status: Vec<(usize, String)>,
     /// 打开着的插件页面。
     plugin_page: Option<OpenPluginPage>,
-    /// 刚关上、还在播放退场的插件页面。
-    plugin_page_leaving: Option<OpenPluginPage>,
     /// 正在显示的安装确认（盖在设置、插件页面之上）。
     install_dialog: Option<OpenInstallDialog>,
-    /// 刚回答、还在播放退场的安装确认。
-    install_dialog_leaving: Option<Entity<install_dialog::InstallDialog>>,
     /// 排队等着显示的安装确认（同时来了好几个时一个一个问）。
     install_queue: std::collections::VecDeque<PendingInstall>,
-    /// 会话列表第一次画出来的时刻：之后一小段时间里新出现的行错峰滑入，再往后单独出现的行不等。
-    sidebar_intro: std::cell::Cell<Option<std::time::Instant>>,
     /// 上次设给系统的窗口标题（任务栏、Alt+Tab、读屏软件读的）；变了才重新设。
     window_title: String,
     /// 界面插件登记的侧边栏入口和状态行。
@@ -839,21 +853,18 @@ impl WorkspaceView {
             collapsed: HashSet::new(),
             sidebar_collapsed,
             sidebar_width: std::cell::Cell::new(if sidebar_collapsed { size::SIDEBAR_RAIL_WIDTH } else { size::SIDEBAR_WIDTH }),
+            narrow: std::cell::Cell::new(false),
+            sidebar_drawer: false,
             session_search: None,
-            session_search_leaving: None,
             sidebar_limits: HashMap::new(),
             sidebar_scroll: ScrollHandle::new(),
             settings: None,
-            settings_leaving: None,
             plugin_entries: Vec::new(),
             plugins_generation: 0,
             plugin_status: Vec::new(),
             plugin_page: None,
-            plugin_page_leaving: None,
             install_dialog: None,
-            install_dialog_leaving: None,
             install_queue: Default::default(),
-            sidebar_intro: std::cell::Cell::new(None),
             window_title: String::new(),
             session_menu: None,
             pending_delete: None,
@@ -1091,7 +1102,6 @@ impl WorkspaceView {
         // 焦点移进弹窗：否则焦点留在侧边栏，Esc 关不掉，Tab 会走到遮罩后面的控件，读屏软件也不知道弹窗开了。
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        self.plugin_page_leaving = None;
         self.plugin_page = Some(OpenPluginPage { title, view, focus });
         cx.notify();
     }
@@ -1130,7 +1140,6 @@ impl WorkspaceView {
         self.close_settings(window, cx);
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        self.plugin_page_leaving = None;
         self.plugin_page = Some(OpenPluginPage { title, view, focus });
         cx.notify();
     }
@@ -1148,36 +1157,29 @@ impl WorkspaceView {
         let subscription = cx.subscribe_in(&view, window, |this, _, event: &install_dialog::InstallDialogEvent, window, cx| match event {
             install_dialog::InstallDialogEvent::Closed => this.close_install_dialog(window, cx),
         });
-        self.install_dialog_leaving = None;
         self.install_dialog = Some(OpenInstallDialog { view, restore, _subscription: subscription });
         cx.notify();
     }
 
-    /// 安装确认回答完了：播退场，焦点还回去，再看队列里还有没有。
+    /// 安装确认回答完了：关上，焦点还回去，再看队列里还有没有。
     fn close_install_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(open) = self.install_dialog.take() else {
             return;
         };
-        self.install_dialog_leaving = Some(open.view);
         match open.restore {
             Some(handle) => handle.focus(window, cx),
             None => self.focus_active(window, cx),
         }
-        // 下一个等退场播完一点再弹，免得两个对话框叠在一起闪。
+        // 关上即移除，下一个直接弹出。
         if !self.install_queue.is_empty() {
-            cx.spawn_in(window, async move |this, cx| {
-                cx.background_executor().timer(motion::FAST).await;
-                this.update_in(cx, |this, window, cx| this.show_next_install(window, cx)).ok();
-            })
-            .detach();
+            self.show_next_install(window, cx);
         }
         cx.notify();
     }
 
     fn close_plugin_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(page) = self.plugin_page.take() {
-            // 留着画完退场；焦点立刻回到输入框。
-            self.plugin_page_leaving = Some(page);
+        if self.plugin_page.take().is_some() {
+            // 关上即移除，焦点回到输入框。
             self.focus_active(window, cx);
             cx.notify();
         }
@@ -1239,6 +1241,8 @@ impl WorkspaceView {
             self.stash_composer(cx);
             self.restore_composer(&view, window, cx);
         }
+        // 从抽屉里选了会话：抽屉关上，露出对话。
+        self.sidebar_drawer = false;
         self.active = view;
         self.prune(cx);
         self.focus_active(window, cx);
@@ -1381,9 +1385,7 @@ impl WorkspaceView {
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((view, _)) = self.settings.take() {
-            // 留着画完退场（订阅已经随之丢掉，不再收它的事件）。
-            self.settings_leaving = Some(view);
+        if self.settings.take().is_some() {
             // 关闭弹窗后把焦点还给输入框，否则键盘用户会“丢失”焦点。
             self.focus_active(window, cx);
             cx.notify();
@@ -1406,8 +1408,14 @@ impl WorkspaceView {
         }
     }
 
-    /// 收起或展开侧边栏，记进配置。
+    /// 收起或展开侧边栏，记进配置。窄窗口里侧边栏总是图标栏，这时改为打开、关上抽屉，不写配置。
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        if self.narrow.get() {
+            self.sidebar_drawer = !self.sidebar_drawer;
+            self.session_menu = None;
+            cx.notify();
+            return;
+        }
         self.sidebar_collapsed = !self.sidebar_collapsed;
         let collapsed = self.sidebar_collapsed;
         if let Err(error) = self.backend.update_config(|config| config.ui.sidebar_collapsed = collapsed) {
@@ -1433,14 +1441,12 @@ impl WorkspaceView {
             session_search::SessionSearchEvent::Close => this.close_session_search(window, cx),
         });
         // 焦点等弹窗画出来再进搜索框（见 `SessionSearchView::focus_pending`）。
-        self.session_search_leaving = None;
         self.session_search = Some((view, subscription));
         cx.notify();
     }
 
     fn close_session_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((view, _)) = self.session_search.take() {
-            self.session_search_leaving = Some(view);
+        if self.session_search.take().is_some() {
             self.focus_active(window, cx);
             cx.notify();
         }
@@ -1469,7 +1475,7 @@ impl WorkspaceView {
                 .rounded(px(radius::MD))
                 .bg(p.raised)
                 .border_color(p.border)
-                .shadow(design::shadow::menu())
+                .shadow(design::shadow::menu(&p))
                 .text_label()
                 .cursor_pointer()
                 .child(label)
@@ -1532,18 +1538,29 @@ impl WorkspaceView {
         }
         let title = input.read(cx).value().trim().to_owned();
         let unchanged = self.sessions.iter().any(|session| session.id == id && session.title == title);
-        if !title.is_empty() && !unchanged {
-            match self.backend.rename_session(id, &title) {
-                // 列表在后台刷新，先把新标题显示出来。
-                Ok(()) => {
-                    if let Some(session) = self.sessions.iter_mut().find(|session| session.id == id) {
-                        session.title = title;
-                    }
-                }
-                Err(error) => self.sidebar_error = Some(t!("sidebar.action_failed", error = error).to_string()),
-            }
+        if title.is_empty() || unchanged {
+            self.refresh_sessions(cx);
+            return;
         }
-        self.refresh_sessions(cx);
+        // 先把新标题显示出来。写日志放到后台：没打开的会话要先把整份日志扫一遍才能接着写（几十 MB 的日志
+        // 要几十毫秒），不能卡住界面。写完（或失败）再从磁盘刷新列表。
+        if let Some(session) = self.sessions.iter_mut().find(|session| session.id == id) {
+            session.title = title.clone();
+        }
+        cx.notify();
+        let (backend, id) = (self.backend.clone(), id.to_owned());
+        let renamed = cx.background_executor().spawn(async move { backend.rename_session(&id, &title) });
+        cx.spawn(async move |this, cx| {
+            let result = renamed.await;
+            this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.sidebar_error = Some(t!("sidebar.action_failed", error = error).to_string());
+                }
+                this.refresh_sessions(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn delete_session(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1628,21 +1645,22 @@ impl WorkspaceView {
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
         let trigger_focus = crate::design::menu_trigger_focus(("session-menu", index), window, cx);
         let trigger = crate::design::framed_trigger_with(
+            ("session-more", index),
             trigger_focus.clone(),
             Button::new(("session-more", index))
                 .track_focus(&trigger_focus)
-                .ghost()
-                .xsmall()
+                .subtle(cx)
+                .control_xs()
                 .icon(IconName::Ellipsis)
                 .accessibility_label(t!("sidebar.session_actions", title = session.title).to_string()),
         );
         // 菜单向下展开。
-        let body = move |menu: &design::MenuFocus, animate: bool, _: &mut Window, cx: &mut App| {
+        let body = move |menu: &design::MenuFocus, _: &mut Window, cx: &mut App| {
             let p = palette(cx);
             let (rename_view, delete_view) = (view.clone(), view.clone());
             let (rename_id, delete_id, title) = (id.clone(), id.clone(), title.clone());
             let delete_label = if confirming { t!("sidebar.confirm_delete") } else { t!("sidebar.delete") };
-            let rename = list_item("session-rename", None, t!("sidebar.rename").to_string(), false, &p)
+            let rename = design::menu_item("session-rename", None, t!("sidebar.rename").to_string(), false, &p)
                 .focus_on_hover()
                 .track_focus(&menu.item(0, cx))
                 .on_click(move |_, window, cx| {
@@ -1650,11 +1668,11 @@ impl WorkspaceView {
                     rename_view.update(cx, |this, cx| this.start_rename(id, title, window, cx)).ok();
                 });
             v_flex()
-                .w(px(180.))
+                .min_w(px(200.))
                 .p(px(space::XS))
-                .child(menu_item_enter(rename, "session-rename-enter", 0, animate))
-                .child(menu_item_enter(
-                    list_item("session-delete", None, delete_label.to_string(), false, &p)
+                .child(rename)
+                .child(
+                    design::menu_item("session-delete", None, delete_label.to_string(), false, &p)
                         .focus_on_hover()
                         .track_focus(&menu.item(1, cx))
                         .text_color(p.danger)
@@ -1671,10 +1689,7 @@ impl WorkspaceView {
                                 })
                                 .ok();
                         }),
-                    "session-delete-enter",
-                    1,
-                    animate,
-                ))
+                )
                 .into_any_element()
         };
         let popover = menu_popover(
@@ -1725,7 +1740,7 @@ impl WorkspaceView {
                     gpui_kit::Focusable::focus_handle(input.read(cx), cx),
                     Input::new(input).small().aria_label(t!("sidebar.rename").to_string()),
                 ));
-            return motion::fade_in(editor, ElementId::Name(format!("session-rename-{}", session.id).into())).into_any_element();
+            return editor.into_any_element();
         }
         let id = session.id.clone();
         let selected = self.active.read(cx).session_id() == Some(session.id.as_str());
@@ -1739,7 +1754,7 @@ impl WorkspaceView {
             session.title.clone().into()
         };
         let status: Option<AnyElement> = if waiting {
-            Some(Icon::new(IconName::CircleAlert).size(px(size::ICON_SM)).text_color(p.warning).into_any_element())
+            Some(design::row_icon(Icon::new(IconName::CircleAlert).size(px(size::ICON_SM)), p.warning, &p).into_any_element())
         } else if running {
             // 静止的强调色圆点，不转圈：侧边栏里的循环动画每一帧都会让整个侧边栏重新生成，一轮运行多久就重建多久。
             // 正在看的会话在标题栏里转圈（见 `TitleView`）；读屏软件读到的名称里带着“运行中”。
@@ -1789,11 +1804,7 @@ impl WorkspaceView {
                     .on_click(cx.listener(move |this, _, window, cx| this.open_session(&id, window, cx))),
             )
             .child(menu);
-        // 按会话 id 而不是行号：新会话插到最前面时，滑入的是它，而不是被挤到最后的那一行。
-        // 列表刚载入时一行接一行错峰滑入；之后单独出现的行不用等。
-        let entrance = motion::Entrance::new(motion::BASE).from(Edge::Left, motion::SHORT);
-        let entrance = if self.in_sidebar_intro() { entrance.stagger(index, motion::STAGGER_ROW) } else { entrance };
-        entrance.play(row, ElementId::Name(format!("session-enter-{}", session.id).into())).into_any_element()
+        row.into_any_element()
     }
 
     fn render_group_header(&self, index: usize, group: &WorkspaceGroup, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1804,7 +1815,6 @@ impl WorkspaceView {
         };
         let collapsed = self.collapsed.contains(&group.path);
         let key = group.path.clone();
-        let hover_bg = p.selected;
         let header = pressable(("workspace", index), &p)
             // 只读文件夹名；完整路径很长，放在描述里最后读。
             .accessibility_label(name.clone())
@@ -1821,16 +1831,20 @@ impl WorkspaceView {
             .cursor_pointer()
             .text_label()
             .relative()
-            .child(hover_fill(hover_bg, radius::MD, false))
-            .child(motion::turn(
-                Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)).text_color(p.text_secondary),
-                ("workspace-turn", index),
-                !collapsed,
-                motion::QUARTER_TURN,
-                window,
-                cx,
+            .hover_fill(&p, radius::MD, false)
+            .child(design::row_icon(
+                motion::turn(
+                    Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)),
+                    ("workspace-turn", index),
+                    !collapsed,
+                    motion::QUARTER_TURN,
+                    window,
+                    cx,
+                ),
+                p.text_secondary,
+                &p,
             ))
-            .child(Icon::new(IconName::Folder).size(px(size::ICON_MD)).text_color(p.text_secondary))
+            .child(design::row_icon(Icon::new(IconName::Folder).size(px(size::ICON_MD)), p.text_secondary, &p))
             .child(div().flex_1().min_w(px(0.)).truncate().child(name.clone()))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if !this.collapsed.remove(&key) {
@@ -1844,8 +1858,8 @@ impl WorkspaceView {
             row = row.child(crate::design::framed(
                 ("workspace-new", index),
                 Button::new(("workspace-new", index))
-                    .ghost()
-                    .xsmall()
+                    .subtle(cx)
+                    .control_xs()
                     .icon(IconName::Plus)
                     .tooltip(path.display().to_string())
                     .accessibility_label(t!("sidebar.new_in_workspace", name = name).to_string())
@@ -1855,19 +1869,15 @@ impl WorkspaceView {
                 row = row.child(crate::design::framed(
                     ("workspace-remove", index),
                     Button::new(("workspace-remove", index))
-                        .ghost()
-                        .xsmall()
+                        .subtle(cx)
+                        .control_xs()
                         .icon(IconName::Close)
                         .accessibility_label(t!("sidebar.remove_workspace", name = name).to_string())
                         .on_click(cx.listener(move |this, _, _, cx| this.forget_workspace(&path, cx))),
                 ));
             }
         }
-        let enter_id = match &group.path {
-            Some(path) => format!("workspace-enter-{}", path.display()),
-            None => "workspace-enter-other".to_owned(),
-        };
-        motion::slide_in(row, ElementId::Name(enter_id.into()), Edge::Left, motion::SHORT).into_any_element()
+        row.into_any_element()
     }
 
     /// 当前会话的标题；还没有会话时是“新会话”。
@@ -1890,7 +1900,7 @@ impl WorkspaceView {
     }
 
     /// 标题栏里的当前位置：工作区 › 会话标题，运行中时后面带加载圈，等待处理时带提醒图标。
-    /// 换会话、标题变了时从下面轻轻浮上来。由 [`TitleView`] 画；系统的窗口标题见 [`Self::sync_window_title`]。
+    /// 由 [`TitleView`] 画；系统的窗口标题见 [`Self::sync_window_title`]。
     fn render_title(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let (session_id, workspace) = {
@@ -1923,13 +1933,7 @@ impl WorkspaceView {
             .children(crumb)
             .child(div().min_w(px(0.)).truncate().font_weight(FontWeight::MEDIUM).child(title.clone()))
             .children(status.map(|status| div().flex_none().pl(px(space::XS)).child(status)));
-        let enter_id = format!("title-enter-{}-{title}", session_id.as_deref().unwrap_or("new"));
-        motion::Entrance::new(motion::FAST).from(Edge::Bottom, motion::NUDGE).play(row, ElementId::Name(enter_id.into())).into_any_element()
-    }
-
-    /// 会话列表刚载入的一小段时间（见 `sidebar_intro`）。
-    fn in_sidebar_intro(&self) -> bool {
-        self.sidebar_intro.get().is_some_and(|shown| shown.elapsed() < SIDEBAR_INTRO)
+        row.into_any_element()
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1949,7 +1953,6 @@ impl WorkspaceView {
         });
         // 焦点移进弹窗：Tab 只在弹窗内循环，Esc 可以立即关闭。
         view.update(cx, |view, cx| view.focus(window, cx));
-        self.settings_leaving = None;
         self.settings = Some((view, subscription));
         cx.notify();
     }
@@ -1966,7 +1969,7 @@ impl WorkspaceView {
         crate::design::framed(
             id,
             Button::new(id)
-                .ghost()
+                .subtle(cx)
                 .icon(icon)
                 .tooltip(label.clone())
                 .accessibility_label(label)
@@ -1987,7 +1990,7 @@ impl WorkspaceView {
             .items_center()
             .justify_center()
             .w_full()
-            .h(px(size::NAV_ITEM))
+            .h(px(size::TITLE_BAR))
             .when(!traffic_lights, |row| row.child(brand_mark(size::ICON_LG, &p)));
         let top = v_flex()
             .items_center()
@@ -2027,7 +2030,7 @@ impl WorkspaceView {
                 crate::design::framed(
                     item.id,
                     Button::new(item.id)
-                        .ghost()
+                        .subtle(cx)
                         .icon(item.icon.clone())
                         .tooltip((item.label)())
                         .accessibility_label((item.label)())
@@ -2045,7 +2048,7 @@ impl WorkspaceView {
                 crate::design::framed(
                     id.clone(),
                     Button::new(id)
-                        .ghost()
+                        .subtle(cx)
                         .icon(plugin_page::entry_icon(entry.entry.icon.as_deref()))
                         .tooltip(entry.entry.label.clone())
                         .accessibility_label(entry.entry.label.clone())
@@ -2078,11 +2081,43 @@ impl WorkspaceView {
             .into_any_element()
     }
 
+    /// 侧边栏现在是不是图标栏：用户收起了，或者窗口太窄。
+    fn rail_shown(&self) -> bool {
+        self.sidebar_collapsed || self.narrow.get()
+    }
+
+    /// 窄窗口里展开的侧边栏：盖在对话区上，点外面、按 Esc、选中会话或窗口变宽时关上。即时出现（布局变化不做动画）。
+    fn render_sidebar_drawer(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !(self.sidebar_drawer && self.narrow.get()) {
+            return None;
+        }
+        let p = palette(cx);
+        let panel = div()
+            .id("sidebar-drawer")
+            .occlude()
+            .absolute()
+            .top_0()
+            .left_0()
+            .h_full()
+            .w(px(size::SIDEBAR_WIDTH))
+            .bg(p.sidebar)
+            .border_r_1()
+            .border_color(p.border)
+            .shadow(shadow::modal(&p))
+            .child(self.render_sidebar_full(window, cx));
+        // 抽屉外面铺一层透明的点击区：点外面关上抽屉，这一下不落到对话区上。
+        let outside = div().id("sidebar-drawer-outside").absolute().inset_0().occlude().on_click(cx.listener(|this, _, _, cx| {
+            this.sidebar_drawer = false;
+            cx.notify();
+        }));
+        Some(div().absolute().inset_0().child(outside).child(panel).into_any_element())
+    }
+
     fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let width = self.sidebar_width.get();
         // 宽度在过渡：外层按当前宽度裁切，里面按收起或展开时的宽度排版，内容不会被挤得换行。
-        let inner = if self.sidebar_collapsed { self.render_sidebar_rail(window, cx) } else { self.render_sidebar_full(window, cx) };
+        let inner = if self.rail_shown() { self.render_sidebar_rail(window, cx) } else { self.render_sidebar_full(window, cx) };
         div()
             .w(px(width))
             .h_full()
@@ -2097,9 +2132,6 @@ impl WorkspaceView {
     fn render_sidebar_full(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
         let hidden = self.backend.hidden_entries();
-        if self.sidebar_intro.get().is_none() && !self.sessions.is_empty() {
-            self.sidebar_intro.set(Some(std::time::Instant::now()));
-        }
         let mut list: Vec<AnyElement> = Vec::new();
         let scroll = &self.sidebar_scroll;
         for (group_index, group) in self.groups().iter().enumerate() {
@@ -2108,28 +2140,18 @@ impl WorkspaceView {
                 reveal::reveal_in(scroll, ("reveal-workspace", group_index), self.render_group_header(group_index, group, window, cx))
                     .into_any_element(),
             );
-            // 折叠、展开时高度收起、展开（会话行在里面，id 按分组，不随折叠变）。
-            let reveal_id = match &group.path {
-                Some(path) => format!("workspace-reveal-{}", path.display()),
-                None => "workspace-reveal-other".to_owned(),
-            };
-            let expanded = !self.collapsed.contains(&group.path);
-            let reveal_id = ElementId::Name(reveal_id.into());
-            let Some(phase) = motion::expansion(reveal_id.clone(), expanded, window, cx) else {
+            // 折叠、展开即时完成（布局变化不做动画）。
+            if self.collapsed.contains(&group.path) {
                 continue;
-            };
+            }
             let mut rows: Vec<AnyElement> = Vec::new();
             if group.sessions.is_empty() {
                 rows.push(
-                    motion::nudge_in(
-                        div().pl(px(space::XXL + space::S)).py(px(space::XS)).child(hint(
-                            t!("sidebar.no_sessions").to_string(),
-                            Tone::Neutral,
-                            &p,
-                        )),
-                        ("workspace-empty", group_index),
-                    )
-                    .into_any_element(),
+                    div()
+                        .pl(px(space::XXL + space::S))
+                        .py(px(space::XS))
+                        .child(hint(t!("sidebar.no_sessions").to_string(), Tone::Neutral, &p))
+                        .into_any_element(),
                 );
             }
             // 每组先显示最近的 `SIDEBAR_PAGE` 个；正在看的、在运行的会话不管多早都显示。
@@ -2170,7 +2192,7 @@ impl WorkspaceView {
                     .into_any_element(),
                 );
             }
-            list.push(motion::reveal(reveal_id, phase, v_flex().gap(px(2.)).children(rows)));
+            list.push(v_flex().gap(px(2.)).children(rows).into_any_element());
         }
 
         let new_session = list_item("new-session", Some(IconName::Plus), t!("sidebar.new_session").to_string(), false, &p)
@@ -2204,7 +2226,7 @@ impl WorkspaceView {
                             .flex_1()
                             .min_w(px(0.))
                             .items_center()
-                            .h(px(size::NAV_ITEM))
+                            .h(px(size::TITLE_BAR))
                             .px(px(space::M))
                             // macOS：品牌放在红黄绿按钮右边。
                             .pl(px(space::M + title_bar::brand_offset(space::M * 2., window)))
@@ -2228,8 +2250,8 @@ impl WorkspaceView {
                     .child(crate::design::framed(
                         "add-workspace",
                         Button::new("add-workspace")
-                            .ghost()
-                            .xsmall()
+                            .subtle(cx)
+                            .control_xs()
                             .icon(IconName::FolderOpen)
                             .tooltip(t!("sidebar.add_workspace").to_string())
                             .accessibility_label(t!("sidebar.add_workspace").to_string())
@@ -2251,7 +2273,7 @@ impl WorkspaceView {
             .children(
                 self.sidebar_error
                     .clone()
-                    .map(|error| motion::error_in(div().px(px(space::M)).child(hint(error, Tone::Danger, &p)), "sidebar-error")),
+                    .map(|error| motion::fade_in(div().px(px(space::M)).child(hint(error, Tone::Danger, &p)), "sidebar-error")),
             )
             .child(
                 v_flex()
@@ -2273,17 +2295,14 @@ impl WorkspaceView {
                             .filter(|(_, entry)| entry.entry.place == dshr_agent::EntryPlace::Sidebar)
                             .map(|(index, entry)| {
                                 let open = self.plugin_page.as_ref().is_some_and(|page| page.title == entry.entry.label);
-                                let item = list_item(
+                                list_item(
                                     ("plugin-entry", index),
                                     Some(plugin_page::entry_icon(entry.entry.icon.as_deref())),
                                     entry.entry.label.clone(),
                                     open,
                                     &p,
                                 )
-                                .on_click(cx.listener(move |this, _, window, cx| this.open_plugin_page(index, window, cx)));
-                                // 插件热重载加进来的入口滑入。
-                                let enter_id = format!("plugin-entry-enter-{}-{}", entry.plugin, entry.entry.label);
-                                motion::slide_in(item, ElementId::Name(enter_id.into()), Edge::Left, motion::SHORT)
+                                .on_click(cx.listener(move |this, _, window, cx| this.open_plugin_page(index, window, cx)))
                             }),
                     )
                     .child(
@@ -2348,8 +2367,16 @@ impl Render for WorkspaceView {
         // 另一边一重绘，没重绘的这一边就从无障碍树里整个消失（例如一输入文字，侧边栏就读不到了）。
         // 只有读屏软件连着时才有这份开销；它连上时 GPUI 会强制重绘一次，这里随之切换。
         let cache = !window.is_a11y_active();
-        // 收起、展开侧边栏时宽度有过渡（减少动态效果时直接到位）。
-        let expanded = motion::tween("sidebar-width", if self.sidebar_collapsed { 0. } else { 1. }, window, cx);
+        // 窗口太窄时侧边栏自动收成图标栏；变宽后回到用户自己的设置，抽屉随之关上。
+        let narrow = window.viewport_size().width.as_f32() < size::SIDEBAR_AUTO_COLLAPSE;
+        if narrow != self.narrow.get() {
+            self.narrow.set(narrow);
+            self.sidebar_drawer &= narrow;
+            self.sidebar.update(cx, |_, cx| cx.notify());
+        }
+        // 收起、展开侧边栏时宽度过渡（`BASE`，标准曲线；减少动态效果时即时）。外层按当前宽度裁切，
+        // 里面按收起或展开后的宽度排版（见 `render_sidebar`），内容不会被挤得换行。
+        let expanded = motion::tween_for("sidebar-width", if self.rail_shown() { 0. } else { 1. }, motion::BASE, window, cx);
         let sidebar_width = size::SIDEBAR_RAIL_WIDTH + (size::SIDEBAR_WIDTH - size::SIDEBAR_RAIL_WIDTH) * expanded;
         if (self.sidebar_width.get() - sidebar_width).abs() > f32::EPSILON {
             self.sidebar_width.set(sidebar_width);
@@ -2360,18 +2387,12 @@ impl Render for WorkspaceView {
         let sidebar = if cache { self.sidebar.clone().cached(sidebar_style) } else { ViewElement::new(self.sidebar.clone()) };
         let active =
             if cache { self.active.clone().cached(StyleRefinement::default().size_full()) } else { ViewElement::new(self.active.clone()) };
-        // 切换会话时对话区淡入并上浮一点：包裹层的 id 跟着当前对话变，换一个对话就重播一次。
-        let conversation = motion::rise_in(
-            div().flex_1().h_full().min_w(px(0.)).child(active),
-            ("conversation-enter", self.active.entity_id().as_u64() as usize),
-        );
-        // 设置以弹窗形式盖在工作区上：遮罩淡入，卡片带一点过冲地浮上来；关上时卡片下沉淡出。
+        // 切换会话即时显示（导航不做动画）。
+        let conversation = div().flex_1().h_full().min_w(px(0.)).child(active);
+        // 设置以弹窗形式盖在工作区上：遮罩淡入，卡片淡入并上浮一点；关上时立即移除。
         // 卡片的样子由设置视图自己按进度画（阴影在卡片上，要跟着渐显）。
-        let settings_phase = motion::presence("settings-overlay", self.settings.is_some(), motion::SLOW, motion::FAST, window, cx);
-        if settings_phase.is_none() {
-            self.settings_leaving = None;
-        }
-        let shown_settings = self.settings.as_ref().map(|(view, _)| view.clone()).or_else(|| self.settings_leaving.clone());
+        let settings_phase = motion::presence("settings-overlay", self.settings.is_some(), motion::SLOW, window, cx);
+        let shown_settings = self.settings.as_ref().map(|(view, _)| view.clone());
         let overlay = settings_phase.zip(shown_settings).map(|(phase, settings)| {
             settings.update(cx, |view, _| view.set_phase(phase));
             title_bar::below(div().id("settings-overlay").absolute())
@@ -2381,11 +2402,8 @@ impl Render for WorkspaceView {
                 .child(centered().child(settings))
         });
         // 插件页面也以弹窗形式打开：标题、关闭按钮，下面是插件画的内容。
-        let plugin_phase = motion::presence("plugin-page-overlay", self.plugin_page.is_some(), motion::SLOW, motion::FAST, window, cx);
-        if plugin_phase.is_none() {
-            self.plugin_page_leaving = None;
-        }
-        let shown_page = self.plugin_page.as_ref().or(self.plugin_page_leaving.as_ref());
+        let plugin_phase = motion::presence("plugin-page-overlay", self.plugin_page.is_some(), motion::SLOW, window, cx);
+        let shown_page = self.plugin_page.as_ref();
         let plugin_page = plugin_phase.zip(shown_page).map(|(phase, page)| {
             let dialog = v_flex()
                 .id("plugin-page")
@@ -2395,7 +2413,7 @@ impl Render for WorkspaceView {
                 .w(px(size::MODAL_CONTENT_MAX_WIDTH))
                 .max_w(relative(0.94))
                 .max_h(relative(0.9))
-                .rounded(px(radius::XXL))
+                .rounded(px(radius::XL))
                 .bg(p.raised)
                 .border_1()
                 .border_color(p.border)
@@ -2409,8 +2427,8 @@ impl Render for WorkspaceView {
                         .child(crate::design::framed(
                             "close-plugin-page",
                             Button::new("close-plugin-page")
-                                .ghost()
-                                .small()
+                                .subtle(cx)
+                                .control_sm()
                                 .icon(IconName::Close)
                                 .accessibility_label(t!("settings.close").to_string())
                                 .on_click(cx.listener(|this, _, window, cx| this.close_plugin_page(window, cx))),
@@ -2425,7 +2443,7 @@ impl Render for WorkspaceView {
                         .overflow_y_scroll()
                         .child(page.view.clone()),
                 )
-                .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::MEDIUM, phase, shadow::modal()))
+                .map(|dialog| motion::pop(dialog, motion::Edge::Bottom, motion::SHORT, phase, shadow::modal(&p)))
                 .focus_trap("plugin-page-trap", &page.focus);
             title_bar::below(div().id("plugin-page-overlay").absolute())
                 .occlude()
@@ -2439,12 +2457,8 @@ impl Render for WorkspaceView {
                 .child(centered().child(dialog))
         });
         // 搜索会话：靠上居中，像命令面板。点遮罩关上。
-        let search_phase =
-            motion::presence("session-search-overlay", self.session_search.is_some(), motion::BASE, motion::FAST, window, cx);
-        if search_phase.is_none() {
-            self.session_search_leaving = None;
-        }
-        let shown_search = self.session_search.as_ref().map(|(view, _)| view.clone()).or_else(|| self.session_search_leaving.clone());
+        let search_phase = motion::presence("session-search-overlay", self.session_search.is_some(), motion::FAST, window, cx);
+        let shown_search = self.session_search.as_ref().map(|(view, _)| view.clone());
         let search_overlay = search_phase.zip(shown_search).map(|(phase, view)| {
             view.update(cx, |view, _| view.set_phase(phase));
             title_bar::below(div().id("session-search-overlay").absolute())
@@ -2457,12 +2471,8 @@ impl Render for WorkspaceView {
                 .child(div().size_full().flex().justify_center().items_start().pt(relative(0.08)).child(view))
         });
         // 安装确认盖在最上面（从设置页装插件时设置弹窗正开着）。点遮罩不关：要用户明确回答。
-        let install_phase =
-            motion::presence("install-dialog-overlay", self.install_dialog.is_some(), motion::SLOW, motion::FAST, window, cx);
-        if install_phase.is_none() {
-            self.install_dialog_leaving = None;
-        }
-        let shown_install = self.install_dialog.as_ref().map(|open| open.view.clone()).or_else(|| self.install_dialog_leaving.clone());
+        let install_phase = motion::presence("install-dialog-overlay", self.install_dialog.is_some(), motion::SLOW, window, cx);
+        let shown_install = self.install_dialog.as_ref().map(|open| open.view.clone());
         let install_overlay = install_phase.zip(shown_install).map(|(phase, dialog)| {
             dialog.update(cx, |view, _| view.set_phase(phase));
             title_bar::below(div().id("install-dialog-overlay").absolute())
@@ -2491,6 +2501,13 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(Self::on_search_sessions))
             // 插件命令的快捷键（和内置快捷键冲突的不生效）。
             .on_key_down(cx.listener(Self::on_plugin_shortcut))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if this.sidebar_drawer && event.keystroke.key == "escape" {
+                    cx.stop_propagation();
+                    this.sidebar_drawer = false;
+                    cx.notify();
+                }
+            }))
             .text_color(p.text)
             // 平滑滚动层放在最前：捕获阶段按绘制顺序派发，它得先于对话区的滚动容器拿到滚轮事件。
             .child(self.scroll.layer(cx))
@@ -2519,6 +2536,7 @@ impl Render for WorkspaceView {
             )
             // 盖在侧边栏和对话区上面，但在弹窗下面：弹窗开着时焦点陷阱把 Tab 留在弹窗里。
             .child(self.render_skip_links(window, cx))
+            .children(self.render_sidebar_drawer(window, cx))
             .children(overlay)
             .children(plugin_page)
             .children(search_overlay)

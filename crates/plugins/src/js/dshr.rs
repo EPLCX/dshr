@@ -251,11 +251,21 @@ impl Dshr<'_> {
             return Err(format!("invalid session id {id}"));
         }
         let path = dshr_agent::session_log_path(&self.paths().sessions_dir(), id);
-        let entries = dshr_core::read_entries(&path).map_err(|error| format!("cannot read session {id}: {error}"))?;
-        let events: Vec<Value> =
-            entries.iter().filter_map(|entry| entry.known()).filter_map(|event| serde_json::to_value(event).ok()).collect();
-        let start = events.len().saturating_sub(last);
-        Ok(Value::Array(events[start..].to_vec()))
+        // 从文件末尾往前一行行读，凑够 `last` 条就停：长会话里只读、只解析用得着的那一截，
+        // 不再把整份日志解析一遍、再把每条事件都转成 JSON 值。解析不了的行（没写完的最后一行、坏行）跳过。
+        let failed = |error: std::io::Error| format!("cannot read session {id}: {error}");
+        let mut lines = super::host::ReverseLines::open(&path).map_err(failed)?;
+        let mut events = Vec::new();
+        while events.len() < last {
+            let Some(line) = lines.next_line().map_err(failed)? else { break };
+            if let Ok(dshr_core::LogEntry::Known(event)) = dshr_core::LogEntry::parse(&line)
+                && let Ok(value) = serde_json::to_value(&event)
+            {
+                events.push(value);
+            }
+        }
+        events.reverse();
+        Ok(Value::Array(events))
     }
 
     /// `{ title, workspace, events: [{ type, data }] }` → 一个新会话，返回它的 id。只接受普通的对话事件。

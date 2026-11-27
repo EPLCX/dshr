@@ -12,10 +12,14 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::text::TextView;
-use gpui_kit::component::{Disableable as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
+
+use crate::design::ControlSize as _;
+use crate::design::HoverFill as _;
+use crate::design::RowColor as _;
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
@@ -322,18 +326,23 @@ impl PluginPageView {
             "divider" => divider(&p).into_any_element(),
             "button" => {
                 let (action, value) = (string("action"), node.get("payload").cloned().unwrap_or(Value::Null));
-                let button = Button::new(id("")).small().label(string("label")).disabled(self.busy);
+                let button = Button::new(id("")).control_sm().label(string("label")).disabled(self.busy);
                 let button = match node.get("variant").and_then(Value::as_str) {
                     Some("primary") => button.primary(),
-                    Some("ghost") => button.ghost(),
+                    Some("ghost") => button.subtle(cx),
                     Some("danger") => button.danger(),
-                    _ => button.outline(),
+                    _ => button,
                 };
                 div()
-                    .child(crate::design::framed(
-                        id(""),
-                        button.on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx))),
-                    ))
+                    .child(
+                        crate::design::framed(
+                            id(""),
+                            button.on_click(
+                                cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)),
+                            ),
+                        )
+                        .inert(self.busy),
+                    )
                     .into_any_element()
             }
             "input" => {
@@ -367,7 +376,6 @@ impl PluginPageView {
             }
             "list" => {
                 let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
-                let selected = p.selected;
                 v_flex()
                     .gap(px(2.))
                     .children(items.into_iter().enumerate().map(|(index, item)| {
@@ -382,7 +390,7 @@ impl PluginPageView {
                                 .gap(px(space::M))
                                 .rounded(px(radius::MD))
                                 .child(div().flex_1().min_w(px(0.)).text_body().child(title.clone()))
-                                .children(detail.clone().map(|detail| div().text_caption().text_color(p.text_secondary).child(detail)))
+                                .children(detail.clone().map(|detail| div().text_caption().row_color(p.text_secondary, &p).child(detail)))
                         };
                         match action {
                             // 能点的行是按钮：Tab 能走到，Enter / 空格触发；读屏软件读标题，详情作补充说明。
@@ -392,10 +400,13 @@ impl PluginPageView {
                                 pressable(item_id, &p)
                                     .accessibility_label(title.clone())
                                     .when_some(detail.clone(), |row, detail| row.aria_description(detail))
+                                    .relative()
                                     .flex()
                                     .items_center()
+                                    .rounded(px(radius::MD))
                                     .cursor_pointer()
-                                    .hover(move |style| style.bg(selected))
+                                    // 悬停、按下底色铺满整行，带圆角。
+                                    .hover_fill(&p, radius::MD, false)
                                     .on_click(
                                         cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)),
                                     )
@@ -437,8 +448,8 @@ impl PluginPageView {
                 let buttons = options.into_iter().enumerate().map(|(index, option)| {
                     let value = option.as_str().or_else(|| option.get("value").and_then(Value::as_str)).unwrap_or_default().to_owned();
                     let text = option.get("label").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| value.clone());
-                    let button = Button::new(id(&format!("-option-{index}"))).small().label(text).disabled(self.busy);
-                    let button = if value == current { button.primary() } else { button.outline() };
+                    let button = Button::new(id(&format!("-option-{index}"))).control_sm().label(text).disabled(self.busy);
+                    let button = if value == current { button.primary() } else { button };
                     let (select, action) = (select.clone(), action.clone());
                     crate::design::framed(
                         id(&format!("-option-{index}")),
@@ -452,6 +463,7 @@ impl PluginPageView {
                             }
                         })),
                     )
+                    .inert(self.busy)
                 });
                 v_flex()
                     .gap(px(space::XS))
@@ -467,8 +479,8 @@ impl PluginPageView {
                 crate::design::framed(
                     id(""),
                     Button::new(id(""))
-                        .small()
-                        .ghost()
+                        .control_sm()
+                        .subtle(cx)
                         .icon(IconName::ExternalLink)
                         .label(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -813,13 +825,13 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
             .rounded(px(radius::SM))
             .when(mark.is_some(), |cell| cell.bg(p.accent_soft))
             .child(div().text_caption().child(day.to_string()))
-            .children(mark.map(|mark| div().text_caption().text_color(p.accent).truncate().child(mark)));
+            .children(mark.map(|mark| div().text_caption().truncate().row_color(p.accent, &p).child(mark)));
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());
-                let selected_bg = p.selected;
                 cell.cursor_pointer()
-                    .hover(move |style| style.bg(selected_bg))
+                    .relative()
+                    .hover_fill(&p, radius::SM, false)
                     .on_click(move |_, window, cx| pick(date.clone(), window, cx))
                     .into_any_element()
             }
@@ -1050,8 +1062,8 @@ impl Render for PluginPageView {
                     crate::design::framed(
                         "plugin-page-retry",
                         Button::new("plugin-page-retry")
-                            .ghost()
-                            .xsmall()
+                            .subtle(cx)
+                            .control_xs()
                             .label(t!("plugin_page.retry").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))),
                     ),

@@ -12,6 +12,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use crate::design::ControlSize as _;
+
 use crate::announce::announce;
 use crate::backend::{Backend, KeyStatus};
 use crate::design::{
@@ -58,8 +60,6 @@ pub struct ProviderForm {
     backend: Arc<Backend>,
     mode: Mode,
     tab: Tab,
-    /// 上一次切换标签页的方向：新内容从这一边滑进来。还没切换过时为 `None`。
-    tab_from: Option<motion::Edge>,
     /// 尚未添加的内置适配器（添加模式的下拉选项）。
     available: Vec<&'static Adapter>,
     adapter_select: Entity<DropdownState>,
@@ -175,7 +175,6 @@ impl ProviderForm {
         let mut form = Self {
             backend,
             tab,
-            tab_from: None,
             available,
             adapter_select,
             tab_select,
@@ -527,9 +526,6 @@ impl ProviderForm {
         if self.tab == tab {
             return;
         }
-        // 往后（下拉框里靠下的一项）切换时内容从右边来，往前切换时从左边来。
-        let position = |tab: Tab| TABS.iter().position(|value| *value == tab);
-        self.tab_from = Some(if position(tab) > position(self.tab) { motion::Edge::Right } else { motion::Edge::Left });
         self.tab = tab;
         self.models.clear();
         self.fetch = Fetch::Idle;
@@ -592,8 +588,8 @@ impl ProviderForm {
                         crate::design::framed(
                             "sign-out",
                             Button::new("sign-out")
-                                .ghost()
-                                .xsmall()
+                                .subtle(cx)
+                                .control_xs()
                                 .label(t!("settings.sign_out").to_string())
                                 .on_click(cx.listener(|this, _, window, cx| this.sign_out_account(window, cx))),
                         ),
@@ -607,12 +603,12 @@ impl ProviderForm {
                         crate::design::framed(
                             "sign-in",
                             Button::new("sign-in")
-                                .outline()
-                                .small()
+                                .control_sm()
                                 .label(t!("settings.sign_in_with_account").to_string())
                                 .disabled(signing_in)
                                 .on_click(cx.listener(|this, _, window, cx| this.sign_in_account(window, cx))),
-                        ),
+                        )
+                        .inert(signing_in),
                     ))
                     .children(signing_in.then(|| hint(t!("settings.signing_in").to_string(), Tone::Neutral, &p)))
                     .into_any_element()
@@ -648,8 +644,8 @@ impl ProviderForm {
                     crate::design::framed(
                         "clear-key",
                         Button::new("clear-key")
-                            .ghost()
-                            .xsmall()
+                            .subtle(cx)
+                            .control_xs()
                             .label(t!("settings.clear_key").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.clear_key(window, cx))),
                     ),
@@ -743,8 +739,8 @@ impl ProviderForm {
                             .child(crate::design::framed(
                                 ("remove-model", index),
                                 Button::new(("remove-model", index))
-                                    .ghost()
-                                    .small()
+                                    .subtle(cx)
+                                    .control_sm()
                                     .icon(IconName::Close)
                                     .accessibility_label(row_label(t!("settings.remove_model").to_string()))
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -775,13 +771,14 @@ impl ProviderForm {
                         crate::design::framed(
                             "fetch-models",
                             Button::new("fetch-models")
-                                .ghost()
-                                .small()
+                                .subtle(cx)
+                                .control_sm()
                                 .icon(IconName::RefreshCw)
                                 .label(fetch_label.to_string())
                                 .disabled(matches!(self.fetch, Fetch::Running))
                                 .on_click(cx.listener(|this, _, window, cx| this.fetch_models(window, cx))),
-                        ),
+                        )
+                        .inert(matches!(self.fetch, Fetch::Running)),
                     )),
             )
             .children(fetch_status)
@@ -792,8 +789,7 @@ impl ProviderForm {
                     crate::design::framed(
                         "add-model",
                         Button::new("add-model")
-                            .outline()
-                            .small()
+                            .control_sm()
                             .icon(IconName::Plus)
                             .label(t!("settings.add_model").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.add_model(window, cx))),
@@ -837,12 +833,8 @@ impl Render for ProviderForm {
                 heading(t!("settings.editing", name = name).to_string(), 3).text_heading().into_any_element()
             }
         };
-        let enter_id = ("provider-tab-enter", self.tab as usize);
-        let entrance = match self.tab_from {
-            Some(from) => motion::Entrance::new(motion::BASE).from(from, motion::PAGE),
-            None => motion::Entrance::new(motion::FAST),
-        };
-        let wrap = |body: Div| v_flex().gap(px(space::XL)).child(header).child(entrance.play(body, enter_id)).into_any_element();
+        // 切换“添加方式”即时显示（换页不做动画）。
+        let wrap = |body: Div| v_flex().gap(px(space::XL)).child(header).child(body).into_any_element();
         let mut form = v_flex().gap(px(space::XL));
 
         if self.mode == Mode::Add && self.tab == Tab::Catalog && self.available.is_empty() {
@@ -902,15 +894,14 @@ impl Render for ProviderForm {
                     ))
                     .child(t!("settings.custom_settings").to_string()),
             );
-            // 展开时高度展开，收起时先收起再移除。和上面的间距算在展开的部分里，收起到最后不会一跳。
-            let section = motion::expansion("custom-settings-reveal", open, window, cx).map(|phase| {
-                let section = v_flex()
+            // 展开、收起即时完成。
+            let section = open.then(|| {
+                v_flex()
                     .pt(px(space::XL))
                     .gap(px(space::XL))
                     .child(self.render_endpoint(cx))
                     .child(divider(&p))
-                    .child(self.render_models(cx));
-                motion::reveal("custom-settings-reveal", phase, section)
+                    .child(self.render_models(cx))
             });
             form = form.child(v_flex().child(toggle).children(section));
         }
@@ -922,7 +913,7 @@ impl Render for ProviderForm {
                 footer.child(crate::design::framed(
                     "remove-provider",
                     Button::new("remove-provider")
-                        .ghost()
+                        .subtle(cx)
                         .icon(IconName::Delete)
                         .label(t!("settings.delete_provider").to_string())
                         .on_click(cx.listener(|this, _, _, cx| this.remove_provider(cx))),
@@ -930,26 +921,28 @@ impl Render for ProviderForm {
             })
             .child(div().flex_1())
             .children(self.message.clone().map(|(text, error)| {
-                motion::message_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), "provider-message-enter", error)
+                motion::fade_in(hint(text, if error { Tone::Danger } else { Tone::Success }, &p), "provider-message-enter")
             }))
             .when(editing || self.tab == Tab::Custom, |footer| {
                 footer.child(crate::design::framed(
                     "cancel-provider",
                     Button::new("cancel-provider")
-                        .outline()
                         .label(t!("settings.cancel").to_string())
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(FormEvent::Cancelled))),
                 ))
             })
-            .child(crate::design::framed_handle(
-                (self.save_focus).clone(),
-                Button::new("save-provider")
-                    .primary()
-                    .label(t!("settings.save").to_string())
-                    .accessibility_label(self.label(t!("settings.save")))
-                    .track_focus(&self.save_focus)
-                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
-            ));
+            .child(
+                crate::design::framed_handle(
+                    (self.save_focus).clone(),
+                    Button::new("save-provider")
+                        .primary()
+                        .label(t!("settings.save").to_string())
+                        .accessibility_label(self.label(t!("settings.save")))
+                        .track_focus(&self.save_focus)
+                        .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
+                )
+                .tint("save-provider"),
+            );
         // 表单里按 Esc 收起表单（编辑时、自定义时有“取消”），而不是关掉整个设置弹窗。
         div()
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {

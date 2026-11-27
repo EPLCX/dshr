@@ -78,6 +78,36 @@ pub(crate) fn builtin_high_contrast_theme() -> dshr_agent::ThemeDef {
     }
 }
 
+/// 跟随 Windows 对比度主题时的配色：直接用系统颜色（WCAG 与 Windows 的做法：开着对比度主题时，应用用系统颜色）。
+///
+/// 对比度主题只有几种颜色：没有次要文字色、状态色，都用文本色（状态靠文字和图标表达）；没有分层的底色，
+/// 页面、浮层、侧边栏都用背景色，层次靠描边。选中项、悬停的行用“选定文本”的配色；链接、强调用超链接色。
+/// 明暗由系统主题本身决定，两套相同。
+pub(crate) fn system_high_contrast_theme(colors: crate::system_a11y::SystemColors) -> dshr_agent::ThemeDef {
+    let hex = |color: u32| format!("#{color:06X}");
+    let (text, background) = (hex(colors.window_text), hex(colors.window));
+    let roles: Vec<(&str, String)> = vec![
+        ("text", text.clone()),
+        ("text_secondary", text.clone()),
+        ("success", text.clone()),
+        ("warning", text.clone()),
+        ("danger", text.clone()),
+        ("border", text.clone()),
+        ("focus_ring", text.clone()),
+        ("surface", background.clone()),
+        ("raised", background.clone()),
+        ("sidebar", background.clone()),
+        ("sunken", background.clone()),
+        ("accent_soft", background.clone()),
+        ("selected", hex(colors.highlight)),
+        ("on_selected", hex(colors.highlight_text)),
+        ("accent", hex(colors.hot_light)),
+        ("on_accent", background),
+    ];
+    let set: std::collections::BTreeMap<String, String> = roles.into_iter().map(|(key, value)| (key.to_string(), value)).collect();
+    dshr_agent::ThemeDef { plugin: String::new(), id: "system-high-contrast".into(), name: String::new(), light: set.clone(), dark: set }
+}
+
 /// （插件快照，按它算出的要隐藏的入口）。
 type HiddenCache = (Arc<dshr_context::Snapshot>, Arc<std::collections::HashSet<String>>);
 
@@ -1041,7 +1071,7 @@ pub struct PendingApproval {
     /// 必须由用户亲自确认（`Gate::Require`）：不能“本会话不再询问”，之前选过的也不算数。
     pub mandatory: bool,
     /// 工具调用的参数：审批面板据此把要授予的插件能力写成人能读懂的说法。
-    pub input: serde_json::Value,
+    pub input: std::sync::Arc<serde_json::Value>,
     pub respond: oneshot::Sender<Decision>,
 }
 

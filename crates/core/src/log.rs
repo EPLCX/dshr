@@ -113,13 +113,19 @@ impl SessionLog {
         &self.path
     }
 
+    /// [`Self::append`] 写这种事件后会等它落盘（可能要几毫秒到几十毫秒）。
+    ///
+    /// 一轮结束、压缩这些节点落盘；其余事件交给系统缓存（每条都 fsync 太慢，流式输出时一步就有好几条）。
+    pub fn syncs(body: &EventBody) -> bool {
+        matches!(body, EventBody::TurnEnd { .. } | EventBody::Compaction { .. } | EventBody::SessionTitle { .. })
+    }
+
     pub fn append(&mut self, body: EventBody) -> Result<SessionEvent, CoreError> {
         let event = SessionEvent { seq: self.next_seq, time: now_millis(), body };
         let mut line = serde_json::to_vec(&event).expect("SessionEvent 总能序列化");
         line.push(b'\n');
         self.file.write_all(&line)?;
-        // 一轮结束、压缩这些节点落盘；其余事件交给系统缓存（每条都 fsync 太慢，流式输出时一步就有好几条）。
-        if matches!(event.body, EventBody::TurnEnd { .. } | EventBody::Compaction { .. } | EventBody::SessionTitle { .. }) {
+        if Self::syncs(&event.body) {
             self.file.sync_data()?;
         }
         self.next_seq += 1;
@@ -180,7 +186,7 @@ pub fn read_entries(path: impl AsRef<Path>) -> Result<Vec<LogEntry>, CoreError> 
         if text.trim().is_empty() {
             continue;
         }
-        match serde_json::from_str(text) {
+        match LogEntry::parse(text) {
             Ok(entry) => entries.push(entry),
             Err(_) if !complete => break,
             Err(source) => return Err(CoreError::Json { line: number, source }),
@@ -321,6 +327,62 @@ mod tests {
         assert!(crate::is_core_kind(EventBody::TurnStart { turn: 1 }.kind()));
         assert!(crate::is_core_kind(EventBody::Compaction { summary: "".into(), upto_seq: 0 }.kind()));
         assert!(!crate::is_core_kind("todo/item"));
+    }
+
+    #[test]
+    fn parses_events_field_by_field() {
+        use crate::event::{ContinueReason, TurnEndReason};
+        use crate::message::{ContentBlock, StopReason};
+        let bodies = [
+            EventBody::TurnStart { turn: 1 },
+            EventBody::TurnEnd { turn: 1, reason: TurnEndReason::Error, error: Some("x".into()) },
+            EventBody::UserAttachment {
+                path: "a.png".into(),
+                content: None,
+                media_type: Some("image/png".into()),
+                data: Some("QQ==".into()),
+            },
+            EventBody::AssistantMessage {
+                model: "m".into(),
+                content: vec![
+                    ContentBlock::text("hi"),
+                    ContentBlock::ToolUse { id: "c".into(), name: "n".into(), input: serde_json::json!({"a": [1]}).into() },
+                ],
+                stop_reason: Some(StopReason::ToolUse),
+                usage: None,
+            },
+            EventBody::ToolCall { call_id: "c".into(), name: "n".into(), input: serde_json::json!({"a": 1}).into() },
+            EventBody::ToolResult { call_id: "c".into(), output: "o".into(), is_error: true },
+            EventBody::TurnContinue { reason: ContinueReason::MaxTokens },
+            EventBody::ext("todo/item", serde_json::json!({"n": 1})).unwrap(),
+        ];
+        for body in bodies {
+            let event = SessionEvent { seq: 3, time: 4, body };
+            let text = serde_json::to_string(&event).unwrap();
+            assert_eq!(LogEntry::parse(&text).unwrap(), LogEntry::Known(event.clone()), "{text}");
+            assert_eq!(serde_json::from_str::<LogEntry>(&text).unwrap(), LogEntry::Known(event.clone()));
+            assert_eq!(serde_json::from_value::<EventBody>(serde_json::to_value(&event.body).unwrap()).unwrap(), event.body);
+        }
+
+        let known = |text: &str| LogEntry::parse(text).unwrap().known().cloned();
+        // `data` 写在 `type` 前面、多出来的字段：照样认得。
+        let event = known(r#"{"data":{"turn":2},"extra":[1],"type":"turn/start","time":1,"seq":5}"#).unwrap();
+        assert_eq!((event.seq, event.body), (5, EventBody::TurnStart { turn: 2 }));
+        // 不认识的类型（包括核心命名空间里新增的）当插件事件读。
+        assert!(
+            matches!(known(r#"{"seq":1,"time":1,"type":"session/note"}"#).unwrap().body, EventBody::Ext { kind, .. } if kind == "session/note")
+        );
+        // 核心事件内容对不上、不是事件的行：原样保留。
+        for text in [
+            r#"{"seq":1,"time":1,"type":"turn/start","data":{"turn":"x"}}"#,
+            r#"{"seq":1,"time":1,"type":"turn/start"}"#,
+            r#"{"hello":1}"#,
+            "[1,2]",
+        ] {
+            assert!(matches!(LogEntry::parse(text).unwrap(), LogEntry::Unknown(_)), "{text}");
+            assert!(matches!(serde_json::from_str::<LogEntry>(text).unwrap(), LogEntry::Unknown(_)), "{text}");
+        }
+        assert!(LogEntry::parse("{\"seq\":").is_err());
     }
 
     #[test]

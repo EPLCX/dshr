@@ -32,6 +32,29 @@ resize 里没有用 `ClearState()`：它会清掉初始化时只设置一次的�
 
 不打补丁时，窗口平时约 20MB，拖动一次之后会一直停在约 60MB。
 
+### Windows 10 上自绘标题栏时补上顶边
+
+移植自上游还没合并的 zed-industries/zed#63821（修复 zed-industries/zed#63812）。隐藏系统标题栏后，客户区
+延伸到窗口顶端，Windows 10 的 DWM 只在窗口自己的边框区域里画顶边，于是左、右、下三边有 1 像素边框线，顶上没有。
+Windows 11 的 DWM 在单独的一层上画边框，四边都有，不受影响。
+
+- `src/events.rs`：Windows 10 上、窗口不是最大化或全屏时，`DwmExtendFrameIntoClientArea` 把 DWM 边框往客户区
+  延伸 1 像素（`update_frame_margins`，在 `WM_CREATE`、`WM_SIZE` 时更新）。前台时 DWM 自己在这一行画顶边
+  （跟随“在标题栏和窗口边框上显示主题色”）；后台时 DWM 不画，由下面的边框 visual 补上（`update_top_border`，
+  在 `WM_ACTIVATE`、`WM_SIZE` 时切换）。顶上留 1 像素非客户区的做法上游试过：DWM 会连整个原生标题栏一起画出来。
+- `src/directx_renderer.rs`：DirectComposition 加一个根 visual，场景 visual 上面叠一个只有 1 像素的边框 visual，
+  按窗口宽度拉伸（`TopBorderVisual`），切换前台 / 后台只需提交一次合成，不用重绘一帧。每帧渲染后把最上面一行清成
+  透明（`draw_top_border`），让 DWM 画的边框透出来。只在 DirectComposition 的预乘 alpha 交换链上生效。
+- `src/util.rs`：`is_windows_10`（内部版本号 < 22000）；后台顶边颜色 `INACTIVE_BORDER_PREMULTIPLIED`
+  （预乘后 `43,43,43,128`，在 19045 版本上实测拟合，不随系统设置变化）；这类窗口在 Windows 10 上不管主题都请求
+  深色边框（`configure_dwm_dark_mode` 的 `force_dark_frame`），否则浅色主题下 DWM 把伸进客户区的边框画成纯白。
+- `src/window.rs`：`active` 状态、绘制时传入顶边高度、创建窗口时的深色边框参数。
+
+和上游 PR 的差异：vendor 里 `CreateTargetForHwnd` 本来用 `false`，保留不变；`draw_top_border` 的文档注释在 PR 里
+错位到了 `set_top_border_visible` 上，这里放回原处并改正。
+
+上游合并 #63821 后（以合并后的版本为准），升级 gpui-pre 时删掉这一节对应的改动。
+
 ## 升级 gpui-pre 时
 
 先看上游 `DirectXRenderer::resize` 是否已经解绑并 Flush；已经修复就删掉 `vendor/gpui-pre-windows`

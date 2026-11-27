@@ -371,7 +371,8 @@ impl Session {
             let active = state.active.as_mut().expect("Session owns an active log");
             // 先补上别人写的，自己的这条才排在它们后面（和日志里的顺序一致）。
             self.catch_up(active);
-            let event = active.log.append(body)?;
+            // 要等落盘的事件：告诉运行时这个工作线程要阻塞一会儿，别的任务挪到其它线程上继续跑。
+            let event = if SessionLog::syncs(&body) { blocking(|| active.log.append(body))? } else { active.log.append(body)? };
             if is_title(&event) {
                 active.has_title = true;
             }
@@ -396,12 +397,45 @@ impl Session {
     }
 }
 
+/// 在 tokio 多线程运行时的工作线程上执行会阻塞的操作（如 fsync）：用 `block_in_place` 让出这个线程上的其它任务。
+/// 不在运行时里、或者是单线程运行时（测试）时直接执行。
+fn blocking<R>(f: impl FnOnce() -> R) -> R {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(f),
+        _ => f(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn seqs(session: &Session) -> Vec<u64> {
         session.events().iter().map(|event| event.seq).collect()
+    }
+
+    /// 落盘的事件在多线程运行时的工作线程上、单线程运行时里、运行时外面都能照常写。
+    #[test]
+    fn syncing_appends_work_in_any_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s").join("session.v1.jsonl");
+        let (sink, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let end = |turn| EventBody::TurnEnd { turn, reason: dshr_core::TurnEndReason::Completed, error: None };
+        let mut session = Session::create("s", &path).unwrap();
+        session.append(end(1), &sink).unwrap();
+        let multi = tokio::runtime::Builder::new_multi_thread().worker_threads(2).build().unwrap();
+        let mut session = multi
+            .block_on(async move {
+                tokio::spawn(async move {
+                    session.append(end(2), &sink).unwrap();
+                    (session, sink)
+                })
+                .await
+            })
+            .unwrap();
+        let single = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        single.block_on(async { session.0.append(end(3), &session.1).unwrap() });
+        assert_eq!(seqs(&session.0), [1, 2, 3]);
     }
 
     #[test]
