@@ -180,6 +180,7 @@
   const pages = new Map();
   let prompt = null;
   let config = {};
+  let configVersion = 0;
   // 插件自带的文案（locales/<语言>.json，已拍平成 key → 文案）和默认语言。
   let i18nData = { messages: {}, defaultLocale: "en" };
   // 从“语言代码 → 值”的对象里按回退顺序挑一个。
@@ -297,8 +298,19 @@
     get workspace() {
       return native.workspace();
     },
+    // 插件自己写入、用户在设置页修改后，宿主换掉配置并加版本号：读的时候发现版本变了就重新取。
     get config() {
+      const version = native.configVersion();
+      if (version !== configVersion) {
+        configVersion = version;
+        config = Object.freeze(JSON.parse(native.configJson()));
+      }
       return config;
+    },
+    // 写自己的配置项（plugin.toml 的 [config] 里声明过的键）；值为 null 时去掉该项、回到默认值。
+    setConfig: async (patch) => {
+      if (patch === null || typeof patch !== "object" || Array.isArray(patch)) throw new TypeError("setConfig expects an object");
+      native.configSet(JSON.stringify(patch, (_key, value) => (value === undefined ? null : value)));
     },
     i18n,
     log: logger("info"),

@@ -31,7 +31,7 @@ impl JsMention {
             id: format!("{plugin}:{}", decl.id),
             decl,
             instance,
-            permits: Permits { write: false, net: !capabilities.net.is_empty(), exec: false, llm: false, act: false },
+            permits: Permits { write: false, net: !capabilities.net.is_empty(), exec: false, llm: false, act: false, config: false },
         }
     }
 

@@ -262,6 +262,12 @@ pub fn install(backend: Arc<Backend>) {
         }));
         let reload = backend.clone();
         services.config_changed = Some(Arc::new(move || reload.reload_config()));
+        // 插件写了自己的配置：先重新读文件（免得内存里的旧配置之后把它覆盖掉），再交给插件容器。
+        let configured = backend.clone();
+        services.plugin_config = Some(Arc::new(move |id: &str, _raw: serde_json::Value| {
+            configured.reload_config();
+            configured.apply_plugin_config(id);
+        }));
         let resolver = backend.clone();
         services.models = Some(Arc::new(move |spec: &str| resolver.llm_for(&dshr_config::ModelRef::parse(spec)?)));
         let backend = backend.clone();

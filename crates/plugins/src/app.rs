@@ -184,6 +184,8 @@ pub type Notifier = Arc<dyn Fn(&Notification) + Send + Sync>;
 /// 问用户要不要装：阻塞地等用户回答。
 pub type InstallPrompt = Arc<dyn Fn(&InstallRequest) -> InstallAnswer + Send + Sync>;
 /// 用系统浏览器打开一个地址（OAuth 登录）。
+/// 插件写了自己的配置：插件 id 和 `[plugins.<id>]` 的新内容。
+pub type PluginConfigChanged = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 pub type UrlOpener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 #[derive(Default, Clone)]
@@ -200,6 +202,9 @@ pub struct AppServices {
     /// 插件改了 `config.toml`（`host.dshr.config.patch`、`host.dshr.mcp.*`）之后调用：主程序重新读配置，
     /// MCP 服务器的增删即时生效。
     pub config_changed: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// 插件写了自己的配置（`host.setConfig`）之后调用：`[plugins.<id>]` 的新内容（JSON）。主程序重新读配置，
+    /// 并把新配置交给插件容器（热重载用新配置）。
+    pub plugin_config: Option<PluginConfigChanged>,
 }
 
 static SERVICES: RwLock<Option<AppServices>> = RwLock::new(None);

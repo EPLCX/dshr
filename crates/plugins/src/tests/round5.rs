@@ -433,3 +433,53 @@ async fn full_access_edits_granted_plugins_without_asking() {
     assert_eq!(recorder.0.lock().unwrap().len(), 1);
     assert!(recorder.0.lock().unwrap()[0].starts_with("plugin_write"));
 }
+
+/// `host.setConfig` 写插件自己的配置：检查后写进 `config.toml`，`host.config` 随即变成新的；
+/// 设置页改了之后（`JsPlugins::set_config`）正在运行的插件也立即读到新值。
+#[tokio::test]
+async fn plugins_write_their_own_config() {
+    let f = Fixture::new();
+    f.plugin(
+        "tuner",
+        "[config.properties.count]\ntype = \"integer\"\nminimum = 1\nmaximum = 10\ndefault = 3\n\n\
+         [config.properties.level]\ntype = \"string\"\nenum = [\"low\", \"high\"]\n",
+        r#"export const tools = [{ name: "tune", async execute({ patch }, host) {
+            try { await host.setConfig(patch); } catch (error) { return `error: ${error.message}`; }
+            return JSON.stringify(host.config);
+        } }, { name: "peek_config", readOnly: true, async execute({ patch }, host) {
+            if (patch) { try { await host.setConfig(patch); return "written"; } catch (error) { return `error: ${error.message}`; } }
+            return JSON.stringify(host.config);
+        } }];"#,
+    );
+    let scripts = JsPlugins::discover(&f.plugins_dir());
+    let cx = Context::new();
+    cx.add_group(dshr_tools::BuiltinTools).unwrap();
+    cx.add_group(scripts.clone()).unwrap();
+    let paths = dshr_config::Paths { home: f.home.path().to_owned() };
+    let stored =
+        || dshr_config::Config::load(&paths).unwrap().plugin_configs().into_iter().find(|(id, _)| id == "tuner").map(|(_, raw)| raw);
+    let tune = |patch: Value| f.call(&cx, "tune", json!({ "patch": patch }));
+
+    assert_eq!(tune(json!({ "count": 7, "level": "high" })).await.content, r#"{"count":7,"level":"high"}"#);
+    assert_eq!(stored(), Some(json!({ "count": 7, "level": "high" })));
+    // null 去掉这一项；与默认值相同的值也不写进文件。
+    assert_eq!(tune(json!({ "level": null, "count": 3 })).await.content, "{}");
+    assert_eq!(stored(), None);
+    // 不合规的整批拒绝，什么都不写。
+    for (patch, error) in [
+        (json!({ "count": 11 }), "between"),
+        (json!({ "count": 5, "level": "mid" }), "one of"),
+        (json!({ "other": 1 }), "not declared"),
+        (json!({ "enabled": false }), "set by the user"),
+    ] {
+        let result = tune(patch.clone()).await.content;
+        assert!(result.starts_with("error:") && result.contains(error), "{patch}: {result}");
+    }
+    assert_eq!(stored(), None);
+    assert!(f.call(&cx, "peek_config", json!({ "patch": { "count": 5 } })).await.content.starts_with("error: setConfig is only available"));
+
+    // 设置页改了配置：正在运行的插件立即读到新值，Context 里也换成新的（热重载用它）。
+    scripts.set_config("tuner", json!({ "count": 9, "enabled": true }));
+    assert_eq!(f.call(&cx, "peek_config", json!({})).await.content, r#"{"count":9}"#);
+    assert_eq!(cx.config("tuner"), Some(json!({ "count": 9, "enabled": true })));
+}

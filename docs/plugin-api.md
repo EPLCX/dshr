@@ -397,7 +397,8 @@ export const state = {
 | 成员 | 需要 | 说明 |
 |---|---|---|
 | `host.workspace` | — | 当前工作区的路径；没有工作区时是插件数据目录 |
-| `host.config` | — | 插件的配置（`[plugins.<id>]`，只读） |
+| `host.config` | — | 插件的配置（`[plugins.<id>]`）。插件写入或用户在设置页修改后立即是新值 |
+| `host.setConfig(patch)` | — | 写自己的配置项：`patch` 是键 → 值，`null` 去掉该项、回到默认值。只能写清单 `[config]` 里声明过的键（`enabled`、`timeout_ms` 除外），按 schema 检查类型、`enum` / `oneOf`、`minimum` / `maximum`，有一项不合规整批拒绝；与默认值相同的值不写进文件。只能在非 `readOnly` 的工具、页面动作、命令、异步钩子、常驻服务里用 |
 | `host.i18n` | — | 多语言，见下面的 [i18n](#i18n) |
 | `host.log(...args)`、`console.*` | — | 写插件日志（设置页的“日志”、`dshr plugin dev` 的 `logs`），保留最近 200 行 |
 | `host.output(text)` | — | 工具运行时的实时输出（显示在卡片里，不进日志） |

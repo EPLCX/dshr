@@ -189,6 +189,19 @@ export const tools = [{
 const limit = host.config.max_chars ?? 100000;
 ```
 
+插件也可以写自己的配置项，不需要能力（比如页面上的“记住我的选择”）：
+
+```js
+await host.setConfig({ max_chars: 5000, level: "high" });   // 合并写入；值为 null 时去掉该项，回到默认值
+host.config.max_chars;                                       // 立即是 5000
+```
+
+- 只能写 `[config]` 里声明过的键（`enabled`、`timeout_ms` 由用户决定，不能写），按 schema 检查类型、选项和范围，有一项不合规就整批拒绝；
+  与默认值相同的值不写进文件。
+- 只能在没有标 `readOnly` 的工具、页面动作、命令、异步钩子和常驻服务里用；`render`、`prompt`、同步钩子、`activate` 里不行。
+- 写进 `config.toml` 的 `[plugins.<id>]`，重新打开设置页即可看到新值。用户在设置页修改 JS 插件的配置同样立即生效，不用重启
+  （内置插件的配置仍在重启后生效）。
+
 配置项在表单里显示 `title`（如 `count` 显示成“数量”），下面一行是 `description`。两者都可以按界面语言切换，写法见下面的“多语言”。
 字符串枚举的选项可以用 `enumTitles` 给出显示文字（存的仍是原来的值）：
 

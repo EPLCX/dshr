@@ -84,6 +84,7 @@ capabilities = ["fs:workspace:read"]   # fs:workspace:read, fs:workspace:write, 
 # zod = "vendor/zod.js"                # (a single-file ES module bundle you wrote with plugin_write)
 
 [config.properties.max_chars]          # optional JSON Schema for user settings; the script reads host.config
+                                       # and may write its own declared keys: await host.setConfig({ max_chars: 5000 })
 type = "integer"
 default = 100000
 title = "Max characters"               # label shown in Settings instead of the key

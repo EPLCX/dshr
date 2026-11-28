@@ -79,7 +79,7 @@ pub(super) fn start(plugin: &'static str, manifest: &PluginManifest, instance: &
             Err(error) => tracing::warn!(plugin, watch = decl.id, %error, "监听的 glob 写错了"),
         }
     }
-    let permits = Permits { write: false, exec: false, net: !manifest.capabilities.net.is_empty(), llm: false, act: false };
+    let permits = Permits { write: false, exec: false, net: !manifest.capabilities.net.is_empty(), llm: false, act: false, config: false };
     let timeout = manifest.timeout;
     let weak: Weak<Instance> = Arc::downgrade(instance);
     runtime.spawn(async move {

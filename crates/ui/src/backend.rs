@@ -675,6 +675,18 @@ impl Backend {
         self.plugins.snapshot().items::<dshr_agent::PluginPresets>().to_vec()
     }
 
+    /// 把 `config.toml` 里 `[plugins.<id>]` 的当前内容交给 JS 插件：正在运行的插件的 `host.config` 立即更新，
+    /// 之后的热重载也用它。不是 JS 插件时返回 `false`（内置插件的配置重启后生效）。
+    pub fn apply_plugin_config(&self, id: &str) -> bool {
+        let Some(scripts) = self.scripts.as_ref() else { return false };
+        if !scripts.ids().contains(&id) {
+            return false;
+        }
+        let raw = self.file_config().plugin_configs().into_iter().find(|(plugin, _)| plugin == id).map(|(_, raw)| raw);
+        scripts.set_config(id, raw.unwrap_or_else(|| serde_json::Value::Object(Default::default())));
+        true
+    }
+
     /// 插件提供的权限模式（权限菜单里排在内置四项后面）。
     pub fn plugin_permissions(&self) -> Vec<Arc<dshr_agent::PermissionDef>> {
         self.plugins.snapshot().items::<dshr_agent::PluginPermissions>().to_vec()

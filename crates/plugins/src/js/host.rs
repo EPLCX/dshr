@@ -56,6 +56,8 @@ pub(crate) struct Permits {
     pub llm: bool,
     /// 替用户做事：发消息、起子代理、改宿主数据、装插件（各自还要对应的能力）。
     pub act: bool,
+    /// 改插件自己的配置（`host.setConfig`）：非 `readOnly` 的工具、页面动作、命令、异步钩子、常驻服务。不需要能力。
+    pub config: bool,
 }
 
 /// 正在执行的那次调用。
@@ -150,6 +152,9 @@ pub(crate) struct State {
     pub(super) dynamic: RefCell<Option<Arc<super::runtime::DynamicTools>>>,
     /// `host.ui.hide` / `show` 改的入口显隐（运行时那边共享的一份）。
     pub(super) visibility: RefCell<Option<Arc<super::runtime::EntryVisibility>>>,
+    /// 脚本看到的配置（运行时那边共享的一份）和清单里配置的 schema（`host.setConfig` 据此检查）。
+    pub(super) live_config: RefCell<Option<Arc<super::config::LiveConfig>>>,
+    pub(super) config_schema: RefCell<Option<Value>>,
 }
 
 pub(super) type PendingSlot<T> = Arc<Mutex<Option<T>>>;
@@ -212,6 +217,8 @@ impl State {
             pending_sockets: RefCell::new(Vec::new()),
             dynamic: RefCell::new(None),
             visibility: RefCell::new(None),
+            live_config: RefCell::new(None),
+            config_schema: RefCell::new(None),
         }
     }
 
@@ -1377,6 +1384,43 @@ impl State {
         Ok(())
     }
 
+    /// `host.setConfig(patch)`：检查后写进 `config.toml` 的 `[plugins.<id>]`，`host.config` 随即换成新的；
+    /// 再告诉主程序（桌面版重新读配置，热重载也用新配置）。
+    fn config_set(&self, patch: &str) -> Result<(), String> {
+        if !self.call.borrow().as_ref().is_some_and(|call| call.permits.config) {
+            return Err(
+                "setConfig is only available to tools that are not declared readOnly, page actions, commands, async hooks and services"
+                    .into(),
+            );
+        }
+        let patch: Value = serde_json::from_str(patch).map_err(|error| format!("invalid setConfig patch: {error}"))?;
+        let changes = super::config::check_patch(self.config_schema.borrow().as_ref(), &patch)?;
+        let paths = dshr_config::Paths { home: self.home() };
+        let mut config = dshr_config::Config::load(&paths).map_err(|error| format!("cannot read the settings: {error}"))?;
+        for (key, value) in changes {
+            config.set_plugin_value(self.plugin, &key, value);
+        }
+        config.save(&paths).map_err(|error| format!("cannot save the settings: {error}"))?;
+        let raw = config.plugin_configs().into_iter().find(|(id, _)| id == self.plugin).map(|(_, raw)| raw);
+        let view = super::config::script_view(raw.as_ref().and_then(Value::as_object));
+        if let Some(live) = self.live_config.borrow().as_ref() {
+            live.set(&view);
+        }
+        tracing::info!(plugin = self.plugin, "插件改了自己的配置");
+        if let Some(changed) = crate::app::app_services().plugin_config {
+            changed(self.plugin, raw.unwrap_or_else(|| Value::Object(Default::default())));
+        }
+        Ok(())
+    }
+
+    fn config_version(&self) -> f64 {
+        self.live_config.borrow().as_ref().map_or(0.0, |live| live.version() as f64)
+    }
+
+    fn config_json(&self) -> String {
+        self.live_config.borrow().as_ref().map_or_else(|| "{}".to_owned(), |live| live.json())
+    }
+
     /// `host.ui.hide(target)` / `show(target)`：变了就通知界面重新算入口。
     fn ui_visibility(&self, target: &str, hidden: bool) -> Result<(), String> {
         let visibility = self.visibility.borrow().clone().ok_or("entries cannot be changed here")?;
@@ -1749,6 +1793,9 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
     native!("uiRefresh", |host, page: String| plain host.refresh_page(&page));
     native!("uiVisibility", |host, target: String, hidden: bool| host.ui_visibility(&target, hidden));
     native!("uiHidden", |host| plain host.ui_hidden());
+    native!("configSet", |host, patch: String| host.config_set(&patch));
+    native!("configVersion", |host| plain host.config_version());
+    native!("configJson", |host| plain host.config_json());
     native!("fetchStream", |host, url: String, options: String| host.fetch_stream(&url, &options).map(|id| id as f64));
     native!("claimStream", |host, op: f64| host.claim_stream(op as u64).map(|id| id as f64));
     native!("readChunk", |host, stream: f64| host.read_chunk(stream as u64).map(|id| id as f64));

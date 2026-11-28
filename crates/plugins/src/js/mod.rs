@@ -9,6 +9,7 @@ pub(super) type BodyReceiver = tokio::sync::mpsc::Receiver<Result<Vec<u8>, Strin
 mod api;
 mod app;
 mod bundle;
+mod config;
 mod creator;
 mod dshr;
 mod hooks;
@@ -418,6 +419,16 @@ impl JsPlugin {
 }
 
 /// 交给脚本的配置：`[plugins.<id>]` 去掉 `enabled`（那是给内核看的）；没有配置时是空对象。
+impl JsPlugin {
+    /// 正在运行的实例换上新的配置（`host.config`）。没有在运行时什么都不做：下次加载时用 `Context` 里的配置。
+    pub(crate) fn set_live_config(&self, config: &Value) {
+        let instance = self.inner.instance.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        if let Some(instance) = instance {
+            instance.config.set(config);
+        }
+    }
+}
+
 fn script_config(raw: Option<Value>) -> Value {
     let mut config = raw.unwrap_or_else(|| Value::Object(Default::default()));
     if let Some(object) = config.as_object_mut() {
@@ -675,6 +686,7 @@ impl Tool for JsTool {
                 exec: self.executes(),
                 llm: self.capabilities.llm,
                 act: self.acts(),
+                config: !self.decl.read_only,
             },
             timeout: self.timeout,
             cancelled,

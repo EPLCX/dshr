@@ -75,8 +75,14 @@ pub(super) fn start(
         };
         let data_dir = super::surface::data_dir(&manifest);
         let capabilities = &manifest.capabilities;
-        let permits =
-            Permits { write: false, exec: false, net: !capabilities.net.is_empty(), llm: false, act: capabilities.session_control };
+        let permits = Permits {
+            write: false,
+            exec: false,
+            net: !capabilities.net.is_empty(),
+            llm: false,
+            act: capabilities.session_control,
+            config: true,
+        };
         let mut runs = Vec::new();
         for id in ids {
             let (instance, owner, active, data_dir, set) = (instance.clone(), owner.clone(), active.clone(), data_dir.clone(), set.clone());

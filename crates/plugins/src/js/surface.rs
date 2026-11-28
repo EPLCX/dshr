@@ -218,6 +218,7 @@ impl UiSurface for JsSurface {
             exec: !self.capabilities.exec.is_empty(),
             llm: self.capabilities.llm,
             act: self.capabilities.acts_for_user(),
+            config: true,
         };
         self.instance.ask_with(job, Some(super::app::user_context(ctx)), self.timeout, permits)
     }
@@ -291,6 +292,7 @@ impl UiSurface for JsSurface {
             exec: !self.capabilities.exec.is_empty(),
             llm: self.capabilities.llm,
             act: self.capabilities.acts_for_user(),
+            config: true,
         };
         let answer: Value = match self.instance.ask_with(job, Some(ctx), self.timeout, permits)? {
             Some(text) => serde_json::from_str(&text).unwrap_or(Value::Null),

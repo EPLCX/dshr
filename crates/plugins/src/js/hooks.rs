@@ -102,6 +102,7 @@ pub(super) fn register(cx: &mut Scope, plugin: &'static str, manifest: &PluginMa
             net: !capabilities.net.is_empty(),
             llm: capabilities.llm,
             act: capabilities.acts_for_user(),
+            config: true,
         },
     });
     for name in &instance.exports.hooks {
@@ -657,6 +658,7 @@ pub(super) fn start_schedules(plugin: &'static str, manifest: &PluginManifest, i
         net: !manifest.capabilities.net.is_empty(),
         llm: false,
         act: manifest.capabilities.session_control,
+        config: true,
     };
     let timeout = manifest.timeout;
     for schedule in &instance.exports.schedules {

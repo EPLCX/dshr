@@ -3354,6 +3354,17 @@ settings:
     es: "Guardado. Se aplica tras reiniciar."
     fr: "Enregistré. Prend effet après un redémarrage."
     pt: "Salvo. Entra em vigor após reiniciar."
+  plugin_saved_live:
+    zh-CN: 已保存，已生效
+    en: Saved and applied.
+    zh-HK: "儲存咗，已經生效。"
+    zh-TW: "已儲存並生效。"
+    de: "Gespeichert und übernommen."
+    el: "Αποθηκεύτηκε και εφαρμόστηκε."
+    ja: "保存して反映しました。"
+    es: "Guardado y aplicado."
+    fr: "Enregistré et appliqué."
+    pt: "Salvo e aplicado."
   plugin_save_field:
     zh-CN: 保存 %{name}
     en: Save %{name}

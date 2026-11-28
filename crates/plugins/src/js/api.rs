@@ -110,5 +110,7 @@ fn intersect(permits: Permits, callee: &Capabilities) -> Permits {
         exec: permits.exec && !callee.exec.is_empty(),
         llm: permits.llm && callee.llm,
         act: permits.act && callee.acts_for_user(),
+        // 被调用方改的是它自己的配置：只看调用方这次调用的场合。
+        config: permits.config,
     }
 }

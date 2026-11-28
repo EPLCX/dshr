@@ -1142,8 +1142,11 @@ impl SettingsView {
             return;
         };
         let result = self.backend.update_config(|config| config.set_plugin_value(id, &key, value));
+        // JS 插件即时生效（`host.config` 换成新的）；内置插件重启后生效。
+        let live = result.is_ok() && self.backend.apply_plugin_config(id);
         self.refresh_extensions(cx);
         self.plugin_rows[row].message = Some(match result {
+            Ok(()) if live => (t!("settings.plugin_saved_live").to_string(), false),
             Ok(()) => (t!("settings.plugin_saved").to_string(), false),
             Err(error) => (error, true),
         });

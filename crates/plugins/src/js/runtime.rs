@@ -327,6 +327,8 @@ pub(crate) struct Instance {
     pub dynamic: Arc<DynamicTools>,
     /// `host.ui.hide` / `show` 改的入口显隐。
     pub visibility: Arc<EntryVisibility>,
+    /// 脚本看到的配置（`host.config`）：插件自己写入、用户在设置页修改后就地换掉。
+    pub config: Arc<super::config::LiveConfig>,
 }
 
 /// `host.tools.set([...])` 设的工具：整组替换，下一步起生效。只属于这个运行时（热重载后的新版本从空的开始）。
@@ -476,14 +478,18 @@ impl Instance {
         let tools = dynamic.clone();
         let visibility = Arc::new(EntryVisibility::default());
         let entries = visibility.clone();
+        let live = Arc::new(super::config::LiveConfig::new(config.clone()));
+        let live_config = live.clone();
         std::thread::Builder::new()
             .name(format!("dshr-js-{plugin}"))
             .stack_size(THREAD_STACK)
-            .spawn(move || run(plugin, &manifest, &config, restore, pages, tools, entries, &recorder, &ready, &inbox))
+            .spawn(move || run(plugin, &manifest, &config, restore, pages, tools, entries, live_config, &recorder, &ready, &inbox))
             .map_err(|error| format!("起不了插件线程：{error}"))?;
         // 加载本身有时限（`activate` 另有一份）；这里多等一会儿只是兜底。
         match loaded.recv_timeout(LOAD_TIMEOUT * 2 + Duration::from_secs(5)) {
-            Ok(Ok(exports)) => Ok(Self { commands, exports, busy_until: Mutex::new(None), health, refresh, dynamic, visibility }),
+            Ok(Ok(exports)) => {
+                Ok(Self { commands, exports, busy_until: Mutex::new(None), health, refresh, dynamic, visibility, config: live })
+            }
             Ok(Err(error)) => Err(error),
             Err(_) => Err("插件加载没有响应".into()),
         }
@@ -528,6 +534,7 @@ fn run(
     refresh: Arc<Mutex<std::collections::HashMap<String, u64>>>,
     dynamic: Arc<DynamicTools>,
     visibility: Arc<EntryVisibility>,
+    live_config: Arc<super::config::LiveConfig>,
     health: &Health,
     ready: &mpsc::SyncSender<Loaded>,
     inbox: &mpsc::Receiver<Command>,
@@ -536,6 +543,8 @@ fn run(
         Rc::new(State::new(plugin, manifest.capabilities.clone(), manifest.secrets.clone(), super::surface::data_dir(manifest), refresh));
     *state.dynamic.borrow_mut() = Some(dynamic);
     *state.visibility.borrow_mut() = Some(visibility.clone());
+    *state.live_config.borrow_mut() = Some(live_config);
+    *state.config_schema.borrow_mut() = manifest.config_schema.clone();
     let setup = || -> rquickjs::Result<(Runtime, Context)> {
         let runtime = Runtime::new()?;
         runtime.set_memory_limit(MEMORY_LIMIT);

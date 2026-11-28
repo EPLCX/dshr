@@ -55,7 +55,7 @@ impl JsObserver {
             all: capabilities.sessions_read,
             timeout,
             // 只读：能读工作区（按能力）、联网（按能力）；不写、不启动程序、不调模型、不替用户做事。
-            permits: Permits { write: false, net: !capabilities.net.is_empty(), exec: false, llm: false, act: false },
+            permits: Permits { write: false, net: !capabilities.net.is_empty(), exec: false, llm: false, act: false, config: false },
             pending: Arc::default(),
             dropped: AtomicU64::new(0),
         }
@@ -150,7 +150,7 @@ impl JsStreamObserver {
             plugin,
             instance,
             timeout,
-            permits: Permits { write: false, net: !capabilities.net.is_empty(), exec: false, llm: false, act: false },
+            permits: Permits { write: false, net: !capabilities.net.is_empty(), exec: false, llm: false, act: false, config: false },
             pending: Arc::default(),
             dropped: AtomicU64::new(0),
             buffers: Mutex::default(),
