@@ -148,6 +148,8 @@ pub(crate) struct State {
     pub(super) pending_sockets: RefCell<Vec<(u64, PendingSlot<Arc<super::stream::Socket>>)>>,
     /// `host.tools.set` 设的动态工具（运行时那边共享的一份）。
     pub(super) dynamic: RefCell<Option<Arc<super::runtime::DynamicTools>>>,
+    /// `host.ui.hide` / `show` 改的入口显隐（运行时那边共享的一份）。
+    pub(super) visibility: RefCell<Option<Arc<super::runtime::EntryVisibility>>>,
 }
 
 pub(super) type PendingSlot<T> = Arc<Mutex<Option<T>>>;
@@ -157,6 +159,23 @@ const MAX_AGENT_RUNS: u32 = 4;
 /// 替用户发消息、发通知的最短间隔。
 const SEND_INTERVAL: Duration = Duration::from_secs(5);
 const NOTIFY_INTERVAL: Duration = Duration::from_secs(10);
+/// 工具交回、随消息发出的图片：最多几张，支持哪些类型。
+const MAX_IMAGES: usize = 4;
+const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// 一张 base64 图片的类型和大小（解码后不超过 [`MAX_FILE_BYTES`]）。
+fn check_image(media_type: &str, data: &str) -> Result<(), String> {
+    if !IMAGE_TYPES.contains(&media_type) {
+        return Err(format!("unsupported image type {media_type} (png, jpeg, gif or webp)"));
+    }
+    if data.is_empty() {
+        return Err("an image has no data".into());
+    }
+    if (data.len() / 4 * 3) as u64 > MAX_FILE_BYTES {
+        return Err(format!("an image is larger than {} MB", MAX_FILE_BYTES / 1024 / 1024));
+    }
+    Ok(())
+}
 /// 装插件时下载的压缩包上限。
 const MAX_INSTALL_DOWNLOAD: usize = 50 * 1024 * 1024;
 
@@ -192,6 +211,7 @@ impl State {
             pending_streams: RefCell::new(Vec::new()),
             pending_sockets: RefCell::new(Vec::new()),
             dynamic: RefCell::new(None),
+            visibility: RefCell::new(None),
         }
     }
 
@@ -244,15 +264,26 @@ impl State {
 
     // ---- 替用户做事：会话控制、子代理 ----
 
-    /// `{ text, session: "current" | "new" | <id>, workspace? }`，返回会话 id。
+    /// `{ text, session: "current" | "new" | <id>, workspace?, images? }`，返回会话 id。
     fn session_send(&self, request: &str) -> Result<String, String> {
         #[derive(Deserialize)]
+        struct Image {
+            data: String,
+            #[serde(alias = "mediaType", alias = "media_type")]
+            media_type: String,
+            #[serde(default)]
+            name: Option<String>,
+        }
+        #[derive(Deserialize)]
         struct Request {
+            #[serde(default)]
             text: String,
             #[serde(default)]
             session: Option<String>,
             #[serde(default)]
             workspace: Option<String>,
+            #[serde(default)]
+            images: Vec<Image>,
         }
         if !self.capabilities.session_control {
             return Err("this plugin does not declare the `session:control` capability in plugin.toml".into());
@@ -263,8 +294,17 @@ impl State {
             );
         }
         let request: Request = serde_json::from_str(request).map_err(|error| format!("invalid session.send request: {error}"))?;
-        if request.text.trim().is_empty() {
+        if request.text.trim().is_empty() && request.images.is_empty() {
             return Err("the message is empty".into());
+        }
+        if request.images.len() > MAX_IMAGES {
+            return Err(format!("a message can carry at most {MAX_IMAGES} images"));
+        }
+        let mut images = Vec::with_capacity(request.images.len());
+        for (index, image) in request.images.into_iter().enumerate() {
+            check_image(&image.media_type, &image.data)?;
+            let path = image.name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| format!("plugin-image-{}", index + 1));
+            images.push(dshr_agent::UserAttachment::Image { path, media_type: image.media_type, data: image.data });
         }
         if self.last_send.get().is_some_and(|last| last.elapsed() < SEND_INTERVAL) {
             return Err(format!("a plugin can send at most one message every {} seconds", SEND_INTERVAL.as_secs()));
@@ -280,6 +320,7 @@ impl State {
             text: request.text,
             target,
             workspace: request.workspace.map(PathBuf::from),
+            images,
         })?;
         self.last_send.set(Some(Instant::now()));
         tracing::info!(plugin = self.plugin, session = id, "插件替用户发了一条消息");
@@ -294,6 +335,54 @@ impl State {
             return Err("stopping a session is only available where the plugin may act for the user".into());
         }
         crate::app::app_services().session.ok_or("this app does not let plugins control sessions")?.stop(session)
+    }
+
+    /// `{ session?, model?, effort?, preset? }`：改会话的模型、思考等级或预设（`session:control`）。
+    /// `effort` 为 `null` 时改回模型的默认值，不写时不改。
+    fn session_set(&self, request: &str) -> Result<(), String> {
+        if !self.capabilities.session_control {
+            return Err("this plugin does not declare the `session:control` capability in plugin.toml".into());
+        }
+        if !self.may_act() {
+            return Err("changing the session's model or preset is only available where the plugin may act for the user".into());
+        }
+        let request: Value = serde_json::from_str(request).map_err(|error| format!("invalid session options: {error}"))?;
+        let text = |key: &str| -> Result<Option<String>, String> {
+            match request.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(text)) if !text.trim().is_empty() => Ok(Some(text.trim().to_owned())),
+                Some(_) => Err(format!("`{key}` must be a non-empty string")),
+            }
+        };
+        let session = text("session")?.filter(|session| session != "current");
+        let change = if let Some(preset) = text("preset")? {
+            crate::app::OptionChange::Preset(preset)
+        } else {
+            let effort = match request.get("effort") {
+                None => None,
+                Some(Value::Null) => Some(None),
+                Some(Value::String(effort)) if ["off", "low", "high", "max"].contains(&effort.as_str()) => Some(Some(effort.clone())),
+                Some(other) => return Err(format!("unknown effort {other}: use off, low, high, max or null")),
+            };
+            let model = text("model")?;
+            if model.is_none() && effort.is_none() {
+                return Err("nothing to change: give a model, an effort or a preset".into());
+            }
+            crate::app::OptionChange::Model { model, effort }
+        };
+        let control = crate::app::app_services().session.ok_or("this app does not let plugins control sessions")?;
+        control.set_options(session, change)?;
+        tracing::info!(plugin = self.plugin, "插件改了会话的选项");
+        Ok(())
+    }
+
+    /// 可以选的模型（`session:read` 或 `session:control`）。
+    fn session_models(&self) -> Result<String, String> {
+        if !(self.capabilities.session_control || self.capabilities.session_read) {
+            return Err("this plugin needs `session:read` or `session:control` to list models".into());
+        }
+        let models = crate::app::app_services().session.map(|control| control.models()).unwrap_or_default();
+        serde_json::to_string(&models).map_err(|error| error.to_string())
     }
 
     fn session_list(&self) -> Result<String, String> {
@@ -987,9 +1076,9 @@ impl State {
         self.ops.start(work, remaining)
     }
 
-    /// 发一次不带工具的请求，返回文本。默认用当前会话的模型；`model` 换模型（`provider/model` 换提供商，
-    /// 只写模型名时沿用当前提供商），`effort` 指定思考等级。
-    fn llm(&self, request: &str) -> Result<u64, String> {
+    /// `host.llm.complete` / `stream` 共用：检查能力和次数，解析出要连的模型和请求。默认用当前会话的模型；
+    /// `model` 换模型（`provider/model` 换提供商，只写模型名时沿用当前提供商），`effort` 指定思考等级。
+    fn prepare_llm(&self, request: &str) -> Result<(LlmAccess, dshr_llm::ChatRequest), String> {
         #[derive(Deserialize)]
         struct Turn {
             role: String,
@@ -1063,6 +1152,12 @@ impl State {
             max_tokens: Some(request.max_tokens.unwrap_or(4096).min(32_000)),
             effort,
         };
+        Ok((access, chat))
+    }
+
+    /// 发一次不带工具的请求，返回文本。
+    fn llm(&self, request: &str) -> Result<u64, String> {
+        let (access, chat) = self.prepare_llm(request)?;
         let work = async move {
             use futures::StreamExt as _;
             let mut stream = access.provider.stream(chat).await.map_err(|error| error.to_string())?;
@@ -1087,6 +1182,66 @@ impl State {
             Ok(json!({ "text": text, "usage": message.usage }).to_string())
         };
         self.ops.start(work, self.remaining())
+    }
+
+    /// 流式请求：操作完成（连上模型）后，`prelude.js` 用 `claimStream` 取到一个流，每块是一段 JSON：
+    /// `{ type: "text" | "thinking", text }`，最后一块是 `{ type: "done", text, usage }`（`text` 是全文）。
+    /// 流属于这次调用：调用结束时关掉，模型那边的请求随之中止。
+    fn llm_stream(&self, request: &str) -> Result<u64, String> {
+        let (access, chat) = self.prepare_llm(request)?;
+        let slot: Arc<std::sync::Mutex<Option<super::BodyReceiver>>> = Arc::default();
+        let filled = slot.clone();
+        let work = async move {
+            use futures::StreamExt as _;
+            let mut stream = access.provider.stream(chat).await.map_err(|error| error.to_string())?;
+            let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(64);
+            *filled.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(receiver);
+            // 连上之后在后台一直读：脚本不读了（流被关掉）时发送失败，请求随之丢弃。
+            tokio::spawn(async move {
+                let mut accumulator = dshr_llm::MessageAccumulator::default();
+                let chunk = |value: Value| Ok(value.to_string().into_bytes());
+                while let Some(event) = stream.next().await {
+                    let event = match event {
+                        Ok(event) => event,
+                        Err(error) => {
+                            let _ = sender.send(Err(error.to_string())).await;
+                            return;
+                        }
+                    };
+                    let piece = match &event {
+                        dshr_llm::StreamEvent::TextDelta { text, .. } => Some(json!({ "type": "text", "text": text })),
+                        dshr_llm::StreamEvent::ThinkingDelta { thinking, .. } => Some(json!({ "type": "thinking", "text": thinking })),
+                        _ => None,
+                    };
+                    if let Err(error) = accumulator.push(&event) {
+                        let _ = sender.send(Err(error.to_string())).await;
+                        return;
+                    }
+                    if let Some(piece) = piece
+                        && sender.send(chunk(piece)).await.is_err()
+                    {
+                        return;
+                    }
+                    if event == dshr_llm::StreamEvent::MessageStop {
+                        break;
+                    }
+                }
+                let message = accumulator.finish();
+                let text: String = message
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        dshr_core::ContentBlock::Text { text } => Some(&**text),
+                        _ => None,
+                    })
+                    .collect();
+                let _ = sender.send(chunk(json!({ "type": "done", "text": text, "usage": message.usage }))).await;
+            });
+            Ok("{}".to_owned())
+        };
+        let id = self.ops.start(work, self.remaining())?;
+        self.pending_streams.borrow_mut().push((id, slot));
+        Ok(id)
     }
 
     // ---- 会话、密钥 ----
@@ -1179,21 +1334,13 @@ impl State {
 
     /// 工具交回的图片：写一条 `media/images` 事件，排在这次调用的结果后面。
     fn tool_images(&self, images: &str) -> Result<(), String> {
-        const TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-        const MAX_IMAGES: usize = 4;
         let images: Vec<Value> = serde_json::from_str(images).map_err(|error| format!("invalid images: {error}"))?;
         if images.len() > MAX_IMAGES {
             return Err(format!("a tool can return at most {MAX_IMAGES} images"));
         }
         for image in &images {
             let media_type = image.get("media_type").and_then(Value::as_str).unwrap_or_default();
-            if !TYPES.contains(&media_type) {
-                return Err(format!("unsupported image type {media_type} (png, jpeg, gif or webp)"));
-            }
-            let size = image.get("data").and_then(Value::as_str).map_or(0, |data| data.len() / 4 * 3);
-            if size as u64 > MAX_FILE_BYTES {
-                return Err(format!("an image is larger than {} MB", MAX_FILE_BYTES / 1024 / 1024));
-            }
+            check_image(media_type, image.get("data").and_then(Value::as_str).unwrap_or_default())?;
         }
         self.with_call(|call| {
             let call_id = call.ctx.options.get::<dshr_agent::CallEnv>().map(|env| env.call_id.clone());
@@ -1228,6 +1375,20 @@ impl State {
         }
         *dynamic.decls.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = decls;
         Ok(())
+    }
+
+    /// `host.ui.hide(target)` / `show(target)`：变了就通知界面重新算入口。
+    fn ui_visibility(&self, target: &str, hidden: bool) -> Result<(), String> {
+        let visibility = self.visibility.borrow().clone().ok_or("entries cannot be changed here")?;
+        if visibility.set(target.trim(), hidden)? {
+            dshr_agent::notify_entries_changed();
+        }
+        Ok(())
+    }
+
+    fn ui_hidden(&self) -> String {
+        let hidden = self.visibility.borrow().as_ref().map(|visibility| visibility.hidden()).unwrap_or_default();
+        serde_json::to_string(&hidden).unwrap_or_else(|_| "[]".to_owned())
     }
 
     fn refresh_page(&self, page: &str) {
@@ -1575,6 +1736,7 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
     native!("fetch", |host, url: String, options: String| host.fetch(&url, &options).map(|id| id as f64));
     native!("exec", |host, program: String, args: String, options: String| host.exec(&program, &args, &options).map(|id| id as f64));
     native!("llm", |host, request: String| host.llm(&request).map(|id| id as f64));
+    native!("llmStream", |host, request: String| host.llm_stream(&request).map(|id| id as f64));
     native!("spawn", |host, program: String, args: String, options: String| host.spawn(&program, &args, &options).map(|id| id as f64));
     native!("procRead", |host, id: f64| host.proc_read(id as u64).map(|op| op as f64));
     native!("procWrite", |host, id: f64, text: Option<String>| host.proc_write(id as u64, text).map(|op| op as f64));
@@ -1585,6 +1747,8 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
     native!("secret", |host, name: String| host.secret(&name));
     native!("toolImages", |host, images: String| host.tool_images(&images));
     native!("uiRefresh", |host, page: String| plain host.refresh_page(&page));
+    native!("uiVisibility", |host, target: String, hidden: bool| host.ui_visibility(&target, hidden));
+    native!("uiHidden", |host| plain host.ui_hidden());
     native!("fetchStream", |host, url: String, options: String| host.fetch_stream(&url, &options).map(|id| id as f64));
     native!("claimStream", |host, op: f64| host.claim_stream(op as u64).map(|id| id as f64));
     native!("readChunk", |host, stream: f64| host.read_chunk(stream as u64).map(|id| id as f64));
@@ -1598,6 +1762,8 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
     native!("sessionSend", |host, request: String| host.session_send(&request));
     native!("sessionStop", |host, session: Option<String>| host.session_stop(session));
     native!("sessionList", |host| host.session_list());
+    native!("sessionSet", |host, request: String| host.session_set(&request));
+    native!("sessionModels", |host| host.session_models());
     native!("agentRun", |host, request: String| host.agent_run(&request).map(|id| id as f64));
     native!("notify", |host, request: String| host.notify(&request));
     native!("composerSet", |host, text: String| host.composer_set(&text));

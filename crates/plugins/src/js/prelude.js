@@ -168,6 +168,8 @@
   const labels = new Map();
   const renders = new Map();
   const hooks = new Map();
+  // permissions：插件提供的权限模式的 decide。
+  const permissionModes = new Map();
   const cards = new Map();
   const schedules = new Map();
   const commands = new Map();
@@ -218,7 +220,7 @@
   });
   let lifecycle = { activate: null, deactivate: null, state: null };
 
-  const HOOKS = ["beforeTool", "afterTool", "beforeStep", "beforeRequest", "turnEnded", "reviewTool", "transformRequest", "turnStarted", "beforeWrite"];
+  const HOOKS = ["beforeTool", "afterTool", "beforeStep", "beforeRequest", "turnEnded", "reviewTool", "transformRequest", "turnStarted", "beforeWrite", "approve"];
   // on：会话事件类型（`tool/result`）、一个命名空间（`todo/*`）或全部（`*`）→ 处理函数。
   const listeners = new Map();
   // api：给别的插件调用的方法。
@@ -283,6 +285,14 @@
   }
 
   // 文件函数在宿主那边是同步执行的，这里包成 async：以后换成真正的异步实现时插件不用改。
+  // `host.session.model()` 等要找的会话：给了 id 就按 id；否则是这一轮的会话，不在一轮里时是界面上当前的会话。
+  const findSession = async (session) => {
+    const sessions = JSON.parse(native.sessionList());
+    const id = session ?? JSON.parse(native.identity()).session;
+    return (id === null || id === undefined ? undefined : sessions.find((item) => item.id === String(id)))
+      ?? (session === undefined || session === null ? sessions.find((item) => item.current) : undefined);
+  };
+
   const host = Object.freeze({
     get workspace() {
       return native.workspace();
@@ -457,16 +467,104 @@
         const id = native.llm(JSON.stringify(body));
         return JSON.parse(await operation(id, options?.signal).catch(rethrowAbort(options?.signal))).text;
       },
+      // 流式请求：for await (const { type, text } of host.llm.stream(…)) 逐块读（type 是 "text" 或 "thinking"）；
+      // 或者 await stream.text() 读完返回全文。读完后 stream.usage 是用量。
+      stream: (request, options = {}) => {
+        const body = { ...(typeof request === "string" ? { prompt: request } : request ?? {}) };
+        for (const key of ["model", "effort", "maxTokens"]) {
+          if (options?.[key] !== undefined && options[key] !== null) body[key] = options[key];
+        }
+        const signal = options?.signal;
+        // 参数、能力不对时在这里就抛出；连接在第一次读的时候等。
+        const op = native.llmStream(JSON.stringify(body));
+        let stream;
+        const connect = async () => {
+          if (stream === undefined) {
+            await operation(op, signal).catch(rethrowAbort(signal));
+            stream = native.claimStream(op);
+          }
+          return stream;
+        };
+        const decoder = new TextDecoder();
+        let used = false;
+        let done = false;
+        const result = { usage: null, text: null };
+        const next = async () => {
+          if (done) return null;
+          const id = await connect();
+          const chunk = JSON.parse(await operation(native.readChunk(id), signal).catch(rethrowAbort(signal)));
+          if (chunk === null) {
+            done = true;
+            return null;
+          }
+          const piece = JSON.parse(decoder.decode(native.base64ToBytes(chunk)));
+          if (piece.type === "done") {
+            done = true;
+            result.usage = piece.usage ?? null;
+            result.text = piece.text ?? "";
+            return null;
+          }
+          return piece;
+        };
+        const take = () => {
+          if (used) throw new TypeError("the stream has already been read");
+          used = true;
+        };
+        return {
+          [Symbol.asyncIterator]() {
+            take();
+            return { next: async () => { const piece = await next(); return piece === null ? { done: true, value: undefined } : { done: false, value: piece }; } };
+          },
+          text: async () => {
+            take();
+            let text = "";
+            for (let piece = await next(); piece !== null; piece = await next()) if (piece.type === "text") text += piece.text;
+            return result.text ?? text;
+          },
+          get usage() {
+            return result.usage;
+          },
+        };
+      },
     }),
 
     // 当前会话（session:read）；替用户发消息、停止、列出打开的会话（session:control）。
     session: Object.freeze({
       events: async (options = {}) => JSON.parse(native.sessionEvents(JSON.stringify(options ?? {}))).events,
       id: async () => JSON.parse(native.sessionEvents(JSON.stringify({ last: 0 }))).id,
-      send: async (text, options = {}) => native.sessionSend(JSON.stringify({ ...(options ?? {}), text: String(text) })),
+      // send(text, { session, workspace, images: [{ data, mediaType, name }] })；也可以写 send({ text, images, ... })。
+      send: async (text, options = {}) => {
+        const request = text !== null && typeof text === "object" ? { ...text } : { ...(options ?? {}), text };
+        request.text = request.text === undefined || request.text === null ? "" : String(request.text);
+        if (request.images !== undefined) {
+          if (!Array.isArray(request.images)) throw new TypeError("images must be an array");
+          request.images = request.images.map((image) => ({
+            media_type: String(image?.mediaType ?? image?.media_type ?? "image/png"),
+            data: typeof image?.data === "string" ? image.data : native.bytesToBase64(bytesOf(image?.data)),
+            ...(image?.name === undefined ? {} : { name: String(image.name) }),
+          }));
+        }
+        return native.sessionSend(JSON.stringify(request));
+      },
       continue: async (options = {}) => native.sessionSend(JSON.stringify({ ...(options ?? {}), text: "continue" })),
       stop: async (session) => native.sessionStop(session === undefined || session === null ? undefined : String(session)),
       list: async () => JSON.parse(native.sessionList()),
+      // 会话下一轮用的模型和预设（session:read 或 session:control）；改它们要 session:control。
+      // 不指定会话时：在一轮里调用的是这一轮的会话，其余场合是界面上当前的会话。
+      model: async (session) => {
+        const found = await findSession(session);
+        return found === undefined ? null : { model: found.model, effort: found.effort ?? null };
+      },
+      preset: async (session) => (await findSession(session))?.preset ?? null,
+      permission: async (session) => (await findSession(session))?.permission ?? null,
+      models: async () => JSON.parse(native.sessionModels()),
+      setModel: async (model, options = {}) => {
+        const request = { session: options?.session };
+        if (model !== undefined && model !== null) request.model = String(model);
+        if (options !== null && typeof options === "object" && "effort" in options) request.effort = options.effort ?? null;
+        native.sessionSet(JSON.stringify(request));
+      },
+      setPreset: async (preset, options = {}) => native.sessionSet(JSON.stringify({ session: options?.session, preset: String(preset) })),
       // 这一步的工具调用执行完后结束本轮（工具、afterTool 里可用）。
       endTurn: async () => native.endTurn(),
       // 当前的会话和代理：{ session, agent }（agent 是 "main" 或子代理名）；不在会话里时都是 null。
@@ -560,6 +658,10 @@
     ui: Object.freeze({
       // 让已经打开的页面重画（工具、钩子改了数据之后）。
       refresh: (page) => native.uiRefresh(String(page)),
+      // 运行时藏起、重新显示入口：自己的入口（sidebar:<id>、settings:<id>、panel:<id>、status:<id>）或可藏的内置入口。
+      hide: async (target) => native.uiVisibility(String(target), true),
+      show: async (target) => native.uiVisibility(String(target), false),
+      hidden: async () => JSON.parse(native.uiHidden()),
     }),
   });
 
@@ -708,6 +810,18 @@
         return { id, label, description: String(description), instructions: String(instructions), readOnly: readOnly === true, tools: tools ?? null };
       });
 
+      // permissions：权限菜单里的权限模式（要 permissions:mode）。选中时每次工具调用由 decide 下结论。
+      const permissionsExport = exported("permissions") ?? [];
+      if (!Array.isArray(permissionsExport)) throw new TypeError("the `permissions` export must be an array");
+      const permissionDecls = permissionsExport.map((mode) => {
+        if (mode === null || typeof mode !== "object") throw new TypeError("each permission mode must be an object");
+        const { id, label, description = "", icon } = mode;
+        if (typeof id !== "string" || typeof label !== "string") throw new TypeError("a permission mode needs a string id and label");
+        if (permissionModes.has(id)) throw new TypeError(`permission mode ${id} is defined twice`);
+        permissionModes.set(id, fn(mode.decide, `permission mode ${id}: decide`));
+        return { id, label, description: String(description), icon: typeof icon === "string" ? icon : null };
+      });
+
       // commands：命令面板里的命令；slash：输入框里的 /命令。run 的返回值决定界面做什么。
       const commandsExport = exported("commands") ?? [];
       if (!Array.isArray(commandsExport)) throw new TypeError("the `commands` export must be an array");
@@ -847,6 +961,7 @@
         lifecycle: { activate: lifecycle.activate !== null, deactivate: lifecycle.deactivate !== null, state: lifecycle.state !== null },
         schedules: scheduleDecls,
         presets: presetDecls,
+        permissions: permissionDecls,
         commands: commandDecls,
         slash: slashDecls,
         services: serviceDecls,
@@ -918,6 +1033,11 @@
           const handler = hooks.get(name);
           if (handler === undefined) throw new Error(`unknown hook ${name}`);
           return asJson(await handler(payload, host));
+        }
+        case "permission": {
+          const decide = permissionModes.get(name);
+          if (decide === undefined) throw new Error(`unknown permission mode ${name}`);
+          return asJson(await decide(payload, host));
         }
         case "card": {
           const card = cards.get(name);
@@ -992,7 +1112,9 @@
           // 精确的类型、命名空间、全部，依次调用。
           const type = String(payload.type ?? "");
           const namespace = type.split("/")[0];
-          for (const pattern of [type, `${namespace}/*`, "*"]) {
+          // 流式输出（stream/text 等）只交给明确订阅了它的处理函数，不进 "*"。
+          const patterns = payload.stream === true ? [type, "stream/*"] : [type, `${namespace}/*`, "*"];
+          for (const pattern of patterns) {
             const handler = listeners.get(pattern);
             if (handler !== undefined) await handler(payload, host);
           }

@@ -28,6 +28,8 @@ pub struct SendRequest {
     pub target: SessionTarget,
     /// 新会话的工作区；没有时用当前的。
     pub workspace: Option<PathBuf>,
+    /// 随消息附上的图片（[`dshr_agent::UserAttachment::Image`]），已经检查过类型和大小。
+    pub images: Vec<dshr_agent::UserAttachment>,
 }
 
 /// 一个打开着的会话。
@@ -38,6 +40,35 @@ pub struct OpenSession {
     pub workspace: Option<String>,
     pub running: bool,
     pub current: bool,
+    /// 这个会话下一轮用的模型：`provider/model`。
+    pub model: String,
+    /// 思考等级（`off` / `low` / `high` / `max`）；`None` 是模型的默认值。
+    pub effort: Option<String>,
+    /// 预设：`standard` / `plan` / `review` / `create`，插件预设是 `<插件 id>/<预设 id>`。
+    pub preset: String,
+    /// 权限模式：`manual` / `workspace` / `auto_review` / `full_access`，插件提供的是 `<插件 id>/<模式 id>`。
+    pub permission: String,
+}
+
+/// 一个可以选的模型（`host.session.models()`）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModelInfo {
+    /// `provider/model`，`host.session.setModel` 认的写法。
+    pub model: String,
+    pub provider: String,
+    /// 显示名。
+    pub name: String,
+    pub provider_name: String,
+}
+
+/// 插件要改的会话选项（`host.session.setModel` / `setPreset`），从下一轮起生效。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OptionChange {
+    /// `model` 是 `provider/model` 或只写模型名（沿用会话现在的提供商）。`effort`：`None` 不改，
+    /// `Some(None)` 改回模型的默认值，`Some(Some("high"))` 换成这一档。
+    Model { model: Option<String>, effort: Option<Option<String>> },
+    /// 预设 id（见 [`OpenSession::preset`]）。
+    Preset(String),
 }
 
 /// 会话控制（`session:control`）。实现要快：只把请求排进主程序的队列，不等这一轮跑完。
@@ -47,6 +78,15 @@ pub trait SessionControl: Send + Sync {
     /// 停止会话（`None` 是当前会话）正在跑的这一轮。
     fn stop(&self, session: Option<String>) -> Result<(), String>;
     fn list(&self) -> Vec<OpenSession>;
+    /// 改会话（`None` 是当前会话）的模型、思考等级或预设；值不合规时报错，不改任何东西。正在运行的会话从下一轮起生效。
+    fn set_options(&self, session: Option<String>, change: OptionChange) -> Result<(), String> {
+        let _ = (session, change);
+        Err("this app does not let plugins change the session's model or preset".into())
+    }
+    /// 已经配置、可以选的模型。
+    fn models(&self) -> Vec<ModelInfo> {
+        Vec::new()
+    }
 }
 
 /// 输入框（页面动作、命令、斜杠命令里的 `host.composer`）。

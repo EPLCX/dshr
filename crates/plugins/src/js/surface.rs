@@ -25,7 +25,6 @@ const MAX_CARD_OUTPUT: usize = 64 * 1024;
 pub(super) struct JsSurface {
     plugin: &'static str,
     entries: Vec<UiEntry>,
-    hidden: Vec<String>,
     cards: Vec<String>,
     renders: Vec<String>,
     commands: Vec<CommandEntry>,
@@ -60,7 +59,6 @@ impl JsSurface {
         Self {
             plugin,
             entries,
-            hidden: ui.hide.iter().filter(|target| dshr_agent::hideable(target)).cloned().collect(),
             cards: instance.exports.cards.clone(),
             renders: instance.exports.renders.clone(),
             commands: instance
@@ -187,8 +185,18 @@ impl UiSurface for JsSurface {
         &self.entries
     }
 
-    fn hidden(&self) -> &[String] {
-        &self.hidden
+    fn hidden(&self) -> Vec<String> {
+        self.instance.visibility.hidden_builtin.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().cloned().collect()
+    }
+
+    fn entry_hidden(&self, place: EntryPlace, id: &str) -> bool {
+        let place = match place {
+            EntryPlace::Sidebar => "sidebar",
+            EntryPlace::Settings => "settings",
+            EntryPlace::Panel => "panel",
+            EntryPlace::Status => "status",
+        };
+        self.instance.visibility.hidden_own.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(&format!("{place}:{id}"))
     }
 
     fn render(&self, page: &str, workspace: Option<&Path>) -> Result<Value, String> {

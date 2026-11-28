@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use dshr_agent::{
     AfterTool, AfterToolCall, AfterToolHook, AgentConfig, AgentError, AgentIdentity, BeforeRequest, BeforeStep, BeforeStepHook, Gate,
-    GateRequest, GateTool, ModelChoices, PermissionMode, ReviewTool, ReviewToolHook, TransformRequest, TransformRequestHook, TurnContext,
-    TurnEnded, TurnEndedHook, TurnInput, TurnOutcome, TurnStart, TurnStarted, TurnStartedHook,
+    GateRequest, GateTool, ModelChoices, ReviewTool, ReviewToolHook, TransformRequest, TransformRequestHook, TurnContext, TurnEnded,
+    TurnEndedHook, TurnInput, TurnOutcome, TurnStart, TurnStarted, TurnStartedHook,
 };
 use dshr_context::{ExtensionPoint, Scope};
 use dshr_llm::ChatRequest;
@@ -43,8 +43,12 @@ const MAX_PAYLOAD_CHARS: usize = 16 * 1024;
 const MAX_APPEND_BYTES: usize = 8 * 1024;
 /// 排在预设（-100）之后、权限（0）之前：脚本能在内置权限放行之前拒绝，但预设的只读规则先生效。
 const GATE_PRIORITY: i32 = -50;
+/// 插件提供的权限模式：排在 `beforeTool`（-50）之后、内置权限（0）之前。选中它时由它给结论。
+const PERMISSION_PRIORITY: i32 = -10;
 /// 其余钩子排在内置的后面。
 const HOOK_PRIORITY: i32 = 100;
+/// `approve` 最多等这么久：插件可以把审批转到别处（手机、IM），等人回答。
+const APPROVE_WAIT: Duration = Duration::from_secs(600);
 /// `reviewTool` 最多等这么久（可以调模型、起子代理）；`transformRequest` 最多等这么久。
 const REVIEW_WAIT: Duration = Duration::from_secs(20);
 const TRANSFORM_WAIT: Duration = Duration::from_secs(5);
@@ -121,11 +125,19 @@ pub(super) fn register(cx: &mut Scope, plugin: &'static str, manifest: &PluginMa
             "reviewTool" => cx.hook::<ReviewTool>(HOOK_PRIORITY, js.clone()),
             "transformRequest" => cx.hook::<TransformRequest>(HOOK_PRIORITY, js.clone()),
             "turnStarted" => cx.hook::<TurnStarted>(HOOK_PRIORITY, js.clone()),
+            "approve" if capabilities.permissions_approve => cx.hook::<dshr_agent::ApproveTool>(HOOK_PRIORITY, js.clone()),
             "beforeWrite" => {
                 let js = js.clone();
                 cx.hook::<WriteIntent>(HOOK_PRIORITY, Arc::new(move |request: &WriteRequest<'_>| js.before_write(request)));
             }
             _ => {}
+        }
+    }
+    // 插件提供的权限模式：选中时每次工具调用由 `decide` 下结论（同步，和 `beforeTool` 一样等 300 ms）。
+    if capabilities.permissions_mode {
+        for decl in &instance.exports.permissions {
+            let (js, id) = (js.clone(), decl.id.clone());
+            cx.hook::<GateTool>(PERMISSION_PRIORITY, Arc::new(move |request: &GateRequest<'_>| js.decide(&id, request)));
         }
     }
 }
@@ -300,6 +312,26 @@ impl JsHooks {
         }
     }
 
+    /// 插件权限模式 `id` 的 `decide`：只在这个模式被选中（且插件还在）时调用。返回 `"allow"`、`"deny"`、`"ask"`，
+    /// 或 `{ decision, reason }`（`ask` 的 `reason` 附在审批处）；其余是没有结论，按手动确认处理。
+    fn decide(&self, id: &str, request: &GateRequest<'_>) -> Option<Gate> {
+        let chosen = dshr_agent::PluginPermission::active(&request.ctx.options, &request.ctx.plugins)?;
+        if chosen.plugin != self.plugin || chosen.id != id {
+            return None;
+        }
+        let payload = json!({ "tool": request.tool, "input": clip_value(request.input), "access": access_json(request.access) });
+        let payload = with_identity(payload, &request.ctx.options, None);
+        let job = Job::Dispatch { kind: "permission", name: id.to_owned(), payload: payload.to_string() };
+        let answer = self.answer("permissions.decide", self.instance.ask(job, Some(sync_context(request.ctx)), SYNC_WAIT));
+        let (decision, reason) = decision(&answer)?;
+        match decision {
+            "allow" => Some(Gate::Allow),
+            "deny" => Some(Gate::Deny(reason.unwrap_or_else(|| format!("Blocked by the {} plugin's permission mode.", self.plugin)))),
+            "ask" => Some(reason.map_or(Gate::Ask, Gate::Confirm)),
+            _ => None,
+        }
+    }
+
     /// `beforeRequest`：返回的文本追加到这次请求的系统提示词后面（不进日志）；返回 `{ append, user, model, effort }` 时
     /// `user` 作为一段 user 文本接在消息末尾（同样只在这次请求里），还可以换模型和思考等级（要 `model:route`，
     /// 模型只能是主程序放进 [`ModelChoices`] 的那些）。
@@ -417,6 +449,33 @@ impl ReviewToolHook for JsHooks {
 }
 
 #[async_trait::async_trait]
+impl dshr_agent::ApproveToolHook for JsHooks {
+    /// `approve`：和界面上的审批同时等，返回 `"allow"` / `"deny"`（或 `{ decision, reason }`）就以它为准；
+    /// 其余（含没有返回、超时）表示放弃，继续等界面。结论写进日志（`plugins/approved`）。
+    async fn approve(&self, request: &GateRequest<'_>, note: Option<&str>) -> Option<dshr_agent::Decision> {
+        let payload = json!({
+            "tool": request.tool,
+            "input": clip_value(request.input),
+            "access": access_json(request.access),
+            "note": note,
+        });
+        let payload = with_identity(payload, &request.ctx.options, None);
+        let job = Self::hook("approve", payload);
+        let answer = self.answer("approve", self.instance.call(job, Some(request.ctx.clone()), APPROVE_WAIT, self.permits).await);
+        let (decision, reason) = decision(&answer)?;
+        let verdict = match decision {
+            "allow" => dshr_agent::Decision::Allow,
+            "deny" => dshr_agent::Decision::Deny,
+            _ => return None,
+        };
+        request
+            .ctx
+            .emit_event("plugins/approved", json!({ "plugin": self.plugin, "tool": request.tool, "decision": decision, "reason": reason }));
+        Some(verdict)
+    }
+}
+
+#[async_trait::async_trait]
 impl TransformRequestHook for JsHooks {
     /// `transformRequest`：返回 `{ system?, messages? }` 替换这次请求的系统提示词和消息（要 `context:rewrite`）。
     async fn transform(&self, request: &mut ChatRequest, ctx: &ToolContext) {
@@ -452,7 +511,7 @@ fn append_user_text(messages: &mut Vec<dshr_core::Message>, text: String) {
 /// 内置的权限规则（预设的只读模式另算）：`"ask"` 用它来保证不比内置的更松。
 fn builtin_gate(request: &GateRequest<'_>) -> Gate {
     let confined = request.ctx.plugins.service::<dyn dshr_sandbox::Sandbox>().is_some_and(|sandbox| sandbox.confines_writes());
-    dshr_agent::gate(PermissionMode::of(&request.ctx.options), request.access, request.ctx, confined)
+    dshr_agent::gate(dshr_agent::effective_mode(&request.ctx.options, &request.ctx.plugins), request.access, request.ctx, confined)
 }
 
 #[async_trait::async_trait]
@@ -635,6 +694,7 @@ impl dshr_context::Plugin for HostEvents {
 
     fn apply(&self, cx: &mut Scope) -> anyhow::Result<()> {
         cx.contribute::<dshr_agent::EventLabels>(Arc::new(ReviewedLabel));
+        cx.contribute::<dshr_agent::EventLabels>(Arc::new(ApprovedLabel));
         Ok(())
     }
 }
@@ -651,6 +711,21 @@ impl dshr_agent::EventLabel for ReviewedLabel {
         let verdict = if text("decision") == "allow" { "放行" } else { "拒绝" };
         let reason = data.get("reason").and_then(Value::as_str).map(|reason| format!("：{reason}")).unwrap_or_default();
         Some(format!("插件 {} 审查后{verdict}了 {}{reason}", text("plugin"), text("tool")))
+    }
+}
+
+struct ApprovedLabel;
+
+impl dshr_agent::EventLabel for ApprovedLabel {
+    fn kind(&self) -> &str {
+        "plugins/approved"
+    }
+
+    fn label(&self, data: &Value) -> Option<String> {
+        let text = |key: &str| data.get(key).and_then(Value::as_str).unwrap_or_default();
+        let verdict = if text("decision") == "allow" { "批准" } else { "拒绝" };
+        let reason = data.get("reason").and_then(Value::as_str).map(|reason| format!("：{reason}")).unwrap_or_default();
+        Some(format!("插件 {} 代为{verdict}了 {}{reason}", text("plugin"), text("tool")))
     }
 }
 

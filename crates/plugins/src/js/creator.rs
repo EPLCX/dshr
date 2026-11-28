@@ -20,7 +20,7 @@
 //! | 非创造模式下的任何 `plugin_*` | 拒绝 | 拒绝 | 拒绝 |
 //! | `plugin_read` | 放行 | 放行 | 放行 |
 //! | `plugin_write`：新插件，或没有任何已允许能力的插件 | 询问 | 放行 | 放行 |
-//! | `plugin_write`：**已经允许过能力的插件** | 必须确认 | 必须确认 | 必须确认 |
+//! | `plugin_write`：**已经允许过能力的插件** | 必须确认 | 必须确认 | 放行 |
 //! | `plugin_write`：链接到插件目录之外的插件（`dshr plugin link`） | 拒绝 | 拒绝 | 拒绝 |
 //! | `plugin_reload`、`plugin_page`（只画页面） | 放行 | 放行 | 放行 |
 //! | `plugin_page`（执行动作） | 按权限模式（视同调用外部服务） | 同左 | 同左 |
@@ -28,7 +28,8 @@
 //!
 //! - 新插件在用户允许能力之前什么都碰不到（声明了能力却没被允许的插件根本不激活），所以写它不必逐次询问。
 //! - 已经被允许过能力的插件不一样：改过的代码热重载后**直接带着这些能力运行**，等于把能力交给了新代码，
-//!   所以每次写都要用户确认，审批卡片上写明它已经被允许了哪些能力。
+//!   所以每次写都要用户确认，审批卡片上写明它已经被允许了哪些能力。完全访问模式是用户明确选择的“不再询问”，
+//!   这时直接放行；授予新的能力（`plugin_grant`）仍然必须确认。
 //! - 链接的插件在别的文件夹里，在插件目录里写同名文件夹会把它遮住，所以直接拒绝，请用户去原文件夹里改。
 //! - `plugin_reload`、`plugin_page` 只会带着用户已经允许的能力运行代码，不会多出任何权限。
 //! - `plugin_grant` 输入里的能力必须和等授权的完全一致，授予的也**正好是**这几项（不重新读清单）：
@@ -257,7 +258,13 @@ fn write_gate(plugins_dir: &Path, request: &GateRequest<'_>) -> Gate {
     }
     let granted: Vec<String> =
         grants::load(&grants::grants_path(plugins_dir)).remove(id).map(|set| set.into_iter().collect()).unwrap_or_default();
+    let mode = dshr_agent::effective_mode(&request.ctx.options, &request.ctx.plugins);
     if !granted.is_empty() {
+        // 完全访问是用户明确选择的“什么都不再询问”：改写已允许过能力的插件也直接放行。
+        // 授予新的能力（`plugin_grant`）仍然要用户亲自确认。
+        if mode == PermissionMode::FullAccess {
+            return Gate::Allow;
+        }
         // 改过的代码会直接带着这些能力运行：等于把能力交给新代码，只能由用户决定。
         return Gate::Require(Some(format!(
             "The plugin `{id}` already has these approved capabilities: {}. The changed code will run with them right away.",
@@ -265,7 +272,7 @@ fn write_gate(plugins_dir: &Path, request: &GateRequest<'_>) -> Gate {
         )));
     }
     // 没有任何能力的插件什么都碰不到：手动确认模式下照样问，其余模式直接写。
-    if PermissionMode::of(&request.ctx.options) == PermissionMode::Manual { Gate::Ask } else { Gate::Allow }
+    if mode == PermissionMode::Manual { Gate::Ask } else { Gate::Allow }
 }
 
 /// `<插件目录>/<id>`；id 不合规时是 `Err`（给模型的说明）。

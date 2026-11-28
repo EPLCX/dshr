@@ -90,6 +90,26 @@ pub trait EventObserver: Send + Sync {
     fn observe(&self, session: &ObservedSession<'_>, event: &SessionEvent);
 }
 
+/// 扩展点：模型流式输出的增量（不进日志的那部分）。在 agent 循环里同步调用，所以**不能阻塞**：
+/// 要做的事排进自己的队列，马上返回。每次请求模型结束（完成、中断、失败）时收到一次 [`StreamChunk::End`]。
+pub struct StreamObservers;
+
+impl ExtensionPoint for StreamObservers {
+    type Item = Arc<dyn StreamObserver>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamChunk<'a> {
+    Text(&'a str),
+    Thinking(&'a str),
+    /// 这次请求的流结束了。
+    End,
+}
+
+pub trait StreamObserver: Send + Sync {
+    fn chunk(&self, session: &ObservedSession<'_>, chunk: StreamChunk<'_>);
+}
+
 /// 写这条事件的会话。
 pub struct ObservedSession<'a> {
     pub id: &'a str,
@@ -144,6 +164,20 @@ impl Hook for ReviewTool {
 #[async_trait::async_trait]
 pub trait ReviewToolHook: Send + Sync {
     async fn review(&self, request: &GateRequest<'_>) -> Option<Gate>;
+}
+
+/// 真的要问用户了（审查钩子也没给结论）：这些钩子和界面上的审批同时等，谁先给出结论以谁为准（比如插件把审批
+/// 转到手机或 IM 上）。返回 `None` 表示放弃，接着等界面。必须由用户亲自确认的（[`crate::Gate::Require`]）不交给它们。
+pub struct ApproveTool;
+
+impl Hook for ApproveTool {
+    type Handler = dyn ApproveToolHook;
+}
+
+#[async_trait::async_trait]
+pub trait ApproveToolHook: Send + Sync {
+    /// `note` 是审批处附的说明（如自动审查的理由）。
+    async fn approve(&self, request: &GateRequest<'_>, note: Option<&str>) -> Option<crate::Decision>;
 }
 
 /// 请求发出之前（[`BeforeRequest`] 之后）异步地改写它：压缩、裁剪消息等。改动不进日志。

@@ -41,13 +41,15 @@ pub use catalog::{
 pub use compaction::{CompactionPlugin, estimate_tokens};
 pub use delegate::{DELEGATE, DelegatePlugin, SubagentRunner};
 pub use hooks::{
-    AfterTool, AfterToolCall, AfterToolHook, AgentIdentity, BeforeRequest, BeforeStep, BeforeStepHook, CallEnv, EventKinds, EventLabel,
-    EventLabels, EventObserver, EventObservers, GateRequest, GateTool, LlmAccess, ModelChoices, ObservedSession, ReviewTool,
-    ReviewToolHook, SessionInfo, TransformRequest, TransformRequestHook, TurnContext, TurnControl, TurnEnded, TurnEndedHook, TurnInput,
-    TurnStart, TurnStarted, TurnStartedHook, TurnState,
+    AfterTool, AfterToolCall, AfterToolHook, AgentIdentity, ApproveTool, ApproveToolHook, BeforeRequest, BeforeStep, BeforeStepHook,
+    CallEnv, EventKinds, EventLabel, EventLabels, EventObserver, EventObservers, GateRequest, GateTool, LlmAccess, ModelChoices,
+    ObservedSession, ReviewTool, ReviewToolHook, SessionInfo, StreamChunk, StreamObserver, StreamObservers, TransformRequest,
+    TransformRequestHook, TurnContext, TurnControl, TurnEnded, TurnEndedHook, TurnInput, TurnStart, TurnStarted, TurnStartedHook,
+    TurnState,
 };
 pub use permission::{
-    AutoReviewer, Gate, PermissionMode, PermissionPlugin, READ_ONLY_DENIED, REVIEW_FAILED, UserIntent, gate, read_only_turn,
+    AutoReviewer, Gate, PermissionDef, PermissionMode, PermissionPlugin, PluginPermission, PluginPermissions, READ_ONLY_DENIED,
+    REVIEW_FAILED, UserIntent, effective_mode, gate, read_only_turn,
 };
 pub use preset::{PluginPreset, PluginPresets, Preset, PresetDef, PresetsPlugin, Subagent};
 pub use prompt::{EnvironmentPlugin, InstructionsPlugin, PromptContext, PromptContributor, PromptParts};
@@ -56,8 +58,8 @@ pub use session::{Session, SessionOptions};
 pub use steer::{SteerMessage, SteerQueue};
 pub use surface::{
     CommandEntry, CommandResult, EntryPlace, FileMentions, MAX_MENTION_BYTES, MAX_MENTION_ITEMS, MAX_TAGS, MentionContent, MentionItem,
-    MentionSource, MentionSources, NODE_ICONS, NODE_TONES, SlashEntry, ThemeDef, ToolCardView, UiEntry, UiSurface, UiSurfaces, hideable,
-    notify_page_refresh, page_refreshes, validate_tree,
+    MentionSource, MentionSources, NODE_ICONS, NODE_TONES, SlashEntry, ThemeDef, ToolCardView, UiEntry, UiSurface, UiSurfaces,
+    entries_generation, entry_changes, hideable, notify_entries_changed, notify_page_refresh, page_refreshes, validate_tree,
 };
 pub use system_prompt::DEFAULT_SYSTEM_PROMPT;
 pub use title::{TitlePlugin, title_changes};
@@ -596,7 +598,13 @@ impl Agent {
 
         let mut attempt = 1;
         loop {
-            match self.call_model(request.clone(), sink, cancel).await {
+            let tap = StreamTap {
+                observers: step.plugins.items::<StreamObservers>().to_vec(),
+                session: session.id(),
+                log_path: session.log_path(),
+                workspace: &self.tool_ctx.workspace,
+            };
+            match self.call_model(request.clone(), sink, cancel, &tap).await {
                 ModelResult::Failed(error) if error.is_retryable() && attempt < self.config.max_attempts => {
                     tracing::warn!(attempt, %error, "模型请求失败，准备重试");
                     session.append(EventBody::AssistantAttempt { attempt, error: error.to_string() }, sink)?;
@@ -618,7 +626,15 @@ impl Agent {
         (!parts.is_empty()).then(|| parts.join("\n\n"))
     }
 
-    async fn call_model(&self, request: ChatRequest, sink: &UnboundedSender<LiveEvent>, cancel: &CancellationToken) -> ModelResult {
+    async fn call_model(
+        &self,
+        request: ChatRequest,
+        sink: &UnboundedSender<LiveEvent>,
+        cancel: &CancellationToken,
+        tap: &StreamTap<'_>,
+    ) -> ModelResult {
+        // 不管这次请求怎么结束，订阅流式输出的插件都收到一次“结束”。
+        let _end = tap.end_guard();
         let mut stream = tokio::select! {
             biased;
             _ = cancel.cancelled() => return ModelResult::Interrupted(AssembledMessage::default()),
@@ -641,9 +657,11 @@ impl Agent {
             };
             match &event {
                 StreamEvent::TextDelta { text, .. } => {
+                    tap.send(StreamChunk::Text(text));
                     let _ = sink.send(LiveEvent::Chunk(Chunk::Text(text.clone())));
                 }
                 StreamEvent::ThinkingDelta { thinking, .. } => {
+                    tap.send(StreamChunk::Thinking(thinking));
                     let _ = sink.send(LiveEvent::Chunk(Chunk::Thinking(thinking.clone())));
                 }
                 _ => {}
@@ -738,13 +756,27 @@ impl Agent {
                     Gate::Require(note) => note,
                     _ => None,
                 };
-                let request =
+                // 插件代为审批（`hooks.approve`）：和界面同时等，先给出结论的生效。亲自确认的不交给插件。
+                let approvers = if mandatory { Vec::new() } else { step.plugins.hooks::<ApproveTool>().to_vec() };
+                let plugin_note = note.clone();
+                let by_plugin = async {
+                    let mut answers: futures::stream::FuturesUnordered<_> =
+                        approvers.iter().map(|hook| hook.approve(&request, plugin_note.as_deref())).collect();
+                    while let Some(answer) = answers.next().await {
+                        if let Some(decision) = answer {
+                            return decision;
+                        }
+                    }
+                    std::future::pending().await
+                };
+                let approval =
                     ApprovalRequest { call_id: call_id.to_owned(), tool: name.to_owned(), input: Arc::clone(input), note, mandatory };
                 // 等审批期间点停止：立刻当作中断返回，不再等用户点允许/拒绝。
                 let decision = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Some(ToolOutput::error(INTERRUPTED_TOOL_OUTPUT)),
-                    decision = self.approver.approve(&request) => decision,
+                    decision = self.approver.approve(&approval) => decision,
+                    decision = by_plugin => decision,
                 };
                 (decision == Decision::Deny).then(|| ToolOutput::error("User denied this tool call."))
             }
@@ -759,6 +791,36 @@ impl Agent {
             hook.after_tool(&after, &mut output).await;
         }
         output
+    }
+}
+
+/// 把模型的流式增量交给订阅的插件（[`StreamObservers`]）。
+struct StreamTap<'a> {
+    observers: Vec<Arc<dyn StreamObserver>>,
+    session: &'a str,
+    log_path: &'a std::path::Path,
+    workspace: &'a std::path::Path,
+}
+
+impl StreamTap<'_> {
+    fn send(&self, chunk: StreamChunk<'_>) {
+        if self.observers.is_empty() {
+            return;
+        }
+        let session = ObservedSession { id: self.session, log_path: self.log_path, workspace: Some(self.workspace) };
+        for observer in &self.observers {
+            observer.chunk(&session, chunk);
+        }
+    }
+
+    fn end_guard(&self) -> impl Drop + '_ {
+        struct End<'t, 'a>(&'t StreamTap<'a>);
+        impl Drop for End<'_, '_> {
+            fn drop(&mut self) {
+                self.0.send(StreamChunk::End);
+            }
+        }
+        End(self)
     }
 }
 

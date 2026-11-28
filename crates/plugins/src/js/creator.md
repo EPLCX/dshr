@@ -17,7 +17,7 @@ The deliverable is a plugin in the plugins folder, written with `plugin_write` a
 2. Write `plugin.toml` and `index.js` with `plugin_write` (one file per call). Keep the plugin small and focused.
 3. Call `plugin_reload`. It reports whether the plugin loaded and why not (syntax errors with line numbers, bad exports, tool name clashes), which tools it exports, the capabilities still waiting for approval, and the recent log.
 4. Fix the code and reload until it loads. Then **call each new tool once** with a realistic input. Tools that `plugin_reload` lists are callable from your next step. Fix what goes wrong.
-5. If the manifest declares capabilities, first tell the user in plain words what each one allows and why the plugin needs it. Then call `plugin_grant`. The user approves or refuses in the app; you cannot approve it yourself. A plugin with unapproved capabilities doesn't start at all. Exactly the capabilities you list are granted; if you change the manifest afterwards, new capabilities need another `plugin_grant`. Editing a plugin that already has approved capabilities asks the user every time (the changed code runs with them), so create new plugins under a new id instead of rewriting installed ones.
+5. If the manifest declares capabilities, first tell the user in plain words what each one allows and why the plugin needs it. Then call `plugin_grant`. The user approves or refuses in the app; you cannot approve it yourself. A plugin with unapproved capabilities doesn't start at all. Exactly the capabilities you list are granted; if you change the manifest afterwards, new capabilities need another `plugin_grant`. Editing a plugin that already has approved capabilities asks the user every time (the changed code runs with them) unless the session is in full access, so create new plugins under a new id instead of rewriting installed ones.
 6. Finish with a short summary: what the plugin does, its tools, its capabilities, and where it lives. It stays installed and hot-reloads when its files change.
 
 **Where to keep state**: the plugin's own data (todo items, notes, settings it remembers) goes in `host.readData` / `host.writeData` / `host.appendData`, or in a SQLite database with `host.db` for records you query, update or trim. These need no capability, work everywhere (sync hooks included) and point at the same folder for tools, pages, previews and settings tabs. Use `readFile` / `writeFile` (and the `fs:` capabilities) only for the user's project files in the open workspace.
@@ -25,15 +25,17 @@ The deliverable is a plugin in the plugins folder, written with `plugin_write` a
 Ask for as few capabilities as possible. Prefer pure computation. Ask for `fs:workspace:read` only to read files, `fs:workspace:write` only to write files, and `net:<host>` only for the exact hosts you need. Avoid `net:*` and `exec:*`. The other capabilities:
 
 - `exec:<program>` (e.g. `exec:git`): run that program with `host.exec`. Name each program; tools that can run programs are gated like `run_shell`.
-- `llm`: one-off requests with `host.llm.complete` — the session's model by default, or `{ model: "provider/model", effort }` (it spends the user's tokens; use it only when the task needs language understanding).
-- `session:read`: read the current session's events with `host.session.events`.
+- `llm`: one-off requests with `host.llm.complete` — the session's model by default, or `{ model: "provider/model", effort }` (it spends the user's tokens; use it only when the task needs language understanding). `host.llm.stream(request)` streams the reply: `for await (const { type, text } of host.llm.stream(…))`, or `await stream.text()`.
+- `session:read`: read the current session's events with `host.session.events`, the session's model and preset with `host.session.model()` / `preset()` / `models()`, and the model's live output with `on: { "stream/text": ({ session, text }, host) => {}, "stream/thinking": …, "stream/end": … }` (deltas are merged into ~100 ms batches; `"*"` does not receive them).
 - `hooks:gate`: let `hooks.beforeTool` *allow* a tool call outright. Denying or asking needs nothing.
 - `hooks:tool-output`: let `hooks.afterTool` rewrite a tool's result.
 - `background`: export `schedules` that run every N minutes.
 
 More capabilities (each is approved by the user; use them only when the task needs them):
 
-- `session:control`: `host.session.send(text, { session: "current" | "new" })`, `continue()`, `stop()`, `list()` — act for the user (IM bridges, automation).
+- `session:control`: `host.session.send(text, { session: "current" | "new", images: [{ data, mediaType }] })`, `continue()`, `stop()`, `list()`, `setModel("provider/model", { effort })`, `setPreset("plan" | "<plugin>/<preset>")` — act for the user (IM bridges, automation). Model and preset changes apply from the next turn.
+- `permissions:mode`: export `permissions: [{ id, label, description, icon, decide: ({ tool, input, access }, host) => "allow" | "deny" | "ask" }]`. Each mode appears in the permission menu; while it is chosen, `decide` (sync, ≤ 300 ms) rules on every tool call, and calls it leaves undecided are asked like manual mode.
+- `permissions:approve`: `hooks.approve({ tool, input, access, note }, host)` → `"allow"` / `"deny"` answers an approval while the app waits too (whichever answers first wins; up to 10 minutes, e.g. relayed to a phone). Return nothing to leave it to the user.
 - `agent:run`: `host.agent.run({ task, preset })` → the sub-agent's report.
 - `hooks:review`: `hooks.reviewTool({ tool, input, access }, host)` → `"allow"` / `"deny"` before the user would be asked.
 - `context:compact` / `context:rewrite`: `beforeStep` returns `{ compact: { summary, uptoSeq } }`; `hooks.transformRequest({ system, messages })` returns replacements.
@@ -210,6 +212,8 @@ export const ui = {
   hide: [],   // optional: "settings:general", "settings:models", "composer:presets", "composer:permission", "status:<id>"
 };
 ```
+
+At run time `host.ui.hide(target)` / `host.ui.show(target)` hide or show an entry at once (`host.ui.hidden()` lists them). `target` is one of the plugin's own entries — `sidebar:<id>`, `settings:<id>`, `panel:<id>`, `status:<id>` — or a built-in entry from the `hide` list. The state resets to `hide` when the plugin reloads, so call it in `activate` if it should stick.
 
 - **Nodes**:
   - Any node: `hidden` (skip it), `disabled` (controls greyed out), `tooltip`, `icon` (see Icons), `tone`: neutral|secondary|accent|success|warning|danger.

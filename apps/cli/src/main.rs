@@ -340,7 +340,12 @@ fn set_plugin_enabled(paths: &Paths, id: &str, enabled: bool) -> anyhow::Result<
 /// 命令行版的会话控制：插件发来的消息排在这一轮后面依次执行；不能新建会话。
 struct HeadlessSessions {
     session: String,
-    queue: Arc<std::sync::Mutex<std::collections::VecDeque<(String, String)>>>,
+    /// 这次运行的选项（命令行参数定的，运行中不能换）。
+    model: String,
+    effort: Option<String>,
+    preset: String,
+    permission: String,
+    queue: Arc<std::sync::Mutex<std::collections::VecDeque<dshr_plugins::app::SendRequest>>>,
     cancel: CancellationToken,
 }
 
@@ -351,7 +356,7 @@ impl dshr_plugins::app::SessionControl for HeadlessSessions {
             dshr_plugins::app::SessionTarget::Id(id) if *id == self.session => {}
             _ => return Err("命令行版只能发到当前会话".into()),
         }
-        self.queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push_back((request.plugin, request.text));
+        self.queue.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push_back(request);
         Ok(self.session.clone())
     }
 
@@ -367,6 +372,10 @@ impl dshr_plugins::app::SessionControl for HeadlessSessions {
             workspace: None,
             running: true,
             current: true,
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            preset: self.preset.clone(),
+            permission: self.permission.clone(),
         }]
     }
 }
@@ -624,7 +633,21 @@ async fn headless(paths: &Paths, prompt: String, options: RunOptions) -> anyhow:
 
     // 插件能用的命令行版服务：替用户发消息（排在这一轮后面）、通知写到 stderr、登录地址打印出来。
     let follow_ups = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
-    let sessions = Arc::new(HeadlessSessions { session: session.id().to_owned(), queue: follow_ups.clone(), cancel: cancel.clone() });
+    let preset_key = match preset {
+        Preset::Standard => "standard",
+        Preset::Plan => "plan",
+        Preset::Review => "review",
+        Preset::Create => "create",
+    };
+    let sessions = Arc::new(HeadlessSessions {
+        session: session.id().to_owned(),
+        model: reference.to_string(),
+        effort: effort.or(config.model.effort).map(|effort| effort.as_str().to_owned()),
+        preset: preset_key.to_owned(),
+        permission: permission.id().to_owned(),
+        queue: follow_ups.clone(),
+        cancel: cancel.clone(),
+    });
     dshr_plugins::app::set_app_services(|services| {
         services.session = Some(sessions.clone());
         services.notifier = Some(Arc::new(|notification: &dshr_plugins::app::Notification| {
@@ -651,12 +674,13 @@ async fn headless(paths: &Paths, prompt: String, options: RunOptions) -> anyhow:
     let mut outcome = agent.run_turn(&mut session, prompt, &tx, &cancel).await;
     for _ in 0..MAX_PLUGIN_FOLLOW_UPS {
         let next = follow_ups.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).pop_front();
-        let Some((plugin, text)) = next else { break };
+        let Some(request) = next else { break };
         if cancel.is_cancelled() || outcome.as_ref().is_ok_and(|outcome| outcome.reason == TurnEndReason::Error) {
             break;
         }
-        eprintln!("\n[由插件 {plugin} 发送] {text}");
-        outcome = agent.run_turn(&mut session, text, &tx, &cancel).await;
+        let images = if request.images.is_empty() { String::new() } else { format!("（附图 {} 张）", request.images.len()) };
+        eprintln!("\n[由插件 {} 发送] {}{images}", request.plugin, request.text);
+        outcome = agent.run_turn_with(&mut session, request.text, request.images, &tx, &cancel).await;
     }
     drop(tx);
     printer.await?;
@@ -732,6 +756,8 @@ async fn print_events_to(mut rx: mpsc::UnboundedReceiver<LiveEvent>, mut stdout:
 #[derive(Default)]
 struct TerminalApprover {
     prompt: Mutex<()>,
+    /// 还没读完的那一行（见 `approve`）。
+    reading: Mutex<Option<tokio::task::JoinHandle<std::io::Result<String>>>>,
 }
 
 #[async_trait::async_trait]
@@ -746,12 +772,18 @@ impl Approver for TerminalApprover {
             (None, false) => String::new(),
         };
         let question = format!("{note}\n允许执行 {} {}？[y/N] ", request.tool, request.input);
-        let answer = tokio::task::spawn_blocking(move || {
-            eprint!("{question}");
-            let mut line = String::new();
-            std::io::stdin().read_line(&mut line).map(|_| line)
-        })
-        .await;
+        eprint!("{question}");
+        // 读一行是阻塞的，取消不了：插件先给出结论（`hooks.approve`）时这次等待被丢下，那一行还在读。
+        // 下一次询问接着用那次读，免得用户的回答被吞掉。
+        let mut reading = self.reading.lock().await;
+        let handle = reading.get_or_insert_with(|| {
+            tokio::task::spawn_blocking(|| {
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).map(|_| line)
+            })
+        });
+        let answer = handle.await;
+        *reading = None;
         match answer {
             Ok(Ok(line)) if matches!(line.trim(), "y" | "Y" | "yes") => Decision::Allow,
             _ => Decision::Deny,

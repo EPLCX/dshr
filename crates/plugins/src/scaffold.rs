@@ -78,7 +78,8 @@ impl Scaffold {
             "# 能用的宿主功能：fs:workspace:read、fs:workspace:write、net:<主机>、exec:<程序>、llm、session:read、\n\
              # session:control、agent:run、hooks:gate、hooks:review、hooks:tool-output、context:compact、context:rewrite、\n\
              # model:route、provider、oauth、notify、background、dshr:config:read、dshr:config:write、dshr:skills、\n\
-             # dshr:sessions:read、dshr:sessions:write、dshr:mcp、plugins:install（见 docs/plugins.md）\n\
+             # dshr:sessions:read、dshr:sessions:write、dshr:mcp、plugins:install、permissions:mode、permissions:approve\n\
+             # （见 docs/plugins.md）\n\
              capabilities = [{}]\n",
             capabilities.join(", ")
         ));

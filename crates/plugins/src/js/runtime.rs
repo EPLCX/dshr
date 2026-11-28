@@ -115,6 +115,9 @@ pub(crate) struct Exports {
     pub ui: UiExports,
     #[serde(default)]
     pub presets: Vec<PresetDecl>,
+    /// `permissions` 导出：插件提供的权限模式。
+    #[serde(default)]
+    pub permissions: Vec<PermissionDecl>,
     #[serde(default)]
     pub commands: Vec<CommandDecl>,
     #[serde(default)]
@@ -163,6 +166,16 @@ pub(crate) struct PresetDecl {
     pub instructions: String,
     pub read_only: bool,
     pub tools: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PermissionDecl {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -312,6 +325,8 @@ pub(crate) struct Instance {
     pub refresh: Arc<Mutex<std::collections::HashMap<String, u64>>>,
     /// `host.tools.set` 设的动态工具。
     pub dynamic: Arc<DynamicTools>,
+    /// `host.ui.hide` / `show` 改的入口显隐。
+    pub visibility: Arc<EntryVisibility>,
 }
 
 /// `host.tools.set([...])` 设的工具：整组替换，下一步起生效。只属于这个运行时（热重载后的新版本从空的开始）。
@@ -320,6 +335,62 @@ pub(crate) struct DynamicTools {
     pub decls: Mutex<Vec<ToolDecl>>,
     /// 不能用的名字：装进 `Context` 时已有的工具、插件自己静态导出的工具。
     pub reserved: Mutex<std::collections::HashSet<String>>,
+}
+
+/// 入口的显隐（`host.ui.hide` / `show`）：插件运行时改，界面每次画的时候读。只属于这个运行时（热重载后回到 `ui.hide`）。
+#[derive(Default)]
+pub(crate) struct EntryVisibility {
+    /// 插件自己的入口：`sidebar:<id>`、`settings:<id>`、`panel:<id>`、`status:<id>`。加载完导出后填。
+    pub own: Mutex<std::collections::BTreeSet<String>>,
+    /// 藏着的自己的入口（键同 `own`）。
+    pub hidden_own: Mutex<std::collections::BTreeSet<String>>,
+    /// 藏着的内置入口（`dshr_agent::hideable` 认可的）。初值是 `ui.hide`。
+    pub hidden_builtin: Mutex<std::collections::BTreeSet<String>>,
+}
+
+impl EntryVisibility {
+    fn load(&self, ui: &UiExports) {
+        let keys = |place: &str, decls: &[EntryDecl]| decls.iter().map(|decl| format!("{place}:{}", decl.id)).collect::<Vec<_>>();
+        let mut own = self.own.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        own.clear();
+        own.extend(keys("sidebar", &ui.sidebar));
+        own.extend(keys("settings", &ui.settings));
+        own.extend(keys("panel", &ui.panels));
+        own.extend(keys("status", &ui.status));
+        drop(own);
+        let mut builtin = self.hidden_builtin.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        builtin.clear();
+        builtin.extend(ui.hide.iter().filter(|target| dshr_agent::hideable(target)).cloned());
+    }
+
+    /// 藏起或显示 `target`：先找插件自己的入口，找不到再当作内置入口。返回有没有变化。
+    pub fn set(&self, target: &str, hidden: bool) -> Result<bool, String> {
+        let lock = |set: &Mutex<std::collections::BTreeSet<String>>| -> bool {
+            let mut set = set.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if hidden { set.insert(target.to_owned()) } else { set.remove(target) }
+        };
+        if self.own.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(target) {
+            return Ok(lock(&self.hidden_own));
+        }
+        if dshr_agent::hideable(target) {
+            return Ok(lock(&self.hidden_builtin));
+        }
+        Err(format!(
+            "`{target}` is neither one of this plugin's entries (sidebar:<id>, settings:<id>, panel:<id>, status:<id>) nor a built-in entry \
+             that can be hidden (settings:<page>, sidebar:<id>, status:<id>, composer:presets, composer:permission)"
+        ))
+    }
+
+    /// 现在藏着的全部：自己的入口和内置入口。
+    pub fn hidden(&self) -> Vec<String> {
+        let own = self.hidden_own.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let builtin = self.hidden_builtin.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        own.into_iter().chain(builtin.into_iter().filter(|target| !self.is_own(target))).collect()
+    }
+
+    fn is_own(&self, target: &str) -> bool {
+        self.own.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(target)
+    }
 }
 
 /// 一次询问超时后，多久之内不再问。
@@ -403,14 +474,16 @@ impl Instance {
         let pages = refresh.clone();
         let dynamic = Arc::new(DynamicTools::default());
         let tools = dynamic.clone();
+        let visibility = Arc::new(EntryVisibility::default());
+        let entries = visibility.clone();
         std::thread::Builder::new()
             .name(format!("dshr-js-{plugin}"))
             .stack_size(THREAD_STACK)
-            .spawn(move || run(plugin, &manifest, &config, restore, pages, tools, &recorder, &ready, &inbox))
+            .spawn(move || run(plugin, &manifest, &config, restore, pages, tools, entries, &recorder, &ready, &inbox))
             .map_err(|error| format!("起不了插件线程：{error}"))?;
         // 加载本身有时限（`activate` 另有一份）；这里多等一会儿只是兜底。
         match loaded.recv_timeout(LOAD_TIMEOUT * 2 + Duration::from_secs(5)) {
-            Ok(Ok(exports)) => Ok(Self { commands, exports, busy_until: Mutex::new(None), health, refresh, dynamic }),
+            Ok(Ok(exports)) => Ok(Self { commands, exports, busy_until: Mutex::new(None), health, refresh, dynamic, visibility }),
             Ok(Err(error)) => Err(error),
             Err(_) => Err("插件加载没有响应".into()),
         }
@@ -454,6 +527,7 @@ fn run(
     restore: Option<String>,
     refresh: Arc<Mutex<std::collections::HashMap<String, u64>>>,
     dynamic: Arc<DynamicTools>,
+    visibility: Arc<EntryVisibility>,
     health: &Health,
     ready: &mpsc::SyncSender<Loaded>,
     inbox: &mpsc::Receiver<Command>,
@@ -461,6 +535,7 @@ fn run(
     let state =
         Rc::new(State::new(plugin, manifest.capabilities.clone(), manifest.secrets.clone(), super::surface::data_dir(manifest), refresh));
     *state.dynamic.borrow_mut() = Some(dynamic);
+    *state.visibility.borrow_mut() = Some(visibility.clone());
     let setup = || -> rquickjs::Result<(Runtime, Context)> {
         let runtime = Runtime::new()?;
         runtime.set_memory_limit(MEMORY_LIMIT);
@@ -490,6 +565,8 @@ fn run(
                 return;
             }
         };
+        // 入口先按导出登记好：`activate` 里就可以 `host.ui.hide`。
+        visibility.load(&exports.ui);
         // 热重载时先把旧版本的状态交给新版本，再 `activate`。都在加载的时限里，失败就是加载失败。
         let lifecycle = |name: &str, payload: String| -> Result<(), String> {
             let job = Job::Dispatch { kind: "lifecycle", name: name.to_owned(), payload };

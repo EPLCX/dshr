@@ -16,7 +16,7 @@
 | [`prompt`](#prompt) | 函数 | — | 每轮追加到系统提示词后面的文本 |
 | [`events`](#events) | 对象 | — | 插件事件怎么进上下文、怎么显示 |
 | [`hooks`](#hooks) | 对象 | 视钩子而定 | 挂在 agent 循环上的钩子 |
-| [`on`](#on) | 对象 | 视事件而定 | 订阅会话事件 |
+| [`on`](#on) | 对象 | 视事件而定 | 订阅会话事件、模型的流式输出 |
 | [`api`](#api) | 对象 | — | 给其他插件调用的方法 |
 | [`mentions`](#mentions) | 数组 | — | 输入框 `@` 菜单的来源 |
 | [`watch`](#watch) | 数组 | `background` + `fs:workspace:read` | 工作区文件变化 |
@@ -25,6 +25,7 @@
 | [`commands`](#commands-与-slash) | 数组 | — | 命令（`/<插件>:<id>`，可带快捷键） |
 | [`slash`](#commands-与-slash) | 数组 | — | 斜杠命令（`/<名字>`） |
 | [`presets`](#presets) | 数组 | — | 预设 |
+| [`permissions`](#permissions) | 数组 | `permissions:mode` | 权限模式（选中后由插件决定每次工具调用） |
 | [`providers`](#providers) | 数组 | `provider` | 模型服务商 |
 | [`themes`](#themes) | 数组 | — | 配色方案 |
 | [`schedules`](#schedules) | 数组 | `background` | 定时任务 |
@@ -178,6 +179,19 @@ turnEnded: async ({ reason, finalText, error }, host) => undefined
 
 一轮结束后。`reason` 是 `completed` / `interrupted` / `error`。可以写事件、写数据、联网（有 `net:` 时）、调模型（有 `llm` 时）。
 
+#### approve（需要 `permissions:approve`）
+
+```js
+approve: async ({ tool, input, access, note, session, agent }, host) => "allow" | "deny" | { decision, reason } | undefined
+```
+
+真的要问用户时（`reviewTool` 和自动审查都没给结论）调用，和审批卡片同时等待，最多 10 分钟；先给出结论的生效。返回 `undefined`
+表示放弃，继续等界面。`note` 是审批处附的说明（如自动审查的理由）。结论写进会话日志（`plugins/approved`）。必须由用户亲自确认的
+操作不会交给它。可以联网、调模型、代办（按插件的能力），适合把审批转到手机或 IM 上。
+
+同一个插件的调用一次只执行一个：`approve` 等待期间，这个插件的其他调用（工具、钩子、页面）排队。用户在界面上先回答时，
+`approve` 这次调用随即被中断。需要长时间等外部回复时，建议把审批单独做成一个小插件，免得影响其他功能；常驻服务在单独的运行时里，不受影响。
+
 ### on
 
 ```js
@@ -191,6 +205,18 @@ export const on = {
 键是事件类型、`命名空间/*` 或 `*`。事件写进日志时排进插件的队列（不阻塞 agent，最多排 256 件，满了丢弃并记日志），
 `data` 最多 16 KB。自己命名空间以外的事件需要 `dshr:sessions:read`。处理函数可以读工作区、联网、读写数据目录、刷新页面；
 不能写工作区、启动程序、调模型、写会话事件。
+
+**流式输出**（需要 `session:read`）：模型逐字输出的内容不进日志，用下面这几个键订阅：
+
+| 键 | 参数 | 时机 |
+|---|---|---|
+| `stream/text` | `{ type, stream: true, session, agent, text }` | 一段正文增量 |
+| `stream/thinking` | 同上 | 一段思考增量 |
+| `stream/end` | `{ type, stream: true, session, agent }` | 一次模型请求的输出结束（完成、中断或失败，重试时每次各一个） |
+| `stream/*` | — | 以上全部 |
+
+增量按会话合并，约每 100 毫秒或攒够 4 KB 交一次，正文和思考的先后顺序不变。`agent` 在子代理里是子代理的会话 id，主会话是 `null`。
+`*` 不会收到这些通知。
 
 ### api
 
@@ -259,7 +285,7 @@ export const ui = {
 | `settings` | 设置弹窗里的一页（排在“扩展”之后） |
 | `panels` | 输入框上方可折叠的面板 |
 | `status` | 侧边栏底部的状态行，显示页面里的第一段文字 |
-| `hide` | 要藏起来的内置入口：`settings:<页>`（不含 `extensions`）、`composer:presets`、`composer:permission`、`sidebar:<id>`、`status:<id>` |
+| `hide` | 加载时要藏起来的内置入口：`settings:<页>`（不含 `extensions`）、`composer:presets`、`composer:permission`、`sidebar:<id>`、`status:<id>`。运行时用 `host.ui.hide` / `show` 改（见“其他”） |
 
 入口的 `icon` 取值见“界面节点”一节的“图标”。
 
@@ -290,6 +316,26 @@ export const presets = [{ id, label, description, instructions, readOnly, tools 
 | `instructions` | 追加到系统提示词后面的说明 |
 | `readOnly` | `true` 时这一轮强制只读 |
 | `tools` | 可选的工具名单：模型只看到这些工具，名单外的调用被拒绝 |
+
+### permissions
+
+```js
+export const permissions = [{
+  id: "office-hours",
+  label: "工作时间放行",
+  description: "工作时间内工作区的修改直接执行",
+  icon: "calendar",
+  decide: ({ tool, input, access, session, agent }, host) => "allow" | "deny" | "ask" | { decision, reason } | undefined,
+}];
+```
+
+需要 `permissions:mode`。每个模式出现在权限菜单里内置四项的后面（`id` 只用小写字母、数字、`-`、`_`；`icon` 取值见“图标”），
+会话日志里记作 `<插件 id>/<id>`。选中时：
+
+- 每次工具调用先经过预设、`beforeTool`，再由 `decide` 下结论：`"allow"` 放行，`"deny"` 拒绝（`reason` 交给模型），`"ask"` 询问
+  （`reason` 附在审批卡片上）。
+- `decide` 同步执行，最多 300 ms，和 `beforeTool` 一样只读；返回 `undefined`、超时或出错时按“手动确认”处理。
+- 预设的只读规则、创造模式的规则、必须由用户亲自确认的操作不受影响。提供模式的插件停用后退回内置的权限模式。
 
 ### providers
 
@@ -476,11 +522,13 @@ const recent = await host.db.query("SELECT text FROM memories WHERE text LIKE :q
 
 | 成员 | 需要 | 说明 |
 |---|---|---|
-| `llm.complete(prompt \| { system, prompt, messages, maxTokens, model, effort }, { model, effort, maxTokens, signal })` | `llm` | 发一次性请求（不带工具），返回文本；每次调用最多 8 次 |
+| `llm.complete(prompt \| { system, prompt, messages, maxTokens, model, effort }, { model, effort, maxTokens, signal })` | `llm` | 发一次性请求（不带工具），返回文本 |
+| `llm.stream(prompt \| { … }, { model, effort, maxTokens, signal })` | `llm` | 同上，流式读取：返回的对象可以 `for await` 逐块读 `{ type: "text" \| "thinking", text }`，或 `await stream.text()` 读完取全文；读完后 `stream.usage` 是用量。只能读一次 |
 
 - 默认用当前会话的模型。`model` 换模型：`"provider/model"` 用另一个已配置的提供商（要有它的 API Key），只写模型名时
   沿用当前提供商。`effort` 指定思考等级：`off` / `low` / `high` / `max`。两者都可以写在请求里或第二个参数里。
 - 模型不存在、提供商没配置时抛出异常，不会悄悄退回当前模型。
+- `complete` 和 `stream` 合计每次调用最多 8 次。流属于发起它的那次调用，调用结束时关掉，没读完的请求随之中止。
 
 可以在工具和异步钩子里用。花的是用户的 token，只在任务确实需要理解语言时用。
 
@@ -492,16 +540,26 @@ const recent = await host.db.query("SELECT text FROM memories WHERE text LIKE :q
 | `session.id()` | `session:read` | 当前会话 id |
 | `session.current()` | — | `{ session, agent }`：顶层会话 id 和代理（`"main"` 或子代理名）；不在会话里时都是 `null` |
 | `session.endTurn()` | — | 这一步的工具调用都执行完后结束本轮，不再请求模型（以“完成”结束）。只能在一轮里的工具和 `afterTool` 钩子里用 |
-| `session.list()` | `session:read` 或 `session:control` | 打开着的会话 `[{ id, title, workspace, running, current }]` |
-| `session.send(text, { session, workspace })` | `session:control` | 替用户发消息；`session` 是 `"current"`（默认）、`"new"` 或会话 id；返回会话 id。每个插件每 5 秒最多一条 |
+| `session.list()` | `session:read` 或 `session:control` | 打开着的会话 `[{ id, title, workspace, running, current, model, effort, preset, permission }]` |
+| `session.model(session?)` | `session:read` 或 `session:control` | `{ model: "provider/model", effort }`（`effort` 为 `null` 时是模型的默认值） |
+| `session.preset(session?)` | `session:read` 或 `session:control` | `standard` / `plan` / `review` / `create`，插件预设是 `<插件>/<预设>` |
+| `session.permission(session?)` | `session:read` 或 `session:control` | `manual` / `workspace` / `auto_review` / `full_access`，插件提供的模式是 `<插件>/<模式>` |
+| `session.models()` | `session:read` 或 `session:control` | 已配置的模型 `[{ model, provider, name, providerName }]` |
+| `session.setModel(model, { effort, session })` | `session:control` | 换模型（`provider/model`，或只写模型名沿用当前提供商；`null` 不换）；`effort` 是 `off` / `low` / `high` / `max`，`null` 改回默认，不写不改 |
+| `session.setPreset(preset, { session })` | `session:control` | 换预设：`standard` / `plan` / `review` 或 `<插件>/<预设>`；不能切到创造模式 |
+| `session.send(text, { session, workspace, images })` | `session:control` | 替用户发消息；`session` 是 `"current"`（默认）、`"new"` 或会话 id；`images` 是 `[{ data, mediaType, name }]`（`data` 为 base64 字符串或 `Uint8Array`，PNG / JPEG / GIF / WebP，最多 4 张、每张 2 MB，可以只发图片）；也可以写成 `send({ text, images, … })`。返回会话 id。每个插件每 5 秒最多一条 |
 | `session.continue(options)` | `session:control` | 等于发送 `continue` |
 | `session.stop(session?)` | `session:control` | 停止会话（默认当前） |
 | `agent.run({ task, preset })` | `agent:run` | 启动子代理，返回它的报告；`preset` 是 `standard` / `plan` / `review`；每次调用最多 4 个 |
 | `notify({ title, body })` 或 `notify("标题")` | `notify` | 桌面通知；每个插件每 10 秒最多一条 |
 | `composer.get()` / `set(text)` / `insert(text)` | — | 读写输入框；只在页面动作、命令、斜杠命令里可用 |
 
-代办类操作（发消息、子代理）只能在没有标 `readOnly` 的工具、页面动作、异步钩子和常驻服务里用。命令行版只能发到当前会话，
-不能新建会话。
+代办类操作（发消息、切换模型和预设、子代理）只能在没有标 `readOnly` 的工具、页面动作、异步钩子和常驻服务里用。
+
+- 不指定 `session` 时：在一轮里调用的是这一轮的会话，其余场合是界面上当前的会话。
+- `setModel`、`setPreset` 先检查值（模型必须已经配置、预设必须存在），不合规时抛出异常、什么都不改；改动从下一轮起生效，
+  和在菜单里选的一样记进会话日志。
+- 命令行版只能发到当前会话，不能新建会话；模型和预设由命令行参数决定，只能读、不能切换。
 
 ### 第三方登录
 
@@ -547,6 +605,8 @@ API 密钥在钥匙串里，这里碰不到。
 | `tools.list()` | — | 动态工具的名字 |
 | `secrets.get(name)`、`secrets.has(name)` | 清单 `secrets` 里声明 | 密钥的值（没设置时 `null`）、是否设置 |
 | `ui.refresh(page)` | — | 让打开着的页面重新渲染 |
+| `ui.hide(target)`、`ui.show(target)` | — | 运行时藏起、重新显示入口，界面立即跟着变。`target` 先按插件自己的入口找：`settings:<id>`、`sidebar:<id>`、`panel:<id>`、`status:<id>`；找不到时按可以藏的内置入口（同 `ui.hide`）。都不是时抛出异常。热重载后回到 `ui.hide` 的状态 |
+| `ui.hidden()` | — | 现在藏着的入口（自己的和内置的） |
 
 ## 在哪里能用什么
 
@@ -668,9 +728,9 @@ warning、alert、success、error、play、pause、eye、chevron-right、chevron
 | `fs:workspace:write` | 写工作区：`writeFile`、`writeFileBytes`、`mkdir`、`remove`、`rename` |
 | `net:<主机>` | `fetch` / `websocket` 访问该主机。`api.example.com`、`*.example.com`（子域）、`*`（任何主机）；通配不含 localhost 和 IP，本机和内网服务要逐个写明（IPv6 写 `[::1]`） |
 | `exec:<程序>` | `exec` / `spawn` 启动该程序（只比程序名）；`exec:*` 任何程序，也允许带路径的写法 |
-| `llm` | `llm.complete`（含指定其他已配置的模型） |
-| `session:read` | `session.events`、`session.id`、`session.list` |
-| `session:control` | `session.send`、`continue`、`stop`、`list` |
+| `llm` | `llm.complete`、`llm.stream`（含指定其他已配置的模型） |
+| `session:read` | `session.events`、`session.id`、`session.list`、`session.model` / `preset` / `permission` / `models`；订阅流式输出（`on["stream/…"]`） |
+| `session:control` | `session.send`（可带图片）、`continue`、`stop`、`list`、`setModel`、`setPreset`，以及 `session:read` 里读模型和预设的那几个 |
 | `agent:run` | `agent.run` |
 | `hooks:gate` | `beforeTool` 直接放行 |
 | `hooks:review` | `reviewTool` 钩子 |
@@ -688,6 +748,8 @@ warning、alert、success、error、play、pause、eye、chevron-right、chevron
 | `dshr:sessions:read` / `dshr:sessions:write` | `host.dshr.sessions`；订阅其他插件和核心的会话事件 |
 | `dshr:mcp` | `host.dshr.mcp` |
 | `plugins:install` | `host.plugins.list` / `install` / `uninstall` / `setEnabled` |
+| `permissions:mode` | `permissions` 导出（权限模式） |
+| `permissions:approve` | `hooks.approve`（代用户回答审批） |
 
 派生的能力（不在 `capabilities` 里写）：
 
@@ -716,7 +778,11 @@ warning、alert、success、error、play、pause、eye、chevron-right、chevron
 | `fetch` 请求体、响应体 | 各 2 MB |
 | WebSocket 单条消息 | 4 MB |
 | `exec` 输出 | 各 1 MB |
-| `llm.complete` | 每次调用 8 次 |
+| `llm.complete`、`llm.stream` | 每次调用合计 8 次 |
+| 权限模式的 `decide` | 300 ms |
+| `approve` 钩子 | 10 分钟 |
+| 流式输出的通知 | 约每 100 ms 或 4 KB 合并一次；每个插件最多排 256 件，满了丢弃并记日志 |
+| 代发消息的图片 | 每条 4 张，单张 2 MB |
 | `agent.run` | 每次调用 4 个 |
 | 动态工具 | 128 个 |
 | 插件包：命令 / 预设 / MCP 服务器 | 50 / 20 / 16 个，单个文件 64 KB |
