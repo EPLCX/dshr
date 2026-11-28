@@ -9,6 +9,7 @@ pub(super) type BodyReceiver = tokio::sync::mpsc::Receiver<Result<Vec<u8>, Strin
 mod api;
 mod app;
 mod bundle;
+mod config;
 mod creator;
 mod dshr;
 mod hooks;
@@ -353,6 +354,17 @@ impl JsPlugin {
         if !exports.providers.is_empty() && !capabilities.provider {
             anyhow::bail!("导出了 providers，但 plugin.toml 没有声明 `provider` 能力");
         }
+        if !exports.permissions.is_empty() && !capabilities.permissions_mode {
+            anyhow::bail!("导出了 permissions，但 plugin.toml 没有声明 `permissions:mode` 能力");
+        }
+        for mode in &exports.permissions {
+            if !crate::manifest::valid_id(&mode.id) {
+                anyhow::bail!("权限模式 id `{}` 不合规：只用小写字母、数字、`-`、`_`", mode.id);
+            }
+        }
+        if exports.hooks.iter().any(|hook| hook == "approve") && !capabilities.permissions_approve {
+            anyhow::bail!("导出了 hooks.approve，但 plugin.toml 没有声明 `permissions:approve` 能力");
+        }
         for provider in &exports.providers {
             if !crate::manifest::valid_id(&provider.id) {
                 anyhow::bail!("服务商 id `{}` 不合规：只用小写字母、数字、`-`、`_`", provider.id);
@@ -407,6 +419,16 @@ impl JsPlugin {
 }
 
 /// 交给脚本的配置：`[plugins.<id>]` 去掉 `enabled`（那是给内核看的）；没有配置时是空对象。
+impl JsPlugin {
+    /// 正在运行的实例换上新的配置（`host.config`）。没有在运行时什么都不做：下次加载时用 `Context` 里的配置。
+    pub(crate) fn set_live_config(&self, config: &Value) {
+        let instance = self.inner.instance.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        if let Some(instance) = instance {
+            instance.config.set(config);
+        }
+    }
+}
+
 fn script_config(raw: Option<Value>) -> Value {
     let mut config = raw.unwrap_or_else(|| Value::Object(Default::default()));
     if let Some(object) = config.as_object_mut() {
@@ -493,6 +515,9 @@ impl Plugin for JsPlugin {
                 timeout,
                 instance.clone(),
             )));
+            if let Some(observer) = observe::JsStreamObserver::new(self.inner.id, manifest, timeout, instance.clone()) {
+                cx.contribute::<dshr_agent::StreamObservers>(Arc::new(observer));
+            }
         }
         for provider in &instance.exports.providers {
             cx.contribute::<dshr_llm::ProviderAuths>(Arc::new(JsProviderAuth {
@@ -501,6 +526,17 @@ impl Plugin for JsPlugin {
                 manifest: manifest.clone(),
                 instance: instance.clone(),
             }));
+        }
+        if manifest.capabilities.permissions_mode {
+            for mode in &instance.exports.permissions {
+                cx.contribute::<dshr_agent::PluginPermissions>(Arc::new(dshr_agent::PermissionDef {
+                    plugin: self.inner.id.to_owned(),
+                    id: mode.id.clone(),
+                    label: mode.label.clone(),
+                    description: mode.description.clone(),
+                    icon: mode.icon.clone(),
+                }));
+            }
         }
         for preset in &instance.exports.presets {
             cx.contribute::<dshr_agent::PluginPresets>(Arc::new(dshr_agent::PresetDef {
@@ -650,6 +686,7 @@ impl Tool for JsTool {
                 exec: self.executes(),
                 llm: self.capabilities.llm,
                 act: self.acts(),
+                config: !self.decl.read_only,
             },
             timeout: self.timeout,
             cancelled,

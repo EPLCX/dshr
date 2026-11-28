@@ -138,6 +138,10 @@ fn permission_line(options: &Options, confined: bool) -> &'static str {
         return "read-only — you can read and search, but files can't be changed and commands can't run. \
                 If the task needs changes, describe them instead.";
     }
+    if options.get::<crate::PluginPermission>().is_some() {
+        return "custom (provided by a plugin) — the plugin decides which calls run directly; anything it does not \
+                allow waits for the user to approve it, so batch related changes and avoid needless calls.";
+    }
     match PermissionMode::of(options) {
         PermissionMode::FullAccess => "full access — nothing asks for approval, so take extra care with destructive commands.",
         PermissionMode::Manual => {

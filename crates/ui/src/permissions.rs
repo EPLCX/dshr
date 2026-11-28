@@ -34,6 +34,8 @@ pub fn capability_text(name: &str) -> String {
         "dshr:sessions:write" => "settings.capability_sessions_write",
         "dshr:mcp" => "settings.capability_mcp",
         "plugins:install" => "settings.capability_plugins_install",
+        "permissions:mode" => "settings.capability_permissions_mode",
+        "permissions:approve" => "settings.capability_permissions_approve",
         other if other.starts_with("plugins:call:") => {
             return t!("settings.capability_plugins_call", plugin = &other["plugins:call:".len()..]).to_string();
         }
@@ -72,6 +74,8 @@ pub fn capability_sensitive(name: &str) -> bool {
                 | "dshr:mcp"
                 | "dshr:skills"
                 | "plugins:install"
+                | "permissions:mode"
+                | "permissions:approve"
         )
 }
 
@@ -158,6 +162,8 @@ mod tests {
             "dshr:sessions:write",
             "dshr:mcp",
             "plugins:install",
+            "permissions:mode",
+            "permissions:approve",
             "hooks:write",
             "mcp:github@1a2b3c4d",
             "plugins:call:helper",

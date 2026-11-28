@@ -97,8 +97,8 @@ impl UiSurface for PromptSurface {
         &[]
     }
 
-    fn hidden(&self) -> &[String] {
-        &[]
+    fn hidden(&self) -> Vec<String> {
+        Vec::new()
     }
 
     fn render(&self, _page: &str, _workspace: Option<&Path>) -> Result<Value, String> {

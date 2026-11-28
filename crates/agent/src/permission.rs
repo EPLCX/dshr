@@ -54,6 +54,48 @@ impl PermissionMode {
     }
 }
 
+/// 插件提供的权限模式（`export const permissions = [...]`，要 `permissions:mode`）：出现在权限菜单里内置四项后面。
+/// 选中时每次工具调用由插件的 `decide` 下结论；插件没给结论（超时、出错、返回 `undefined`）时按“手动确认”处理。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionDef {
+    pub plugin: String,
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub icon: Option<String>,
+}
+
+impl PermissionDef {
+    /// 写进会话日志、插件读到的名字：`<插件 id>/<模式 id>`。
+    pub fn key(&self) -> String {
+        format!("{}/{}", self.plugin, self.id)
+    }
+}
+
+/// 扩展点：插件提供的权限模式。
+pub struct PluginPermissions;
+
+impl dshr_context::ExtensionPoint for PluginPermissions {
+    type Item = Arc<PermissionDef>;
+}
+
+/// 本轮选中的插件权限模式，放在 [`crate::AgentConfig::options`] 里；有它时 [`PermissionMode`] 不起作用。
+#[derive(Debug, Clone)]
+pub struct PluginPermission(pub Arc<PermissionDef>);
+
+impl PluginPermission {
+    /// 选中的插件模式，且提供它的插件还在（停用、卸载之后退回 [`PermissionMode`]）。
+    pub fn active<'a>(options: &'a Options, plugins: &dshr_context::Snapshot) -> Option<&'a Arc<PermissionDef>> {
+        let chosen = &options.get::<Self>()?.0;
+        plugins.items::<PluginPermissions>().iter().any(|def| def.plugin == chosen.plugin && def.id == chosen.id).then_some(chosen)
+    }
+}
+
+/// 内置规则按哪种模式算：选了插件权限模式时按最谨慎的“手动确认”（插件没给结论的调用都问用户）。
+pub fn effective_mode(options: &Options, plugins: &dshr_context::Snapshot) -> PermissionMode {
+    if PluginPermission::active(options, plugins).is_some() { PermissionMode::Manual } else { PermissionMode::of(options) }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gate {
     Allow,
@@ -127,7 +169,8 @@ impl Plugin for PermissionPlugin {
             0,
             Arc::new(move |request: &GateRequest<'_>| {
                 let confined = sandbox.as_ref().is_some_and(|sandbox| sandbox.confines_writes());
-                Some(gate(PermissionMode::of(&request.ctx.options), request.access, request.ctx, confined))
+                // 选了插件的权限模式：插件的 `decide`（排在前面）没给结论时才到这里，按手动确认处理。
+                Some(gate(effective_mode(&request.ctx.options, &request.ctx.plugins), request.access, request.ctx, confined))
             }),
         );
         cx.hook::<ReviewTool>(AUTO_REVIEW_PRIORITY, Arc::new(AutoReviewer));
@@ -170,7 +213,7 @@ pub struct AutoReviewer;
 #[async_trait::async_trait]
 impl ReviewToolHook for AutoReviewer {
     async fn review(&self, request: &GateRequest<'_>) -> Option<Gate> {
-        if PermissionMode::of(&request.ctx.options) != PermissionMode::AutoReview {
+        if effective_mode(&request.ctx.options, &request.ctx.plugins) != PermissionMode::AutoReview {
             return None;
         }
         let llm = request.ctx.options.get::<LlmAccess>()?.clone();

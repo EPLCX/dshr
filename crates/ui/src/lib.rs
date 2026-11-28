@@ -771,7 +771,7 @@ pub struct WorkspaceView {
     settings: Option<(Entity<SettingsView>, Subscription)>,
     /// 插件加在侧边栏的入口，和上次读它们时插件的组成。
     plugin_entries: Vec<PluginEntry>,
-    plugins_generation: usize,
+    plugins_generation: (usize, u64),
     /// JS 插件的状态行（`ui.status`）：(在 `plugin_entries` 里的下标, 页面画出来的第一段文字)。在后台画。
     plugin_status: Vec<(usize, String)>,
     /// 打开着的插件页面。
@@ -860,7 +860,7 @@ impl WorkspaceView {
             sidebar_scroll: ScrollHandle::new(),
             settings: None,
             plugin_entries: Vec::new(),
-            plugins_generation: 0,
+            plugins_generation: (0, 0),
             plugin_status: Vec::new(),
             plugin_page: None,
             install_dialog: None,
@@ -912,6 +912,8 @@ impl WorkspaceView {
         // 插件变了（装上、卸下、热重载、启动后在后台加载完）时刷新入口、状态行和输入卡片。等的是通知，
         // 没有变化时不会被叫醒；只有插件在状态栏放了内容时，才每隔 STATUS_REFRESH 重画一次状态行。
         let mut changes = view.backend.plugin_changes();
+        // 插件在运行时藏起、显示入口（`host.ui.hide` / `show`）：和插件组成变了一样刷新。
+        let mut entry_changes = dshr_agent::entry_changes();
         cx.spawn(async move |this, cx| {
             use futures::FutureExt as _;
             loop {
@@ -923,10 +925,14 @@ impl WorkspaceView {
                 let changed = if has_status {
                     futures::select_biased! {
                         changed = changes.changed().fuse() => Some(changed.is_ok()),
+                        changed = entry_changes.changed().fuse() => Some(changed.is_ok()),
                         _ = cx.background_executor().timer(STATUS_REFRESH).fuse() => None,
                     }
                 } else {
-                    Some(changes.changed().await.is_ok())
+                    futures::select_biased! {
+                        changed = changes.changed().fuse() => Some(changed.is_ok()),
+                        changed = entry_changes.changed().fuse() => Some(changed.is_ok()),
+                    }
                 };
                 let updated = this.update(cx, |this, cx| match changed {
                     None => this.refresh_plugin_status(cx),
@@ -973,7 +979,7 @@ impl WorkspaceView {
                         }
                     };
                     match target {
-                        Some(view) => view.update(cx, |view, cx| view.plugin_send(request.text, &request.plugin, cx)),
+                        Some(view) => view.update(cx, |view, cx| view.plugin_send(request.text, request.images, &request.plugin, cx)),
                         None => {
                             tracing::warn!(plugin = request.plugin, "插件要发消息的会话没有打开")
                         }
@@ -986,6 +992,15 @@ impl WorkspaceView {
                     };
                     if let Some(view) = view {
                         view.update(cx, |view, cx| view.plugin_stop(cx));
+                    }
+                }
+                bridge::BridgeRequest::SetOptions(session, change) => {
+                    let view = match session {
+                        Some(id) => self.find_conversation(&id, cx),
+                        None => Some(self.active.clone()),
+                    };
+                    if let Some(view) = view {
+                        view.update(cx, |view, cx| view.plugin_set_options(change, cx));
                     }
                 }
                 bridge::BridgeRequest::SetComposer(text) => {
@@ -1017,6 +1032,10 @@ impl WorkspaceView {
                     workspace: view.workspace().map(|path| path.display().to_string()),
                     running: view.is_running(),
                     current: open.view == active,
+                    model: view.turn_options().model.to_string(),
+                    effort: view.turn_options().effort.map(|effort| effort.as_str().to_owned()),
+                    preset: crate::conversation::options_preset_key(view.turn_options()),
+                    permission: crate::conversation::options_permission_key(view.turn_options()),
                 })
             })
             .collect();
@@ -1036,6 +1055,8 @@ impl WorkspaceView {
                     .entries()
                     .iter()
                     .filter(|entry| matches!(entry.place, dshr_agent::EntryPlace::Sidebar | dshr_agent::EntryPlace::Status))
+                    // 插件在运行时藏起来的自己的入口（`host.ui.hide("sidebar:<id>")`）。
+                    .filter(|entry| !surface.entry_hidden(entry.place, &entry.id))
                     .map(move |entry| PluginEntry { plugin: plugin.clone(), entry: entry.clone() })
                     .collect::<Vec<_>>()
             })

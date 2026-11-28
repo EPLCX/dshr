@@ -166,13 +166,14 @@ export const tools = [{
 | `fs:workspace:write` | 写工作区的文件 |
 | `net:<主机>` | `host.fetch` / `host.websocket` 访问这个主机；`*.example.com` 是子域，`*` 是任何主机（都不含 localhost 和 IP） |
 | `exec:<程序>` | `host.exec` / `host.spawn` 启动这个程序（`git`、`npm`），`*` 是任何程序 |
-| `llm` | `host.llm.complete` 发一次性请求：默认用当前会话的模型，也可以指定别的已配置模型和思考等级（花的是用户的 token） |
-| `session:read` | 读当前会话的事件 |
+| `llm` | `host.llm.complete` 发一次性请求、`host.llm.stream` 流式读取回复：默认用当前会话的模型，也可以指定别的已配置模型和思考等级（花的是用户的 token） |
+| `session:read` | 读当前会话的事件、模型和预设，订阅模型的流式输出 |
 | `hooks:gate` / `hooks:review` / `hooks:tool-output` / `hooks:write` | 钩子里放行工具调用 / 在询问用户前审查 / 改写工具结果 / 改写要写入的内容 |
 | `context:compact` / `context:rewrite` | 压缩上下文 / 改写发给模型的消息 |
 | `model:route` | 为每次请求选择模型和思考等级 |
 | `background` | 定时任务、常驻服务、文件监视 |
-| `session:control`、`agent:run`、`notify`、`oauth`、`provider` | 代发消息、启动子代理、桌面通知、浏览器登录第三方账号、提供模型服务商 |
+| `session:control`、`agent:run`、`notify`、`oauth`、`provider` | 代发消息（可带图片）、切换会话的模型和预设、启动子代理、桌面通知、浏览器登录第三方账号、提供模型服务商 |
+| `permissions:mode`、`permissions:approve` | 提供权限模式（选中后由插件决定每次工具调用）、代用户回答审批（见 [接管权限控制](#接管权限控制)） |
 | `dshr:config:read/write`、`dshr:skills`、`dshr:sessions:read/write`、`dshr:mcp`、`plugins:install` | 读写 dshr 自己的设置、Skills、会话、MCP 服务器，安装插件 |
 
 不需要任何能力的：纯计算、读写自己的数据目录（`host.readData` / `writeData` / `appendData`）和数据库（`host.db`）、zip 打包解包、
@@ -187,6 +188,19 @@ export const tools = [{
 ```js
 const limit = host.config.max_chars ?? 100000;
 ```
+
+插件也可以写自己的配置项，不需要能力（比如页面上的“记住我的选择”）：
+
+```js
+await host.setConfig({ max_chars: 5000, level: "high" });   // 合并写入；值为 null 时去掉该项，回到默认值
+host.config.max_chars;                                       // 立即是 5000
+```
+
+- 只能写 `[config]` 里声明过的键（`enabled`、`timeout_ms` 由用户决定，不能写），按 schema 检查类型、选项和范围，有一项不合规就整批拒绝；
+  与默认值相同的值不写进文件。
+- 只能在没有标 `readOnly` 的工具、页面动作、命令、异步钩子和常驻服务里用；`render`、`prompt`、同步钩子、`activate` 里不行。
+- 写进 `config.toml` 的 `[plugins.<id>]`，重新打开设置页即可看到新值。用户在设置页修改 JS 插件的配置同样立即生效，不用重启
+  （内置插件的配置仍在重启后生效）。
 
 配置项在表单里显示 `title`（如 `count` 显示成“数量”），下面一行是 `description`。两者都可以按界面语言切换，写法见下面的“多语言”。
 字符串枚举的选项可以用 `enumTitles` 给出显示文字（存的仍是原来的值）：
@@ -338,6 +352,7 @@ export const hooks = {
 | `beforeRequest` | 构造请求时 | 同步，300 ms | 往系统提示词后追加文字、往消息末尾补一段 user 文本；换模型和思考等级（`model:route`） |
 | `transformRequest` | 发出请求前 | 5 秒 | 改写系统提示词和消息（`context:rewrite`） |
 | `turnEnded` | 一轮结束后 | 异步 | 写事件、写数据、联网、调模型 |
+| `approve` | 真的要问用户时 | 10 分钟，与审批卡片同时等 | 代用户允许或拒绝（`permissions:approve`，见 [接管权限控制](#接管权限控制)） |
 
 “同步”是说 agent 循环在原地等它（最多等表里的时间），钩子本身照样可以 `async`、`await` 读写数据目录和 `host.db`。
 
@@ -346,6 +361,29 @@ export const hooks = {
 
 **结束本轮**：工具或 `afterTool` 钩子里调用 `host.session.endTurn()`，这一步的工具调用执行完后本轮就结束，不再请求模型——
 适合“工具已经给出最终结果、模型不必再说话”的场合。
+
+### 会话的模型、预设与代发消息
+
+读当前会话的设置需要 `session:read`（或 `session:control`），改它们、替用户发消息需要 `session:control`：
+
+```js
+const { model, effort } = await host.session.model();      // { model: "deepseek/deepseek-flash", effort: null }
+const preset = await host.session.preset();                // "standard" / "plan" / "review" / "create" / "<插件>/<预设>"
+const permission = await host.session.permission();        // "workspace" 等，插件提供的模式是 "<插件>/<模式>"
+const models = await host.session.models();                // [{ model: "provider/model", provider, name, providerName }]
+
+await host.session.setModel("deepseek/deepseek-pro", { effort: "high" });   // 只写模型名时沿用当前提供商
+await host.session.setModel(null, { effort: null });                        // 只把思考等级改回默认
+await host.session.setPreset("plan");                                       // 或 "<插件 id>/<预设 id>"
+
+// 带图片发消息：data 是 base64 字符串或 Uint8Array，PNG / JPEG / GIF / WebP，最多 4 张、每张 2 MB
+await host.session.send("看看这张截图", { images: [{ data: bytes, mediaType: "image/png", name: "shot.png" }] });
+```
+
+- 不指定会话时：在一轮里调用的是这一轮的会话，其余场合是界面上当前的会话；指定时写 `{ session: "<id>" }`。
+- 改动从**下一轮**起生效，并像在菜单里选的一样记进会话日志。模型必须是“设置 → 模型”里已经配置的，预设必须存在；
+  插件不能把会话切换到创造模式。
+- 命令行版只能读，不能切换（模型和预设由命令行参数决定）。
 
 ### 订阅会话事件
 
@@ -360,6 +398,28 @@ export const on = {
 
 自己命名空间里的事件不需要能力；其他事件（包括 `tool/result` 这类核心事件）需要 `dshr:sessions:read`。处理函数可以读工作区、
 联网、读写数据目录、刷新页面，不能写工作区、启动程序、调用模型、再写会话事件。
+
+**流式输出**：模型逐字输出的内容不进日志，但可以订阅（需要 `session:read`）：
+
+```js
+export const on = {
+  "stream/text": ({ session, text }, host) => { /* 一段正文增量 */ },
+  "stream/thinking": ({ session, text }, host) => { /* 一段思考增量 */ },
+  "stream/end": ({ session }, host) => { /* 这次请求的输出结束（完成、中断或失败） */ },
+  // 或者 "stream/*" 一次订阅全部
+};
+```
+
+增量按会话合并，约每 100 毫秒（或攒够 4 KB）交给处理函数一次，正文和思考的先后顺序不变。`"*"` 收不到这些通知，必须明确订阅
+`stream/…`。插件自己发起的请求要流式读取时用 `host.llm.stream`：
+
+```js
+const stream = host.llm.stream({ system: "Be brief.", prompt: text });
+for await (const { type, text } of stream) {        // type 是 "text" 或 "thinking"
+  if (type === "text") await host.appendData("reply.txt", text);
+}
+// 或者：const full = await host.llm.stream("hi").text();
+```
 
 ### 后台：定时任务、常驻服务、文件监视
 
@@ -468,13 +528,32 @@ export const ui = {
 - **`render` 是只读的**（和 `prompt` 一样）；**动作**可以直接使用插件的能力，不再询问——因为是用户自己点的。
 - **没有打开的工作区时**（设置页、调试预览）`readFile` / `writeFile` 指向插件的数据目录。插件自己的状态放 `readData` / `writeData`，
   就不会依赖当前打开的是哪个工作区。
-- **节点类型**：布局 `column`、`row`、`card`；文字 `text`、`markdown`、`code`、`diff`、`badge`、`divider`；
-  控件 `button`、`input`、`textarea`、`select`、`switch`、`link`；数据 `list`、`table`、`kv`、`progress`、`chart`、`heatmap`、
-  `calendar`、`image`。直接写一个字符串等于一个 `text` 节点。每个节点的属性见 [插件 API 参考 · 界面节点](plugin-api.md#界面节点)。
+- **节点类型**（直接写一个字符串等于一个 `text` 节点；每个节点的属性见 [插件 API 参考 · 界面节点](plugin-api.md#界面节点)）：
+
+  | 类别 | 节点 |
+  |---|---|
+  | 布局 | `column`、`row`、`grid`、`spacer`、`card`、`collapsible`、`tabs`、`section`、`split` |
+  | 文字与展示 | `text`、`markdown`、`code`、`diff`、`badge`、`divider`、`stat`、`alert`、`empty`、`status`、`skeleton` |
+  | 数据 | `list`、`table`、`kv`、`progress`、`chart`、`heatmap`、`calendar`、`image`、`steps`、`timeline`、`tree`、`avatar`、`tags` |
+  | 控件 | `button`、`link`、`input`、`textarea`、`number`、`select`、`radio`、`checkbox`、`checkboxes`、`slider`、`date`、`tags-input`、`switch` |
+
+  所有节点都可以写 `hidden`、`disabled`、`tooltip`、`icon`、`tone`；多数控件和部分展示节点还有 `size`（`small` / `medium` / `large`），
+  写在 `row` 上时是其中控件的默认尺寸。
 - **图标**：star、heart、bell、book、bot、calendar、chart、cpu、file、folder、globe、inbox、map、mic、moon、sun、network、palette、
-  search、settings、terminal、user、info。
+  search、settings、terminal、user、info、check、x、plus、minus、trash、copy、refresh、external、warning、alert、success、error、
+  play、pause、eye、chevron-right、chevron-down、arrow-up、arrow-down。
 - **可以藏起来的内置入口**：`settings:<页 id>`（“扩展”页除外，如 `settings:general`、`settings:models`）、`composer:presets`、
   `composer:permission`、`sidebar:<id>`、`status:<id>`。
+- **运行时显示或隐藏入口**：`ui.hide` 是加载时的初始状态；之后随时可以用 `host.ui.hide(target)`、`host.ui.show(target)` 改，
+  界面立即跟着变，`host.ui.hidden()` 列出现在藏着的。`target` 先按插件**自己的**入口找——`settings:<id>`（设置里的一页）、
+  `sidebar:<id>`（侧边栏入口）、`panel:<id>`（输入框上方的面板）、`status:<id>`（状态行）——找不到时按上面可以藏的内置入口处理。
+  不需要任何能力。插件热重载后回到 `ui.hide` 的状态，要保持时在 `activate` 里再调用一次。
+
+  ```js
+  export const activate = async (host) => {
+    if (!(await host.readData("enabled"))) await host.ui.hide("panel:quick-note");   // 用户没开启时先不显示面板
+  };
+  ```
 
 ### 工具卡片
 
@@ -527,6 +606,46 @@ export const presets = [{
 ```
 
 预设出现在输入卡片预设菜单里内置四项的后面，不需要任何能力。
+
+### 接管权限控制
+
+**提供权限模式**（需要 `permissions:mode`）：导出的模式排在权限菜单内置四项的后面。用户选中后，每次工具调用由 `decide` 下结论：
+
+```js
+export const permissions = [{
+  id: "office-hours",
+  label: "工作时间放行",
+  description: "工作时间内工作区的修改直接执行，其余询问",
+  icon: "calendar",
+  decide: ({ tool, input, access }, host) => {
+    if (access.type === "read") return "allow";
+    const hour = new Date().getHours();
+    if (access.type === "write" && hour >= 9 && hour < 18) return "allow";
+    if (tool === "run_shell" && /rm\s+-rf/.test(input.command ?? "")) return { decision: "deny", reason: "不允许 rm -rf" };
+    return "ask";                       // 也可以 { decision: "ask", reason: "…" }，理由显示在审批卡片上
+  },
+}];
+```
+
+- `decide` 同步执行，最多等 300 ms，和 `beforeTool` 一样只能读工作区和数据目录。返回 `undefined`、超时或出错时按“手动确认”处理。
+- 预设的只读规则、创造模式的规则和“必须亲自确认”的操作照常生效；提供模式的插件停用后，会话退回内置的权限模式。
+
+**代为审批**（需要 `permissions:approve`）：真的要问用户时，`hooks.approve` 和审批卡片同时等待，先给出结论的生效：
+
+```js
+export const hooks = {
+  approve: async ({ tool, input, access, note }, host) => {
+    const answer = await askOnPhone(host, `允许 ${tool} 吗？`);   // 例如经 IM 机器人转发，等用户回复
+    if (answer === "yes") return "allow";
+    if (answer === "no") return { decision: "deny", reason: "在手机上拒绝" };
+    // 返回 undefined：放弃，继续等界面上的审批卡片
+  },
+};
+```
+
+最多等 10 分钟；结论写进会话日志（对话区显示“插件 X 代为批准了 …”）。“必须亲自确认”的操作（授予插件能力等）不会交给插件。
+等待期间这个插件的其他调用排队（同一个插件一次只执行一个调用）；用户在界面上先回答时，这次 `approve` 随即被中断。
+完整的把关顺序见 [权限与安全](permissions.md#把关的顺序)。
 
 ## 插件包
 
@@ -610,11 +729,13 @@ env = { TOKEN = "${secret:SEARCH_TOKEN}", CACHE_DIR = "${data}/cache" }
 | 顶层代码、`activate` | 2 秒 |
 | 工具调用 | 默认 30 秒（`timeout_ms`） |
 | `prompt` | 1 秒，结果最多 32 KB |
-| 同步钩子（`beforeTool`、`beforeRequest`） | 300 ms |
+| 同步钩子（`beforeTool`、`beforeRequest`）、权限模式的 `decide` | 300 ms |
+| `approve` 钩子 | 10 分钟 |
 | 读写工作区文件 | 单个 2 MB |
 | 数据目录 | 单个文件 16 MB，共 512 MB（含数据库；单个数据库 256 MB） |
 | `fetch` 请求 / 响应体 | 各 2 MB（`stream: true` 时逐块读取）；WebSocket 单条消息 4 MB |
-| `llm.complete` | 每次调用最多 8 次 |
+| `llm.complete`、`llm.stream` | 每次调用合计最多 8 次 |
+| 代发消息的图片 | 每条最多 4 张，单张 2 MB |
 | 页面节点 | 最多 1000 个，嵌套 16 层 |
 | 失控 | 连续 3 次超时或内存耗尽后停用，直到文件变化 |
 

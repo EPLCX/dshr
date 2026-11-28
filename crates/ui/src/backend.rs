@@ -109,7 +109,7 @@ pub(crate) fn system_high_contrast_theme(colors: crate::system_a11y::SystemColor
 }
 
 /// （插件快照，按它算出的要隐藏的入口）。
-type HiddenCache = (Arc<dshr_context::Snapshot>, Arc<std::collections::HashSet<String>>);
+type HiddenCache = (Arc<dshr_context::Snapshot>, u64, Arc<std::collections::HashSet<String>>);
 
 pub struct Backend {
     runtime: Runtime,
@@ -149,6 +149,8 @@ pub struct TurnOptions {
     pub preset: Preset,
     /// 选中的插件预设（优先于 `preset`）。
     pub plugin_preset: Option<Arc<dshr_agent::PresetDef>>,
+    /// 选中的插件权限模式（优先于 `permission`）：每次工具调用由插件决定。
+    pub plugin_permission: Option<Arc<dshr_agent::PermissionDef>>,
 }
 
 /// 模型菜单里的一项。
@@ -344,8 +346,11 @@ impl Backend {
     pub fn hidden_entries(&self) -> Arc<std::collections::HashSet<String>> {
         let snapshot = self.plugins.snapshot();
         let mut cache = self.hidden.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((cached, hidden)) = &*cache
+        // 插件在运行时也能藏起、显示入口（`host.ui.hide`）：快照和入口代数都没变才用缓存。
+        let generation = dshr_agent::entries_generation();
+        if let Some((cached, cached_generation, hidden)) = &*cache
             && Arc::ptr_eq(cached, &snapshot)
+            && *cached_generation == generation
         {
             return hidden.clone();
         }
@@ -353,11 +358,11 @@ impl Backend {
             snapshot
                 .items::<dshr_agent::UiSurfaces>()
                 .iter()
-                .flat_map(|surface| surface.hidden().iter().cloned())
+                .flat_map(|surface| surface.hidden())
                 .filter(|target| dshr_agent::hideable(target))
                 .collect(),
         );
-        *cache = Some((snapshot, hidden.clone()));
+        *cache = Some((snapshot, generation, hidden.clone()));
         hidden
     }
 
@@ -367,8 +372,9 @@ impl Backend {
     }
 
     /// 插件的组成变了没有（装上、卸下、热重载都会换快照）：收到 [`Self::plugin_changes`] 的通知后比一次，变了就刷新入口。
-    pub fn plugins_generation(&self) -> usize {
-        Arc::as_ptr(&self.plugins.snapshot()) as *const () as usize
+    /// 插件在运行时藏起、显示入口（`host.ui.hide` / `show`）也算一次变化。
+    pub fn plugins_generation(&self) -> (usize, u64) {
+        (Arc::as_ptr(&self.plugins.snapshot()) as *const () as usize, dshr_agent::entries_generation())
     }
 
     /// 主程序交进来了 JS 插件（[`Self::with_scripts`]）。
@@ -667,6 +673,23 @@ impl Backend {
     /// 插件提供的预设（输入卡片的预设菜单里内置四项后面）。
     pub fn plugin_presets(&self) -> Vec<Arc<dshr_agent::PresetDef>> {
         self.plugins.snapshot().items::<dshr_agent::PluginPresets>().to_vec()
+    }
+
+    /// 把 `config.toml` 里 `[plugins.<id>]` 的当前内容交给 JS 插件：正在运行的插件的 `host.config` 立即更新，
+    /// 之后的热重载也用它。不是 JS 插件时返回 `false`（内置插件的配置重启后生效）。
+    pub fn apply_plugin_config(&self, id: &str) -> bool {
+        let Some(scripts) = self.scripts.as_ref() else { return false };
+        if !scripts.ids().contains(&id) {
+            return false;
+        }
+        let raw = self.file_config().plugin_configs().into_iter().find(|(plugin, _)| plugin == id).map(|(_, raw)| raw);
+        scripts.set_config(id, raw.unwrap_or_else(|| serde_json::Value::Object(Default::default())));
+        true
+    }
+
+    /// 插件提供的权限模式（权限菜单里排在内置四项后面）。
+    pub fn plugin_permissions(&self) -> Vec<Arc<dshr_agent::PermissionDef>> {
+        self.plugins.snapshot().items::<dshr_agent::PluginPermissions>().to_vec()
     }
 
     /// JS 插件的卡片信息（设置页“扩展”）；不是 JS 插件时是 `None`。
@@ -1009,7 +1032,8 @@ impl Backend {
             .with(options.permission)
             .with(options.preset)
             .with(dshr_agent::ModelChoices(model_choices))
-            .with_option(options.plugin_preset.clone().map(dshr_agent::PluginPreset)),
+            .with_option(options.plugin_preset.clone().map(dshr_agent::PluginPreset))
+            .with_option(options.plugin_permission.clone().map(dshr_agent::PluginPermission)),
         ))
     }
 }

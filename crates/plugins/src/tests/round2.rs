@@ -125,6 +125,7 @@ impl crate::app::SessionControl for RecordingSessions {
 
 #[tokio::test]
 async fn session_control_sends_with_rate_limit() {
+    let _serial = super::round5::SESSION_SERVICE.lock().await;
     let recorder = Arc::new(RecordingSessions::default());
     let shared = recorder.clone();
     crate::app::set_app_services(|services| services.session = Some(shared));

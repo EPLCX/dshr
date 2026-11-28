@@ -283,6 +283,22 @@ impl JsPlugins {
         Ok(self.shared.reload_only(false, Some(id)))
     }
 
+    /// 插件 `id` 的配置（`config.toml` 的 `[plugins.<id>]`，JSON）变了：交给每个附着的 `Context`（之后的热重载用它），
+    /// 正在运行的实例的 `host.config` 随即换成新的，不用重启。持久化到 `config.toml` 由调用方负责。
+    pub fn set_config(&self, id: &str, raw: Value) {
+        let (contexts, plugin) = {
+            let state = self.shared.lock();
+            let plugin = state.loaded.iter().find(|loaded| loaded.plugin.id() == id).map(|loaded| loaded.plugin.clone());
+            (state.attached.iter().map(|attached| attached.cx.clone()).collect::<Vec<Context>>(), plugin)
+        };
+        for cx in &contexts {
+            cx.set_config(id, raw.clone());
+        }
+        if let Some(plugin) = plugin {
+            plugin.set_live_config(&script_config(Some(raw)));
+        }
+    }
+
     /// 就地开关插件 `id`：改掉所有附着的 `Context` 里的 `enabled`，不用重启。持久化到 `config.toml` 由调用方负责。
     ///
     /// - 停用：在每个 `Context` 里撤销它的全部注册（正在执行的调用用旧版本跑完），只重算这一个插件的指纹，

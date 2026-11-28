@@ -111,8 +111,14 @@ pub trait UiSurface: Send + Sync {
 
     fn entries(&self) -> &[UiEntry];
 
-    /// 要藏起来的内置入口（[`hideable`] 认可的那些）。
-    fn hidden(&self) -> &[String];
+    /// 要藏起来的内置入口（[`hideable`] 认可的那些）。插件可以在运行时改（`host.ui.hide` / `show`），
+    /// 改了之后调用 [`notify_entries_changed`]，所以每次问都给一份新的。
+    fn hidden(&self) -> Vec<String>;
+
+    /// 插件自己的入口 `id`（在 `place`）现在是不是被它藏起来了（`host.ui.hide("sidebar:<id>")`）。
+    fn entry_hidden(&self, _place: EntryPlace, _id: &str) -> bool {
+        false
+    }
 
     /// 页面现在的节点树。`workspace` 是当前打开的工作区，没有时插件的文件函数指向它自己的数据目录。
     fn render(&self, page: &str, workspace: Option<&Path>) -> Result<Value, String>;
@@ -254,6 +260,23 @@ static PAGE_REFRESHES: std::sync::LazyLock<tokio::sync::watch::Sender<u64>> = st
 /// 有插件页面要求重画了（任何一个插件的任何一页）：打开着的页面各自比一下自己的 [`UiSurface::refresh_generation`]。
 pub fn notify_page_refresh() {
     PAGE_REFRESHES.send_modify(|generation| *generation += 1);
+}
+
+static ENTRY_CHANGES: std::sync::LazyLock<tokio::sync::watch::Sender<u64>> = std::sync::LazyLock::new(|| tokio::sync::watch::channel(0).0);
+
+/// 有插件在运行时藏起或重新显示了入口（[`UiSurface::hidden`]、[`UiSurface::entry_hidden`] 变了）。
+pub fn notify_entries_changed() {
+    ENTRY_CHANGES.send_modify(|generation| *generation += 1);
+}
+
+/// 订阅 [`notify_entries_changed`]。
+pub fn entry_changes() -> tokio::sync::watch::Receiver<u64> {
+    ENTRY_CHANGES.subscribe()
+}
+
+/// [`notify_entries_changed`] 被调用过几次：界面拿它和插件快照一起判断入口要不要重新算。
+pub fn entries_generation() -> u64 {
+    *ENTRY_CHANGES.borrow()
 }
 
 /// 订阅 [`notify_page_refresh`]。不依赖 tokio 运行时，界面线程上可以直接等；没有插件要求重画时不会被叫醒。
