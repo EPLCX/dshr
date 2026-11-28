@@ -339,7 +339,22 @@ const SIZED_NODES: &[&str] = &[
     "checkboxes",
     "date",
     "tags-input",
+    "progress",
+    "avatar",
+    "tags",
+    "status",
+    "skeleton",
+    "steps",
 ];
+
+/// `steps` 最多几步。
+pub const MAX_STEPS: usize = 20;
+
+/// 图片、头像的 `src`：`data:image/…`，或者不出插件数据目录、工作区的相对路径。
+fn image_src_ok(src: &str) -> bool {
+    src.starts_with("data:image/")
+        || (!src.is_empty() && !src.contains("://") && !src.starts_with('/') && !src.split('/').any(|part| part == ".."))
+}
 
 /// `tags-input` 最多这么多个标签。
 pub const MAX_TAGS: usize = 100;
@@ -631,10 +646,105 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                 require(optional_text(&["empty"]), "`empty` must be a string")
             }
             "divider" => Ok(()),
-            "markdown" => require(text("text"), "needs a string `text`"),
+            "markdown" => {
+                require(text("text"), "needs a string `text`")?;
+                require(number_in("maxHeight", 80., 1200.), "`maxHeight` must be 80 to 1200")
+            }
             "code" => {
                 require(text("text"), "needs a string `text`")?;
-                require(object.get("language").is_none_or(Value::is_string), "`language` must be a string")
+                require(optional_text(&["language", "title"]), "`language` and `title` must be strings")?;
+                require(flag("copy") && flag("wrap") && flag("lineNumbers"), "`copy`, `wrap` and `lineNumbers` must be booleans")?;
+                require(number_in("maxHeight", 80., 1200.), "`maxHeight` must be 80 to 1200")
+            }
+            "steps" => {
+                let items = object.get("items").and_then(Value::as_array);
+                let ok = items.is_some_and(|items| {
+                    !items.is_empty()
+                        && items.len() <= MAX_STEPS
+                        && items
+                            .iter()
+                            .all(|item| item.get("title").is_some_and(Value::is_string) && item.get("detail").is_none_or(Value::is_string))
+                });
+                *count += items.map_or(0, Vec::len);
+                require(ok, "`items` must be 1–20 of { title, detail? }")?;
+                let length = items.map_or(0, Vec::len) as u64;
+                require(
+                    object.get("current").is_none_or(|current| current.as_u64().is_some_and(|current| current <= length)),
+                    "`current` must be a step index (or the number of steps when all are done)",
+                )?;
+                require(one_of("orientation", &["horizontal", "vertical"]), "`orientation` must be horizontal or vertical")
+            }
+            "timeline" => {
+                let items = object.get("items").and_then(Value::as_array);
+                let ok = items.is_some_and(|items| {
+                    items.iter().all(|item| {
+                        item.get("title").is_some_and(Value::is_string)
+                            && ["time", "detail"].iter().all(|key| item.get(*key).is_none_or(Value::is_string))
+                            && tone_ok(item.get("tone"))
+                            && icon_ok(item.get("icon"))
+                    })
+                });
+                *count += items.map_or(0, Vec::len);
+                require(ok, "`items` must be an array of { title, time?, detail?, tone?, icon? }")
+            }
+            "tree" => {
+                // 树的每一项计入节点数，每深一层计入层数。
+                fn items(list: &Value, path: &str, depth: usize, count: &mut usize) -> Result<(), String> {
+                    let Some(list) = list.as_array() else { return Err(format!("{path}: must be an array")) };
+                    for (index, item) in list.iter().enumerate() {
+                        let at = format!("{path}[{index}]");
+                        *count += 1;
+                        if *count > MAX_NODES {
+                            return Err(format!("the page has more than {MAX_NODES} nodes"));
+                        }
+                        if depth > MAX_DEPTH {
+                            return Err(format!("{at}: nested deeper than {MAX_DEPTH} levels"));
+                        }
+                        let text = |key: &str| item.get(key).is_some_and(Value::is_string);
+                        let optional = |key: &str| item.get(key).is_none_or(Value::is_string);
+                        if !(text("id") && text("label") && optional("detail") && optional("action")) {
+                            return Err(format!("{at}: needs a string `id` and `label` (`detail` and `action` are strings)"));
+                        }
+                        if item.get("icon").is_some_and(|icon| !icon.as_str().is_some_and(|icon| NODE_ICONS.contains(&icon))) {
+                            return Err(format!("{at}: unknown `icon`"));
+                        }
+                        if let Some(children) = item.get("children") {
+                            items(children, &format!("{at}.children"), depth + 1, count)?;
+                        }
+                    }
+                    Ok(())
+                }
+                items(object.get("items").unwrap_or(&Value::Null), &format!("{path} (tree).items"), depth + 1, count)?;
+                require(
+                    object.get("expanded").is_none_or(|ids| ids.as_array().is_some_and(|ids| ids.iter().all(Value::is_string))),
+                    "`expanded` must be an array of item ids",
+                )
+            }
+            "avatar" => {
+                let src = object.get("src").and_then(Value::as_str);
+                require(text("text") || src.is_some(), "needs a string `text` or `src`")?;
+                require(
+                    src.is_none_or(image_src_ok),
+                    "`src` must be a data:image/… URI, or a relative path (data/… for the plugin's data folder)",
+                )?;
+                require(src.is_none_or(|src| src.len() <= MAX_IMAGE_SRC), "the image is larger than 4 MB")?;
+                require(optional_text(&["text", "alt"]), "`text` and `alt` must be strings")
+            }
+            "tags" => {
+                let items = object.get("items").and_then(Value::as_array);
+                let ok = items.is_some_and(|items| {
+                    items.iter().all(|item| {
+                        item.get("text").is_some_and(Value::is_string) && tone_ok(item.get("tone")) && icon_ok(item.get("icon"))
+                    })
+                });
+                *count += items.map_or(0, Vec::len);
+                require(ok, "`items` must be an array of { text, tone?, icon? }")?;
+                require(optional_text(&["action", "value"]), "`action` and `value` must be strings")
+            }
+            "skeleton" => require(number_in("lines", 1., 10.), "`lines` must be 1 to 10"),
+            "status" => {
+                require(text("text"), "needs a string `text`")?;
+                require(one_of("state", &["ok", "idle", "warn", "error", "busy"]), "`state` must be ok, idle, warn, error or busy")
             }
             "diff" => {
                 let pair = text("before") && text("after");
@@ -709,11 +819,19 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                 )
             }
             "progress" => {
+                let indeterminate = object.get("indeterminate").and_then(Value::as_bool) == Some(true);
                 let value = object.get("value").and_then(Value::as_f64);
-                require(value.is_some_and(|value| (0.0..=1.0).contains(&value)), "needs a numeric `value` from 0 to 1")?;
-                require(object.get("label").is_none_or(Value::is_string), "`label` must be a string")
+                require(
+                    value.is_some_and(|value| (0.0..=1.0).contains(&value)) || (indeterminate && object.get("value").is_none()),
+                    "needs a numeric `value` from 0 to 1 (or `indeterminate: true`)",
+                )?;
+                require(object.get("label").is_none_or(Value::is_string), "`label` must be a string")?;
+                require(one_of("style", &["bar", "ring", "steps"]), "`style` must be bar, ring or steps")?;
+                require(number_in("steps", 2., MAX_STEPS as f64), "`steps` must be 2 to 20")?;
+                require(flag("indeterminate") && flag("showValue"), "`indeterminate` and `showValue` must be booleans")
             }
             "link" => {
+                require(one_of("variant", &["inline", "button"]), "`variant` must be inline or button")?;
                 require(text("label") && text("url"), "needs a string `label` and `url`")?;
                 let url = object.get("url").and_then(Value::as_str).unwrap_or_default();
                 require(url.starts_with("https://") || url.starts_with("http://"), "`url` must be an http or https URL")
@@ -751,9 +869,28 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                 require(
                     object.get("height").is_none_or(|height| height.as_u64().is_some_and(|height| (80..=600).contains(&height))),
                     "`height` must be 80 to 600",
+                )?;
+                require(
+                    flag("legend") && flag("donut") && flag("showValues") && flag("grid"),
+                    "`legend`, `donut`, `showValues` and `grid` must be booleans",
+                )?;
+                require(optional_text(&["xLabel", "yLabel"]), "`xLabel` and `yLabel` must be strings")?;
+                require(
+                    ["yMin", "yMax"].iter().all(|key| object.get(*key).is_none_or(Value::is_number)),
+                    "`yMin` and `yMax` must be numbers",
+                )?;
+                require(
+                    object.get("colors").is_none_or(|colors| {
+                        colors
+                            .as_array()
+                            .is_some_and(|colors| colors.len() <= MAX_SERIES && colors.iter().all(|color| tone_ok(Some(color))))
+                    }),
+                    "`colors` must be tone names (accent, success, warning, danger, secondary, neutral)",
                 )
             }
             "heatmap" => {
+                require(flag("showValues"), "`showValues` must be a boolean")?;
+                require(optional_text(&["action", "label"]), "`action` and `label` must be strings")?;
                 let labels = |key: &str| {
                     object.get(key).and_then(Value::as_array).filter(|labels| labels.iter().all(Value::is_string)).map(Vec::len)
                 };
@@ -778,11 +915,20 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                     && month[..4].parse::<u32>().is_ok()
                     && month[5..].parse::<u32>().is_ok_and(|value| (1..=12).contains(&value));
                 require(valid_month, "`month` must look like 2026-11")?;
+                let mark_ok =
+                    |mark: &Value| mark.is_string() || (mark.get("text").is_some_and(Value::is_string) && tone_ok(mark.get("tone")));
                 require(
-                    object.get("marks").is_none_or(|marks| marks.as_object().is_some_and(|marks| marks.values().all(Value::is_string))),
-                    "`marks` must map dates (2026-11-16) to strings",
+                    object.get("marks").is_none_or(|marks| marks.as_object().is_some_and(|marks| marks.values().all(mark_ok))),
+                    "`marks` must map dates (2026-11-16) to strings or { text, tone? }",
                 )?;
-                require(object.get("action").is_none_or(Value::is_string), "`action` must be a string")
+                require(object.get("action").is_none_or(Value::is_string), "`action` must be a string")?;
+                require(object.get("value").is_none_or(|value| value.as_str().is_some_and(is_date)), "`value` must look like 2026-11-16")?;
+                require(
+                    object.get("range").is_none_or(|range| {
+                        ["start", "end"].iter().all(|key| range.get(*key).and_then(Value::as_str).is_some_and(is_date))
+                    }),
+                    "`range` must be { start, end } dates",
+                )
             }
             "kv" => {
                 let items = object.get("items").and_then(Value::as_array);
@@ -793,13 +939,22 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                     })
                 });
                 *count += items.map_or(0, Vec::len);
-                require(ok, "`items` must be an array of { key, value }")
+                require(ok, "`items` must be an array of { key, value, tone? }")?;
+                require(
+                    items.is_none_or(|items| items.iter().all(|item| tone_ok(item.get("tone")))),
+                    "`tone` of an item must be a tone name",
+                )?;
+                require(number_in("columns", 1., 3.), "`columns` must be 1 to 3")?;
+                require(one_of("layout", &["inline", "stacked"]), "`layout` must be inline or stacked")?;
+                require(flag("copy"), "`copy` must be a boolean")
             }
             "image" => {
                 let src = object.get("src").and_then(Value::as_str).unwrap_or_default();
-                let ok = src.starts_with("data:image/")
-                    || (!src.is_empty() && !src.contains("://") && !src.starts_with('/') && !src.split('/').any(|part| part == ".."));
-                require(ok, "`src` must be a data:image/… URI, or a relative path (data/… for the plugin's data folder)")?;
+                require(image_src_ok(src), "`src` must be a data:image/… URI, or a relative path (data/… for the plugin's data folder)")?;
+                require(one_of("fit", &["contain", "cover"]), "`fit` must be contain or cover")?;
+                require(one_of("radius", &["none", "medium", "full"]), "`radius` must be none, medium or full")?;
+                require(number_in("height", 16., 1200.), "`height` must be 16 to 1200")?;
+                require(optional_text(&["caption"]), "`caption` must be a string")?;
                 require(src.len() <= MAX_IMAGE_SRC, "the image is larger than 4 MB")?;
                 require(object.get("alt").is_none_or(Value::is_string), "`alt` must be a string")?;
                 require(
@@ -997,5 +1152,88 @@ mod tests {
         assert_eq!(validate_tree(&json!({ "type": "split", "ratio": 0.3, "left": ["a"], "right": ["b", "c"] })), Ok(4));
         bad(json!({ "type": "split", "ratio": 0.9 }), "`ratio`");
         bad(json!({ "type": "split", "left": [{ "type": "gauge" }] }), "page.left[0]");
+    }
+
+    #[test]
+    fn third_round_nodes_are_checked() {
+        let ok = |tree: Value| validate_tree(&tree).map_err(|error| format!("{tree}: {error}")).unwrap();
+        let bad = |tree: Value, needle: &str| {
+            let error = validate_tree(&tree).expect_err(&tree.to_string());
+            assert!(error.contains(needle), "{error} should mention {needle}");
+        };
+
+        ok(
+            json!({ "type": "steps", "current": 3, "orientation": "vertical", "items": [{ "title": "a" }, { "title": "b", "detail": "x" }, { "title": "c" }] }),
+        );
+        bad(json!({ "type": "steps", "current": 4, "items": [{ "title": "a" }] }), "`current`");
+        bad(json!({ "type": "steps", "items": [] }), "`items`");
+
+        ok(json!({ "type": "timeline", "items": [{ "title": "a", "time": "10:00", "tone": "danger", "icon": "error" }] }));
+        bad(json!({ "type": "timeline", "items": [{ "title": "a", "icon": "rocket" }] }), "`items`");
+
+        // 树：每一项计入节点数；项的错误指到具体位置。
+        let tree = json!({ "type": "tree", "expanded": ["a"], "items": [
+            { "id": "a", "label": "A", "icon": "folder", "children": [{ "id": "b", "label": "B", "action": "open" }] },
+            { "id": "c", "label": "C" }
+        ]});
+        assert_eq!(validate_tree(&tree), Ok(4));
+        bad(json!({ "type": "tree", "items": [{ "id": "a", "label": "A", "children": [{ "label": "B" }] }] }), "items[0].children[0]");
+        bad(json!({ "type": "tree", "items": [{ "id": "a", "label": "A", "icon": "rocket" }] }), "unknown `icon`");
+        bad(json!({ "type": "tree", "items": {} }), "must be an array");
+        let mut deep = json!({ "id": "x", "label": "x" });
+        for _ in 0..MAX_DEPTH + 1 {
+            deep = json!({ "id": "x", "label": "x", "children": [deep] });
+        }
+        bad(json!({ "type": "tree", "items": [deep] }), "nested deeper");
+
+        ok(json!({ "type": "avatar", "text": "Ada", "size": "large", "tone": "success" }));
+        ok(json!({ "type": "avatar", "src": "data/me.png", "alt": "Me" }));
+        bad(json!({ "type": "avatar" }), "`text` or `src`");
+        bad(json!({ "type": "avatar", "src": "../me.png" }), "`src`");
+
+        ok(
+            json!({ "type": "tags", "value": "a", "action": "filter", "items": [{ "text": "a" }, { "text": "b", "tone": "danger", "icon": "alert" }] }),
+        );
+        bad(json!({ "type": "tags", "items": [{ "label": "a" }] }), "`items`");
+
+        ok(json!({ "type": "skeleton", "lines": 4 }));
+        bad(json!({ "type": "skeleton", "lines": 11 }), "`lines`");
+        ok(json!({ "type": "status", "text": "Syncing", "state": "busy" }));
+        bad(json!({ "type": "status", "text": "x", "state": "sleeping" }), "`state`");
+
+        ok(json!({ "type": "progress", "indeterminate": true, "style": "ring", "size": "small" }));
+        ok(json!({ "type": "progress", "value": 0.5, "style": "steps", "steps": 8, "tone": "success", "showValue": false }));
+        bad(json!({ "type": "progress" }), "`indeterminate: true`");
+        bad(json!({ "type": "progress", "value": 0.5, "style": "pie" }), "`style`");
+        bad(json!({ "type": "progress", "value": 0.5, "steps": 1 }), "`steps`");
+
+        ok(json!({ "type": "code", "text": "x", "title": "main.rs", "copy": false, "wrap": false, "lineNumbers": true, "maxHeight": 200 }));
+        bad(json!({ "type": "code", "text": "x", "lineNumbers": "yes" }), "booleans");
+        ok(json!({ "type": "markdown", "text": "x", "maxHeight": 300 }));
+
+        let chart = json!({ "type": "chart", "kind": "pie", "donut": true, "legend": true, "showValues": true, "colors": ["success", "danger"],
+            "series": [{ "data": [["a", 1]] }] });
+        ok(chart);
+        ok(
+            json!({ "type": "chart", "kind": "line", "yMin": 0, "yMax": 10, "xLabel": "day", "grid": false, "series": [{ "data": [["a", 1]] }] }),
+        );
+        bad(json!({ "type": "chart", "kind": "bar", "colors": ["#ff0000"], "series": [{ "data": [["a", 1]] }] }), "`colors`");
+
+        ok(
+            json!({ "type": "heatmap", "tone": "success", "showValues": true, "action": "pick", "rows": ["a"], "columns": ["x"], "values": [[1]] }),
+        );
+        ok(json!({ "type": "calendar", "month": "2026-11", "value": "2026-11-28", "range": { "start": "2026-11-01", "end": "2026-11-05" },
+            "marks": { "2026-11-03": { "text": "late", "tone": "danger" }, "2026-11-04": "ok" } }));
+        bad(json!({ "type": "calendar", "month": "2026-11", "range": { "start": "2026-11-01" } }), "`range`");
+        bad(json!({ "type": "calendar", "month": "2026-11", "marks": { "2026-11-03": { "tone": "danger" } } }), "`marks`");
+
+        ok(
+            json!({ "type": "kv", "columns": 2, "layout": "stacked", "copy": true, "items": [{ "key": "a", "value": 1, "tone": "success" }] }),
+        );
+        bad(json!({ "type": "kv", "columns": 4, "items": [] }), "`columns`");
+        ok(json!({ "type": "image", "src": "data/a.png", "fit": "cover", "height": 120, "radius": "full", "caption": "A" }));
+        bad(json!({ "type": "image", "src": "data/a.png", "fit": "stretch" }), "`fit`");
+        ok(json!({ "type": "link", "label": "Docs", "url": "https://example.com", "variant": "inline" }));
+        bad(json!({ "type": "link", "label": "Docs", "url": "https://example.com", "variant": "card" }), "`variant`");
     }
 }

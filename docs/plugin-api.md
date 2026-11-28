@@ -607,8 +607,8 @@ API 密钥在钥匙串里，这里碰不到。
 | 类型 | 属性 |
 |---|---|
 | `text` | `text`、`style`（`title` / `heading` / `body` / `caption` / `mono`）、`tone`、`weight`（`regular` / `medium` / `bold`）、`align`（`start` / `center` / `end`）、`truncate`（单行截断）、`lines`（1–10，超出行数截断） |
-| `markdown` | `text`、`size`（`body` / `caption`） |
-| `code` | `text`、`language` |
+| `markdown` | `text`、`size`（`body` / `caption`）、`maxHeight`（80–1200，超出时内部滚动） |
+| `code` | `text`、`language`、`title`、`copy`（复制按钮，默认 `true`）、`wrap`（默认折行，`false` 时横向滚动）、`lineNumbers`、`maxHeight`（80–1200） |
 | `diff` | `text`（统一 diff），或 `before` + `after`；`path` |
 | `badge` | `text`、`tone`、`variant`（`soft` 浅底，默认 / `outline` 描边 / `solid` 实底）、`icon`；有 `size` |
 | `divider` | — |
@@ -617,19 +617,26 @@ API 密钥在钥匙串里，这里碰不到。
 | `empty` | `title`、`description`、`icon`、`action`、`actionLabel`、`payload`；空状态占位 |
 | `list` | `items`：`[{ title, detail, icon, badge, trailing, tone, action, payload }]`（`trailing` 是行右侧的文字）、`dividers`（行间分隔线）、`empty`（没有项时显示的文字）；有 `size`（行高） |
 | `table` | `columns`（字符串数组）、`rows`（每行一个数组，每列一个字符串 / 数字 / 布尔 / `null`，或 `{ text, tone, badge }`）、`align`（每列一个 `left` / `center` / `right`）、`widths`（每列一个相对宽度）、`striped`（隔行底色）、`maxHeight`（80–1200，超出时内部滚动）、`empty`、`rowAction`（点击行时执行，`value` 为 `{ index, row }`）；有 `size` |
-| `kv` | `items`：`[{ key, value }]` |
-| `progress` | `value`（0–1）、`label` |
-| `chart` | `kind`（`line` / `bar` / `area` / `pie` / `candlestick`）、`series`：`[{ name, data }]`（`data` 是 `[x, y]`，K 线是 `[x, 开, 高, 低, 收]`；最多 20 组、每组 2000 点）、`height`（80–600） |
-| `heatmap` | `rows`、`columns`（标签，各最多 100）、`values`（每行一个数字数组，可以有 `null`） |
-| `calendar` | `month`（`2026-11`）、`marks`（`{ "2026-11-16": "说明" }`）、`action` |
-| `image` | `src`（`data:image/…` URI，或相对路径，`data/…` 指插件数据目录；≤ 4 MB）、`alt`、`width`（16–1200） |
+| `kv` | `items`：`[{ key, value, tone }]`、`columns`（1–3）、`layout`（`inline` 键在左，默认 / `stacked` 键在上）、`copy`（每个值后面加复制按钮） |
+| `progress` | `value`（0–1）、`label`、`style`（`bar` 条形，默认 / `ring` 环形 / `steps` 分段）、`steps`（分段数，2–20，默认 5）、`tone`、`indeterminate`（不确定进度，显示循环动画，此时可以不写 `value`）、`showValue`（默认 `true`）；有 `size`（条的粗细或环的直径） |
+| `chart` | `kind`（`line` / `bar` / `area` / `pie` / `candlestick`）、`series`：`[{ name, data }]`（`data` 是 `[x, y]`，K 线是 `[x, 开, 高, 低, 收]`；最多 20 组、每组 2000 点）、`height`（80–600）、`colors`（语气名数组，依次给各序列或饼图各扇区上色）、`legend`（下方显示图例）、`showValues`（柱状图、饼图上标数值）、`donut`（环形饼图）、`yMin` / `yMax`（折线图、面积图纵轴范围）、`grid`（默认 `true`）、`xLabel` / `yLabel`（坐标轴说明） |
+| `heatmap` | `rows`、`columns`（标签，各最多 100）、`values`（每行一个数字数组，可以有 `null`）、`label`、`tone`（色阶的颜色，默认强调色）、`showValues`（格子里写数值）、`action`（点击格子时执行，`value` 为 `{ row, column }`） |
+| `calendar` | `month`（`2026-11`）、`marks`（`{ "2026-11-16": "说明" }`，值也可以是 `{ text, tone }`）、`value`（选中的日期）、`range`（`{ start, end }`，区间内的日期有底色）、`action` |
+| `image` | `src`（`data:image/…` URI，或相对路径，`data/…` 指插件数据目录；≤ 4 MB）、`alt`、`width`（16–1200）、`height`（16–1200）、`fit`（同时给了宽高时：`contain` 完整显示，默认 / `cover` 裁切填满）、`radius`（`none` / `medium` / `full`）、`caption` |
+| `steps` | `items`：`[{ title, detail }]`（1–20 步）、`current`（当前是第几步，从 0 开始；等于步数时全部完成）、`orientation`（`horizontal`，默认 / `vertical`）；有 `size` |
+| `timeline` | `items`：`[{ title, time, detail, tone, icon }]`；按给出的顺序从上到下排列 |
+| `tree` | `items`：`[{ id, label, icon, detail, action, payload, children }]`（可以嵌套，每一项计入节点数，每深一层计入层数）、`expanded`（默认展开的项的 `id`）；有子项的项点击后展开或收起，有 `action` 的项点击后执行动作（这时用前面的箭头展开） |
+| `avatar` | `text`（显示第一个字）或 `src`（图片，规则同 `image`；读不了时改为显示首字）、`alt`、`tone`；有 `size`（直径 24 / 32 / 40） |
+| `tags` | `items`：`[{ text, tone, icon }]`、`value`（选中的那个，显示为实底）、`action`（点击标签时执行，`value` 为标签的文字）；有 `size` |
+| `skeleton` | `lines`（1–10，默认 3）；加载占位，异步数据就绪前可以先返回它；有 `size`（行高） |
+| `status` | `text`、`state`（`ok` / `idle` / `warn` / `error` / `busy`，`busy` 显示转圈）；有 `size` |
 
 ### 控件
 
 | 类型 | 属性 | `inputs` 中的值 |
 |---|---|---|
 | `button` | `label`、`action`、`payload`、`variant`（`primary` / `outline` / `ghost` / `danger` / `link`）、`icon`、`iconOnly`（只显示图标，需要 `icon`，`label` 用作读屏名称和提示）、`full`（占满宽度）、`confirm`（第一次点击时按钮上显示这句话，再次点击才执行）；有 `size`，默认 `small` | — |
-| `link` | `label`、`url`（http / https；点击后经用户确认，用系统浏览器打开）、`icon`；有 `size` | — |
+| `link` | `label`、`url`（http / https；点击后经用户确认，用系统浏览器打开）、`icon`、`variant`（`button` 安静按钮，默认 / `inline` 文字链接）；有 `size` | — |
 | `input` | `id`、`label`、`placeholder`、`value`、`kind`（`text` / `password` 遮蔽并带显示按钮 / `search` 前面有放大镜 / `url` / `email`）、`prefix` / `suffix`（框内两头的固定文字）、`maxLength`（1–10000）、`submit`（在框里按 Enter 时执行的动作）；有 `size` | 字符串 |
 | `textarea` | `id`、`label`、`placeholder`、`value`、`rows`（1–40）；有 `size` | 字符串 |
 | `number` | `id`、`label`、`placeholder`、`value`、`min`、`max`、`step`（加减按钮的步长，默认 1）、`unit`；有 `size` | 数字（超出范围时取边界值），为空或不是数字时为 `null` |

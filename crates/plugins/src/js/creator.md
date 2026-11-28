@@ -213,7 +213,7 @@ export const ui = {
 
 - **Nodes**:
   - Any node: `hidden` (skip it), `disabled` (controls greyed out), `tooltip`, `icon` (see Icons), `tone`: neutral|secondary|accent|success|warning|danger.
-  - `size`: small|medium|large (control height 28 / 32 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `checkboxes`, `number`, `date`, `tags-input`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`. On `row` it is the default for the controls inside.
+  - `size`: small|medium|large (control height 28 / 32 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `checkboxes`, `number`, `date`, `tags-input`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`, `progress`, `avatar`, `tags`, `status`, `skeleton`, `steps`. On `row` it is the default for the controls inside.
   - `column` / `row` (`children`, `gap`: small|medium|large, `align`: start|center|end|stretch, `justify`: start|center|end|between, `padding`: none|small|medium|large; `row` also `wrap`: false)
   - `grid` (`children`, `columns` 1–6, `gap`), `spacer` (in a `row`, without `size` it pushes what follows to the right)
   - `card` (`title`, `description`, `icon`, `children`, `actions`: nodes on the right of the title, `variant`: outlined|filled|plain, `collapsible`, `open`)
@@ -235,9 +235,14 @@ export const ui = {
   - `badge` (`text`, `tone`, `variant`: soft|outline|solid), `divider`
   - `stat` (`label`, `value`, `delta`: a number or "+3%" (green up, red down), `caption`, `spark`: numbers for a small line)
   - `alert` (`text`, `title`, `tone`, `action`, `actionLabel`), `empty` (`title`, `description`, `icon`, `action`, `actionLabel`)
-  - `markdown` (`text`, `size`: body|caption), `code` (`text`, `language`), `diff` (unified diff `text`, or `before` + `after`; `path`)
-  - `progress` (`value` 0–1, `label`), `link` (`label`, `url`: http/https, opened in the browser after the user confirms)
-  - `kv` (`items`: [{ `key`, `value` }]), `chart` (`kind`: line|bar|area|pie|candlestick, `series`: [{ `name`, `data`: [[x, y], …] }], `height`), `heatmap` (`rows`, `columns`, `values`), `calendar` (`month`: 2026-11, `marks`, `action`), `image` (`src`: data URI or `data/…`, `alt`, `width`)
+  - `markdown` (`text`, `size`: body|caption, `maxHeight`), `code` (`text`, `language`, `title`, `copy` (default true), `wrap` (default true), `lineNumbers`, `maxHeight`), `diff` (unified diff `text`, or `before` + `after`; `path`)
+  - `progress` (`value` 0–1, `label`, `style`: bar|ring|steps, `steps`, `tone`, `indeterminate` (no `value` needed), `showValue`), `link` (`label`, `url`: http/https, opened in the browser after the user confirms; `variant`: button|inline)
+  - `kv` (`items`: [{ `key`, `value`, `tone` }], `columns` 1–3, `layout`: inline|stacked, `copy`)
+  - `chart` (`kind`: line|bar|area|pie|candlestick, `series`: [{ `name`, `data`: [[x, y], …] }], `height`, `colors`: tone names, `legend`, `showValues`, `donut`, `yMin` / `yMax`, `grid`, `xLabel` / `yLabel`)
+  - `heatmap` (`rows`, `columns`, `values`, `tone`, `showValues`, `action`: runs with `value` = { row, column }), `calendar` (`month`: 2026-11, `marks`: text or { text, tone }, `value`, `range`: { start, end }, `action`), `image` (`src`: data URI or `data/…`, `alt`, `width`, `height`, `fit`: contain|cover, `radius`: none|medium|full, `caption`)
+  - `steps` (`items`: [{ `title`, `detail` }], `current` (0-based; = length when all done), `orientation`: horizontal|vertical), `timeline` (`items`: [{ `title`, `time`, `detail`, `tone`, `icon` }])
+  - `tree` (`items`: [{ `id`, `label`, `icon`, `detail`, `action`, `payload`, `children` }], `expanded`: ids): expanding is kept by the app; an item with `action` runs it when clicked
+  - `avatar` (`text` (first letter) or `src`, `alt`, `tone`), `tags` (`items`: [{ `text`, `tone`, `icon` }], `value`: the selected one, `action`: runs with the tag text as `value`), `skeleton` (`lines`: a loading placeholder), `status` (`text`, `state`: ok|idle|warn|error|busy)
   - A bare string is a text node. Anything else fails to render.
 - **More places**: `panels: [{ id, label, page }]` shows a page in a collapsible panel above the input box; `status: [{ id, page }]` shows the first text of a page as a status line in the sidebar.
 - **Re-rendering**: after every action the page is rendered again. An input keeps what the user typed unless `render` returns a different `value` for it (e.g. `""` to clear it after adding).

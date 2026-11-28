@@ -427,7 +427,7 @@ impl PluginPageView {
         let element = match node.get("type").and_then(Value::as_str) {
             Some(
                 "button" | "input" | "switch" | "textarea" | "select" | "link" | "calendar" | "checkbox" | "radio" | "number" | "tabs"
-                | "collapsible" | "checkboxes" | "slider" | "date" | "tags-input",
+                | "collapsible" | "checkboxes" | "slider" | "date" | "tags-input" | "tree" | "tags" | "heatmap",
             ) => reveal_in(&self.scroll, SharedString::from(format!("{}-{path}-reveal", self.plugin)), element).into_any_element(),
             _ => element,
         };
@@ -1172,11 +1172,13 @@ impl PluginPageView {
                 let url = string("url");
                 let confirming = self.pending_link.as_deref() == Some(url.as_str());
                 let label = if confirming { t!("plugin_page.open_link_confirm", url = url).to_string() } else { string("label") };
-                crate::design::framed(
+                let link = crate::design::framed(
                     id(""),
                     NodeSize::of(node, size, NodeSize::Small)
                         .apply(Button::new(id("")))
-                        .subtle(cx)
+                        // `inline` 是文字链接的样子，默认是安静的按钮。
+                        .when(node.get("variant").and_then(Value::as_str) == Some("inline"), |button| button.link())
+                        .when(node.get("variant").and_then(Value::as_str) != Some("inline"), |button| button.subtle(cx))
                         .icon(icon_of(node).unwrap_or(IconName::ExternalLink))
                         .label(label)
                         .disabled(off)
@@ -1190,9 +1192,72 @@ impl PluginPageView {
                             cx.notify();
                         }))
                         .into_any_element(),
-                )
-                .into_any_element()
+                );
+                // 横向 flex 包一层：在 `column` 里按文字宽度，不被拉满居中。
+                h_flex().child(link).into_any_element()
             }
+            "tree" => {
+                let key = Self::local_key(node, path);
+                let expanded: Vec<String> = node
+                    .get("expanded")
+                    .and_then(Value::as_array)
+                    .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+                    .unwrap_or_default();
+                // 展开状态在这边记（键是树的键加项的 id）；没点过的按插件写的 `expanded`。
+                let is_open = |item: &str| {
+                    self.open.get(&format!("tree:{key}:{item}")).copied().unwrap_or_else(|| expanded.iter().any(|open| open == item))
+                };
+                let handlers = (!off).then(|| {
+                    let (toggle_view, pick_view) = (cx.entity().downgrade(), cx.entity().downgrade());
+                    let key = key.clone();
+                    TreeHandlers {
+                        toggle: std::rc::Rc::new(move |item: String, open: bool, _: &mut Window, cx: &mut App| {
+                            toggle_view
+                                .update(cx, |this, cx| {
+                                    this.open.insert(format!("tree:{key}:{item}"), open);
+                                    cx.notify();
+                                })
+                                .ok();
+                        }),
+                        pick: std::rc::Rc::new(move |action: String, payload: Value, window: &mut Window, cx: &mut App| {
+                            pick_view.update(cx, |this, cx| this.act(action, payload, None, window, cx)).ok();
+                        }),
+                    }
+                });
+                tree(node, &id(""), &is_open, handlers.as_ref(), &p)
+            }
+            "tags" => {
+                let pick: Option<PickDate> = optional("action").filter(|_| !off).map(|action| {
+                    let view = cx.entity().downgrade();
+                    std::rc::Rc::new(move |text: String, window: &mut Window, cx: &mut App| {
+                        let action = action.clone();
+                        view.update(cx, |this, cx| this.act(action, Value::String(text), None, window, cx)).ok();
+                    }) as PickDate
+                });
+                let mut node = node.clone();
+                if node.get("size").is_none()
+                    && let Some(size) = size
+                {
+                    node["size"] = json!(match size {
+                        NodeSize::Small => "small",
+                        NodeSize::Medium => "medium",
+                        NodeSize::Large => "large",
+                    });
+                }
+                tags(&node, &id(""), pick, &p)
+            }
+            "heatmap" if node.get("action").and_then(Value::as_str).is_some() && !off => {
+                let action = string("action");
+                let view = cx.entity().downgrade();
+                let pick: PickCell = std::rc::Rc::new(move |row, column, window, cx| {
+                    let action = action.clone();
+                    view.update(cx, |this, cx| this.act(action, json!({ "row": row, "column": column }), None, window, cx)).ok();
+                });
+                heatmap(node, &id(""), Some(pick), cx)
+            }
+            "avatar" => avatar(node, &id(""), size, &p).into_any_element(),
+            "status" => status(node, &id(""), size, &p).into_any_element(),
+            "skeleton" => skeleton(node, size),
             "calendar" if node.get("action").and_then(Value::as_str).is_some() => {
                 let action = string("action");
                 let view = cx.entity().downgrade();
@@ -1766,23 +1831,22 @@ fn table(node: &Value, id: &SharedString, inherited: Option<NodeSize>, on_row: O
 fn display_node(node: &Value, id: &SharedString, cx: &App) -> Option<AnyElement> {
     let p = palette(cx);
     let string = |key: &str| node.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let max_height = node.get("maxHeight").and_then(Value::as_f64).map(|height| height as f32);
     let element = match node.get("type").and_then(Value::as_str).unwrap_or_default() {
-        "markdown" => div()
-            .id(SharedString::from(format!("{id}-md")))
-            .role(Role::Label)
-            .aria_value(crate::transcript::plain_markdown(&string("text")))
-            .text_content()
-            .child(TextView::markdown(id.clone(), string("text")))
-            .into_any_element(),
-        "code" => div()
-            .w_full()
-            .px(px(space::M))
-            .py(px(space::S))
-            .rounded(px(radius::MD))
-            .bg(p.sunken)
-            .text_mono(mono_font(cx))
-            .child(readable_with_id(SharedString::from(format!("{id}-code")), string("text")))
-            .into_any_element(),
+        "markdown" => {
+            let text = div()
+                .id(SharedString::from(format!("{id}-md")))
+                .role(Role::Label)
+                .aria_value(crate::transcript::plain_markdown(&string("text")))
+                .when(node.get("size").and_then(Value::as_str) == Some("caption"), |text| text.text_caption().text_color(p.text_secondary))
+                .when(node.get("size").and_then(Value::as_str) != Some("caption"), |text| text.text_content())
+                .child(TextView::markdown(id.clone(), string("text")));
+            match max_height {
+                Some(height) => text.max_h(px(height)).overflow_y_scroll().into_any_element(),
+                None => text.into_any_element(),
+            }
+        }
+        "code" => code_block(node, id, cx),
         "diff" => {
             let text = match node.get("text").and_then(Value::as_str) {
                 Some(text) => text.to_owned(),
@@ -1813,63 +1877,246 @@ fn display_node(node: &Value, id: &SharedString, cx: &App) -> Option<AnyElement>
                 .into_any_element()
         }
         "table" => table(node, id, None, None, cx),
-        "progress" => {
-            let value = node.get("value").and_then(Value::as_f64).unwrap_or(0.).clamp(0., 1.);
-            let label = node.get("label").and_then(Value::as_str).map(str::to_owned);
-            let percent = format!("{}%", (value * 100.).round());
-            v_flex()
-                .w_full()
-                .gap(px(space::XS))
-                .child(
-                    h_flex()
-                        .justify_between()
-                        .text_caption()
-                        .text_color(p.text_secondary)
-                        .child(readable_with_id(SharedString::from(format!("{id}-label")), label.unwrap_or_default()))
-                        .child(readable_with_id(SharedString::from(format!("{id}-percent")), percent)),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .h(px(6.))
-                        .rounded_full()
-                        .bg(p.sunken)
-                        .child(div().h_full().rounded_full().bg(p.accent).w(relative(value as f32))),
-                )
-                .into_any_element()
-        }
+        "progress" => progress(node, id, cx),
         "chart" => chart(node, id, cx),
-        "heatmap" => heatmap(node, id, cx),
+        "heatmap" => heatmap(node, id, None, cx),
         "calendar" => calendar(node, id, None, cx),
-        "kv" => {
-            let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
-            v_flex()
-                .w_full()
-                .gap(px(2.))
-                .children(items.into_iter().enumerate().map(|(index, item)| {
-                    let key = item.get("key").and_then(Value::as_str).unwrap_or_default().to_owned();
-                    let value = match item.get("value") {
-                        Some(Value::String(text)) => text.clone(),
-                        Some(Value::Null) | None => String::new(),
-                        Some(other) => other.to_string(),
-                    };
-                    h_flex()
-                        .id(SharedString::from(format!("{id}-kv-{index}")))
-                        .role(Role::Label)
-                        .aria_value(format!("{key}：{value}"))
-                        .gap(px(space::M))
-                        .child(div().w(px(140.)).flex_none().text_caption().text_color(p.text_secondary).child(key))
-                        .child(div().flex_1().min_w(px(0.)).text_body().child(value))
-                }))
-                .into_any_element()
-        }
+        "kv" => kv(node, id, cx),
         "image" => image(node, id, cx),
+        "steps" => steps(node, id, &p),
+        "timeline" => timeline(node, id, &p),
+        "tree" => {
+            let expanded: Vec<String> = node
+                .get("expanded")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+                .unwrap_or_default();
+            tree(node, id, &|item: &str| expanded.iter().any(|open| open == item), None, &p)
+        }
+        "avatar" => avatar(node, id, None, &p).into_any_element(),
+        "tags" => tags(node, id, None, &p),
+        "skeleton" => skeleton(node, None),
+        "status" => status(node, id, None, &p).into_any_element(),
         _ => return None,
     };
     Some(element)
 }
 
-/// 图表：每个序列一张（多序列时上面写序列名）。点的第一项是横轴标签，其余是数值。
+/// 复制按钮（代码块、键值）：把 `text` 放进剪贴板。
+fn copy_button(id: SharedString, text: String, name: Option<String>, cx: &App) -> AnyElement {
+    let spoken = match name {
+        Some(name) => t!("plugin_page.copy_named", name = name).to_string(),
+        None => t!("plugin_page.copy").to_string(),
+    };
+    crate::design::framed(
+        id.clone(),
+        Button::new(id)
+            .control_xs()
+            .subtle(cx)
+            .icon(IconName::Copy)
+            .accessibility_label(spoken.clone())
+            .tooltip(spoken)
+            .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))),
+    )
+    .into_any_element()
+}
+
+/// 代码块：可选标题和复制按钮（默认有），可选行号；`wrap: false` 时不折行、横向滚动；`maxHeight` 超出时纵向滚动。
+fn code_block(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
+    let p = palette(cx);
+    let text = node.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let title = node.get("title").and_then(Value::as_str).map(str::to_owned);
+    let copy = node.get("copy").and_then(Value::as_bool) != Some(false);
+    let wrap = node.get("wrap").and_then(Value::as_bool) != Some(false);
+    let numbers = node.get("lineNumbers").and_then(Value::as_bool) == Some(true);
+    let max_height = node.get("maxHeight").and_then(Value::as_f64).map(|height| height as f32);
+    let body = if numbers {
+        let lines: Vec<&str> = text.lines().collect();
+        let width = lines.len().to_string().len() as f32 * 8. + space::S;
+        v_flex()
+            .children(lines.iter().enumerate().map(|(index, line)| {
+                h_flex()
+                    .items_start()
+                    .child(div().w(px(width)).flex_none().text_color(p.text_secondary).child((index + 1).to_string()))
+                    .child(
+                        div()
+                            .when(!wrap, |line| line.whitespace_nowrap())
+                            .child(readable_with_id(SharedString::from(format!("{id}-code-{index}")), (*line).to_owned())),
+                    )
+            }))
+            .into_any_element()
+    } else {
+        div()
+            .when(!wrap, |text| text.whitespace_nowrap())
+            .child(readable_with_id(SharedString::from(format!("{id}-code")), text.clone()))
+            .into_any_element()
+    };
+    let scroller = div()
+        .id(SharedString::from(format!("{id}-code-scroll")))
+        .px(px(space::M))
+        .py(px(space::S))
+        .when(!wrap, |body| body.overflow_x_scroll())
+        .when_some(max_height, |body, height| body.max_h(px(height)).overflow_y_scroll())
+        .child(body);
+    let header = (title.is_some() || copy).then(|| {
+        h_flex()
+            .pl(px(space::M))
+            .pr(px(space::XS))
+            .pt(px(space::XS))
+            .justify_between()
+            .items_center()
+            .child(div().text_caption().text_color(p.text_secondary).children(title.clone()))
+            .when(copy, |header| header.child(copy_button(SharedString::from(format!("{id}-copy")), text.clone(), title.clone(), cx)))
+    });
+    v_flex().w_full().rounded(px(radius::MD)).bg(p.sunken).text_mono(mono_font(cx)).children(header).child(scroller).into_any_element()
+}
+
+/// 进度：条形（默认）、环形或分段；`indeterminate` 时不显示数值，显示循环动画。`tone` 定颜色，`size` 定粗细或直径。
+fn progress(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
+    use gpui_kit::component::progress::{Progress, ProgressCircle};
+    let p = palette(cx);
+    let indeterminate = node.get("indeterminate").and_then(Value::as_bool) == Some(true);
+    let value = node.get("value").and_then(Value::as_f64).unwrap_or(0.).clamp(0., 1.);
+    let label = node.get("label").and_then(Value::as_str).map(str::to_owned);
+    let color = tone_color(node.get("tone").and_then(Value::as_str), &p).unwrap_or(p.accent);
+    let size = NodeSize::of(node, None, NodeSize::Medium);
+    let show_value = node.get("showValue").and_then(Value::as_bool) != Some(false) && !indeterminate;
+    let percent = format!("{}%", (value * 100.).round());
+    let spoken = label.clone().unwrap_or_default();
+    match node.get("style").and_then(Value::as_str) {
+        Some("ring") => {
+            let diameter = match size {
+                NodeSize::Small => 32.,
+                NodeSize::Medium => 48.,
+                NodeSize::Large => 64.,
+            };
+            h_flex()
+                .gap(px(space::S))
+                .items_center()
+                .child(
+                    ProgressCircle::new(SharedString::from(format!("{id}-ring")))
+                        .value((value * 100.) as f32)
+                        .loading(indeterminate)
+                        .color(color)
+                        .accessibility_label(spoken)
+                        .size(px(diameter))
+                        .flex_none(),
+                )
+                .child(
+                    v_flex()
+                        .children(
+                            label.map(|label| div().text_body().child(readable_with_id(SharedString::from(format!("{id}-label")), label))),
+                        )
+                        .when(show_value, |text| {
+                            text.child(
+                                div()
+                                    .text_caption()
+                                    .text_color(p.text_secondary)
+                                    .child(readable_with_id(SharedString::from(format!("{id}-percent")), percent.clone())),
+                            )
+                        }),
+                )
+                .into_any_element()
+        }
+        style => {
+            let thickness = match size {
+                NodeSize::Small => 4.,
+                NodeSize::Medium => 6.,
+                NodeSize::Large => 8.,
+            };
+            let track: AnyElement = if indeterminate {
+                Progress::new(SharedString::from(format!("{id}-bar")))
+                    .loading(true)
+                    .color(color)
+                    .accessibility_label(spoken)
+                    .h(px(thickness))
+                    .into_any_element()
+            } else if style == Some("steps") {
+                let count = node.get("steps").and_then(Value::as_u64).unwrap_or(5).clamp(2, 20) as usize;
+                let filled = (value * count as f64).round() as usize;
+                h_flex()
+                    .w_full()
+                    .gap(px(2.))
+                    .children(
+                        (0..count)
+                            .map(|index| div().flex_1().h(px(thickness)).rounded_full().bg(if index < filled { color } else { p.sunken })),
+                    )
+                    .into_any_element()
+            } else {
+                div()
+                    .w_full()
+                    .h(px(thickness))
+                    .rounded_full()
+                    .bg(p.sunken)
+                    .child(div().h_full().rounded_full().bg(color).w(relative(value as f32)))
+                    .into_any_element()
+            };
+            v_flex()
+                .w_full()
+                .gap(px(space::XS))
+                .when(label.is_some() || show_value, |column| {
+                    column.child(
+                        h_flex()
+                            .justify_between()
+                            .text_caption()
+                            .text_color(p.text_secondary)
+                            .child(readable_with_id(SharedString::from(format!("{id}-label")), label.clone().unwrap_or_default()))
+                            .when(show_value, |row| {
+                                row.child(readable_with_id(SharedString::from(format!("{id}-percent")), percent.clone()))
+                            }),
+                    )
+                })
+                .child(track)
+                .into_any_element()
+        }
+    }
+}
+
+/// 键值：一列或多列（`columns`），键在左（`inline`，默认）或在上（`stacked`）；`copy` 时每个值后面有复制按钮。
+fn kv(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
+    let p = palette(cx);
+    let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+    let columns = node.get("columns").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u16;
+    let stacked = node.get("layout").and_then(Value::as_str) == Some("stacked");
+    let copy = node.get("copy").and_then(Value::as_bool) == Some(true);
+    let cells = items.into_iter().enumerate().map(|(index, item)| {
+        let key = item.get("key").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let value = match item.get("value") {
+            Some(Value::String(text)) => text.clone(),
+            Some(Value::Null) | None => String::new(),
+            Some(other) => other.to_string(),
+        };
+        let color = tone_color(item.get("tone").and_then(Value::as_str), &p).unwrap_or(p.text);
+        let value_element = h_flex()
+            .flex_1()
+            .min_w(px(0.))
+            .gap(px(space::XS))
+            .items_center()
+            .child(div().min_w(px(0.)).text_body().text_color(color).child(value.clone()))
+            .when(copy && !value.is_empty(), |row| {
+                row.child(copy_button(SharedString::from(format!("{id}-kv-copy-{index}")), value.clone(), Some(key.clone()), cx))
+            });
+        let key_element = div().text_caption().text_color(p.text_secondary).child(key.clone());
+        let row = if stacked {
+            v_flex().gap(px(2.)).child(key_element).child(value_element)
+        } else {
+            h_flex().gap(px(space::M)).child(key_element.w(px(140.)).flex_none()).child(value_element)
+        };
+        row.id(SharedString::from(format!("{id}-kv-{index}"))).role(Role::Label).aria_value(format!("{key}：{value}"))
+    });
+    div()
+        .w_full()
+        .grid()
+        .grid_cols(columns)
+        .gap_x(px(space::L))
+        .gap_y(px(if stacked { space::M } else { 2. }))
+        .children(cells)
+        .into_any_element()
+}
+
+/// 图表：每个序列一张（多序列时上面写序列名，`legend` 时改为下面一行图例）。点的第一项是横轴标签，其余是数值。
+/// `colors` 用语气名指定各序列（饼图是各扇区）的颜色；`donut` 是环形饼图；`showValues` 在柱子、扇区上标数值；
+/// `yMin` / `yMax` 定折线图、面积图纵轴的范围；`grid: false` 不画网格；`xLabel` / `yLabel` 是坐标轴说明。
 fn chart(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
     use gpui_kit::component::chart::{AreaChart, BarChart, CandlestickChart, LineChart, PieChart};
     #[derive(Clone)]
@@ -1883,11 +2130,30 @@ fn chart(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
     let height = node.get("height").and_then(Value::as_u64).unwrap_or(220) as f32;
     let series = node.get("series").and_then(Value::as_array).cloned().unwrap_or_default();
     let multiple = series.len() > 1;
-    let colors = [p.accent, p.success, p.warning, p.danger, p.text_secondary];
-    v_flex()
-        .w_full()
-        .gap(px(space::S))
-        .children(series.into_iter().enumerate().map(|(series_index, one)| {
+    let defaults = [p.accent, p.success, p.warning, p.danger, p.text_secondary];
+    let colors: Vec<Hsla> = node
+        .get("colors")
+        .and_then(Value::as_array)
+        .map(|colors| colors.iter().filter_map(|color| tone_color(color.as_str(), &p)).collect::<Vec<_>>())
+        .filter(|colors| !colors.is_empty())
+        .unwrap_or_else(|| defaults.to_vec());
+    let legend = node.get("legend").and_then(Value::as_bool) == Some(true);
+    let show_values = node.get("showValues").and_then(Value::as_bool) == Some(true);
+    let grid = node.get("grid").and_then(Value::as_bool) != Some(false);
+    let donut = node.get("donut").and_then(Value::as_bool) == Some(true);
+    let y_domain = match (node.get("yMin").and_then(Value::as_f64), node.get("yMax").and_then(Value::as_f64)) {
+        (Some(min), Some(max)) if min < max => Some((min, max)),
+        _ => None,
+    };
+    let caption = |key: &str| {
+        node.get(key).and_then(Value::as_str).map(|text| div().text_caption().text_color(p.text_secondary).child(text.to_owned()))
+    };
+    // 图例：每项一个色点加名字。饼图是各扇区，其余是各序列。
+    let mut legend_items: Vec<(String, Hsla)> = Vec::new();
+    let charts: Vec<AnyElement> = series
+        .into_iter()
+        .enumerate()
+        .map(|(series_index, one)| {
             let name = one.get("name").and_then(Value::as_str).map(str::to_owned);
             let points: Vec<Point> = one
                 .get("data")
@@ -1909,12 +2175,20 @@ fn chart(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
                 })
                 .collect();
             let color = colors[series_index % colors.len()];
+            if kind == "pie" {
+                legend_items.extend(points.iter().map(|point| (point.x.to_string(), colors[point.index % colors.len()])));
+            } else if let Some(name) = &name {
+                legend_items.push((name.clone(), color));
+            }
             let chart_id = SharedString::from(format!("{id}-chart-{series_index}"));
             let element: AnyElement = match kind.as_str() {
                 "bar" => BarChart::new(points)
                     .id(chart_id)
                     .band(|point: &Point| point.x.clone())
                     .value(|point: &Point| point.values[0])
+                    .fill(move |_: &Point, _, _, _| color)
+                    .grid(grid)
+                    .when(show_values, |chart| chart.label(|point: &Point| format_number(point.values[0])))
                     .into_any_element(),
                 "area" => AreaChart::new(points)
                     .id(chart_id)
@@ -1922,13 +2196,17 @@ fn chart(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
                     .y(|point: &Point| point.values[0])
                     .stroke(color)
                     .fill(color.opacity(0.2))
+                    .grid(grid)
+                    .when_some(y_domain, |chart, (min, max)| chart.y_domain(min, max))
                     .into_any_element(),
                 "pie" => {
-                    let palette_colors = colors;
+                    let slice_colors = colors.clone();
                     PieChart::new(points)
                         .id(chart_id)
                         .value(|point: &Point| point.values[0] as f32)
-                        .color(move |point: &Point| palette_colors[point.index % palette_colors.len()])
+                        .color(move |point: &Point| slice_colors[point.index % slice_colors.len()])
+                        .when(donut, |chart| chart.inner_radius_ratio(0.6))
+                        .when(show_values, |chart| chart.label(|point: &Point| SharedString::from(format_number(point.values[0]))))
                         .into_any_element()
                 }
                 "candlestick" => CandlestickChart::new(points)
@@ -1945,18 +2223,42 @@ fn chart(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
                     .y(|point: &Point| point.values[0])
                     .stroke(color)
                     .dot()
+                    .grid(grid)
+                    .when_some(y_domain, |chart, (min, max)| chart.y_domain(min, max))
                     .into_any_element(),
             };
             v_flex()
                 .gap(px(space::XS))
-                .children(name.filter(|_| multiple).map(|name| div().text_caption().text_color(p.text_secondary).child(name)))
+                .children(name.filter(|_| multiple && !legend).map(|name| div().text_caption().text_color(p.text_secondary).child(name)))
                 .child(div().w_full().h(px(height)).child(element))
+                .into_any_element()
+        })
+        .collect();
+    let legend_row = (legend && !legend_items.is_empty()).then(|| {
+        h_flex().flex_wrap().gap(px(space::M)).children(legend_items.into_iter().map(|(name, color)| {
+            h_flex()
+                .gap(px(space::XS))
+                .items_center()
+                .child(div().size(px(crate::design::size::STATUS_DOT)).rounded_full().bg(color))
+                .child(div().text_caption().text_color(p.text_secondary).child(name))
         }))
+    });
+    v_flex()
+        .w_full()
+        .gap(px(space::S))
+        .children(caption("yLabel"))
+        .children(charts)
+        .children(caption("xLabel").map(|label| h_flex().justify_center().child(label)))
+        .children(legend_row)
         .into_any_element()
 }
 
-/// 热力图：每格的颜色按值在最小、最大值之间插值强调色的深浅；没有值的格子留空。
-fn heatmap(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
+/// 点了热力图的一格：(行标签, 列标签)。
+type PickCell = std::rc::Rc<dyn Fn(String, String, &mut Window, &mut App)>;
+
+/// 热力图：每格的颜色按值在最小、最大值之间插值 `tone`（默认强调色）的深浅；没有值的格子留空。
+/// `showValues` 时格子里写数值（格子变大）；有 `on_pick` 时格子能点（`action`）。
+fn heatmap(node: &Value, id: &SharedString, on_pick: Option<PickCell>, cx: &App) -> AnyElement {
     let p = palette(cx);
     let labels = |key: &str| -> Vec<String> {
         node.get(key)
@@ -1973,11 +2275,21 @@ fn heatmap(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
     let all: Vec<f64> = values.iter().flatten().flatten().copied().collect();
     let (min, max) = all.iter().fold((f64::MAX, f64::MIN), |(min, max), value| (min.min(*value), max.max(*value)));
     let label = node.get("label").and_then(Value::as_str).map(str::to_owned);
+    let base = tone_color(node.get("tone").and_then(Value::as_str), &p).unwrap_or(p.accent);
+    let show_values = node.get("showValues").and_then(Value::as_bool) == Some(true);
+    let cell_size = if show_values { 32. } else { 16. };
     v_flex()
         .gap(px(2.))
         .children(label.map(|label| div().text_caption().text_color(p.text_secondary).child(label)))
         .child(h_flex().gap(px(2.)).child(div().w(px(64.)).flex_none()).children(columns.iter().map(|column| {
-            div().w(px(16.)).flex_none().text_caption().text_color(p.text_secondary).overflow_hidden().child(column.clone())
+            div()
+                .w(px(cell_size))
+                .flex_none()
+                .text_center()
+                .text_caption()
+                .text_color(p.text_secondary)
+                .overflow_hidden()
+                .child(column.clone())
         })))
         .children(rows.iter().enumerate().map(|(row_index, row)| {
             h_flex()
@@ -1991,17 +2303,43 @@ fn heatmap(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
                         None => 0.0,
                     };
                     let spoken = match value {
-                        Some(value) => format!("{row} {column}：{value}"),
+                        Some(value) => format!("{row} {column}：{}", format_number(value)),
                         None => format!("{row} {column}"),
                     };
-                    div()
-                        .id(SharedString::from(format!("{id}-heat-{row_index}-{column_index}")))
-                        .role(Role::Label)
-                        .aria_value(spoken)
-                        .size(px(16.))
-                        .flex_none()
+                    let cell_id = SharedString::from(format!("{id}-heat-{row_index}-{column_index}"));
+                    let fill = if value.is_some() { base.opacity(0.12 + strength * 0.88) } else { p.sunken };
+                    // 深色格子上的数字用强调色上的文字色。
+                    let text = if strength > 0.55 { p.on_accent } else { p.text };
+                    let content = div()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .rounded(px(3.))
-                        .bg(if value.is_some() { p.accent.opacity(0.12 + strength * 0.88) } else { p.sunken })
+                        .bg(fill)
+                        .when(show_values, |cell| cell.text_caption().text_color(text).children(value.map(format_number)));
+                    match &on_pick {
+                        Some(pick) => {
+                            let (pick, row, column) = (pick.clone(), row.clone(), column.clone());
+                            pressable(cell_id, &p)
+                                .accessibility_label(spoken)
+                                .size(px(cell_size))
+                                .flex_none()
+                                .rounded(px(3.))
+                                .cursor_pointer()
+                                .on_click(move |_, window, cx| pick(row.clone(), column.clone(), window, cx))
+                                .child(content)
+                                .into_any_element()
+                        }
+                        None => div()
+                            .id(cell_id)
+                            .role(Role::Label)
+                            .aria_value(spoken)
+                            .size(px(cell_size))
+                            .flex_none()
+                            .child(content)
+                            .into_any_element(),
+                    }
                 }))
         }))
         .into_any_element()
@@ -2010,7 +2348,8 @@ fn heatmap(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
 /// 点了日历上的某一天（`YYYY-MM-DD`）。
 pub(crate) type PickDate = std::rc::Rc<dyn Fn(String, &mut Window, &mut App)>;
 
-/// 某月的日历：7 列，周一开头；`marks` 里有的日子下面显示一小段文字。`on_pick` 有的时候日子能点。
+/// 某月的日历：7 列，周一开头；`marks` 里有的日子下面显示一小段文字（`{ text, tone }` 时按语气着色）。
+/// `value` 那天是选中的样子，`range` 里的日子有底色。`on_pick` 有的时候日子能点。
 pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate>, cx: &App) -> AnyElement {
     let p = palette(cx);
     let month = node.get("month").and_then(Value::as_str).unwrap_or("2026-01").to_owned();
@@ -2019,26 +2358,43 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
     // 这个月 1 号是星期几（0 是周一）。
     let first = (weekday(year, number, 1) + 6) % 7;
     let marks = node.get("marks").and_then(Value::as_object).cloned().unwrap_or_default();
+    let selected = node.get("value").and_then(Value::as_str).map(str::to_owned);
+    let range =
+        node.get("range").and_then(|range| Some((range.get("start")?.as_str()?.to_owned(), range.get("end")?.as_str()?.to_owned())));
     let mut cells: Vec<AnyElement> = (0..first).map(|_| div().flex_1().into_any_element()).collect();
     for day in 1..=days {
         let date = format!("{month}-{day:02}");
-        let mark = marks.get(&date).and_then(Value::as_str).map(str::to_owned);
+        let (mark, mark_color) = match marks.get(&date) {
+            Some(Value::String(text)) => (Some(text.clone()), p.accent),
+            Some(mark) => (
+                mark.get("text").and_then(Value::as_str).map(str::to_owned),
+                tone_color(mark.get("tone").and_then(Value::as_str), &p).unwrap_or(p.accent),
+            ),
+            None => (None, p.accent),
+        };
+        let is_selected = selected.as_deref() == Some(date.as_str());
+        let in_range = range.as_ref().is_some_and(|(start, end)| *start <= date && date <= *end);
         let spoken = match &mark {
-            Some(mark) => format!("{date}：{mark}"),
-            None => date.clone(),
+            Some(mark) if !mark.is_empty() => format!("{date}：{mark}"),
+            _ => date.clone(),
         };
         let cell = div()
             .id(SharedString::from(format!("{id}-day-{day}")))
             .role(Role::Label)
             .aria_value(spoken)
+            .aria_selected(is_selected)
             .flex_1()
             .min_h(px(40.))
             .p(px(space::XS))
             .rounded(px(radius::SM))
-            .when(mark.is_some(), |cell| cell.bg(p.accent_soft))
+            .when((mark.is_some() || in_range) && !is_selected, |cell| cell.bg(p.accent_soft))
+            .when(is_selected, |cell| cell.bg(p.accent).text_color(p.on_accent))
             .child(div().text_caption().child(day.to_string()))
             // 空的标记只用底色表示（日期选择里选中的那天），不占一行。
-            .children(mark.filter(|mark| !mark.is_empty()).map(|mark| div().text_caption().truncate().row_color(p.accent, &p).child(mark)));
+            .children(
+                mark.filter(|mark| !mark.is_empty())
+                    .map(|mark| div().text_caption().truncate().when(!is_selected, |text| text.row_color(mark_color, &p)).child(mark)),
+            );
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());
@@ -2091,25 +2447,418 @@ fn weekday(year: i32, month: u32, day: u32) -> u32 {
     ((year + year / 4 - year / 100 + year / 400 + OFFSETS[(month - 1) as usize] + day as i32).rem_euclid(7)) as u32
 }
 
-/// 图片节点：宿主已经把路径换成了 `data:` URI。
+/// `data:` URI 解码成图片。
+fn data_image(src: &str) -> Option<Arc<Image>> {
+    src.strip_prefix("data:").and_then(|rest| rest.split_once(";base64,")).and_then(|(media_type, data)| decoded_image(media_type, data))
+}
+
+/// 图片节点：宿主已经把路径换成了 `data:` URI。`fit` 在给了宽高时决定怎么填（`cover` 裁切、`contain` 完整显示），
+/// `radius` 是圆角，`caption` 是下面的说明。
 fn image(node: &Value, id: &SharedString, cx: &App) -> AnyElement {
     let p = palette(cx);
-    let src = node.get("src").and_then(Value::as_str).unwrap_or_default();
     let alt = node.get("alt").and_then(Value::as_str).unwrap_or_default().to_owned();
     let width = node.get("width").and_then(Value::as_u64).map(|width| width as f32);
-    let decoded = src
-        .strip_prefix("data:")
-        .and_then(|rest| rest.split_once(";base64,"))
-        .and_then(|(media_type, data)| decoded_image(media_type, data));
-    match decoded {
-        Some(image) => div()
-            .id(SharedString::from(format!("{id}-image")))
-            .role(Role::Image)
-            .aria_label(alt)
-            .child(img(image).max_w_full().when_some(width, |image, width| image.w(px(width))))
-            .into_any_element(),
+    let height = node.get("height").and_then(Value::as_u64).map(|height| height as f32);
+    let fit = match node.get("fit").and_then(Value::as_str) {
+        Some("cover") => ObjectFit::Cover,
+        _ => ObjectFit::Contain,
+    };
+    let caption = node.get("caption").and_then(Value::as_str).map(str::to_owned);
+    match data_image(node.get("src").and_then(Value::as_str).unwrap_or_default()) {
+        Some(image) => {
+            let picture = img(image)
+                .max_w_full()
+                .object_fit(fit)
+                .when_some(width, |image, width| image.w(px(width)))
+                .when_some(height, |image, height| image.h(px(height)));
+            let picture = match node.get("radius").and_then(Value::as_str) {
+                Some("medium") => picture.rounded(px(radius::MD)),
+                Some("full") => picture.rounded_full(),
+                _ => picture,
+            };
+            v_flex()
+                .gap(px(space::XS))
+                .child(
+                    div().id(SharedString::from(format!("{id}-image"))).role(Role::Image).aria_label(alt).overflow_hidden().child(picture),
+                )
+                .children(caption.map(|text| div().text_caption().text_color(p.text_secondary).child(text)))
+                .into_any_element()
+        }
         None => hint(if alt.is_empty() { "[image]".to_owned() } else { alt }, Tone::Neutral, &p).into_any_element(),
     }
+}
+
+/// 步骤条：已完成的步骤打勾，当前步骤用强调色，后面的是次要色。`current` 等于步数时全部完成。
+fn steps(node: &Value, id: &SharedString, p: &Palette) -> AnyElement {
+    let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+    let current = node.get("current").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let vertical = node.get("orientation").and_then(Value::as_str) == Some("vertical");
+    let size = NodeSize::of(node, None, NodeSize::Medium);
+    let dot = size.indicator() + 8.;
+    let count = items.len();
+    let step = |index: usize, item: &Value| {
+        let title = item.get("title").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let detail = item.get("detail").and_then(Value::as_str).map(str::to_owned);
+        let (done, active) = (index < current, index == current);
+        let state = if done {
+            t!("plugin_page.step_done").to_string()
+        } else if active {
+            t!("plugin_page.step_current").to_string()
+        } else {
+            t!("plugin_page.step_pending").to_string()
+        };
+        let marker = div()
+            .size(px(dot))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .text_caption()
+            .when(done, |marker| marker.bg(p.accent).child(Icon::new(IconName::Check).size(px(dot - 8.)).text_color(p.on_accent)))
+            .when(active, |marker| marker.border_2().border_color(p.accent).text_color(p.accent).child((index + 1).to_string()))
+            .when(!done && !active, |marker| {
+                marker.border_1().border_color(p.border).text_color(p.text_secondary).child((index + 1).to_string())
+            });
+        let text = v_flex()
+            .min_w(px(0.))
+            .child(
+                size.text(div())
+                    .when(active, |title| title.font_weight(FontWeight::MEDIUM))
+                    .when(!done && !active, |title| title.text_color(p.text_secondary))
+                    .child(title.clone()),
+            )
+            .children(detail.clone().map(|detail| div().text_caption().text_color(p.text_secondary).child(detail)));
+        let spoken =
+            [Some(format!("{}/{count}", index + 1)), Some(title), detail, Some(state)].into_iter().flatten().collect::<Vec<_>>().join("，");
+        (marker, text, spoken)
+    };
+    let line = |done: bool| if done { p.accent } else { p.border };
+    if vertical {
+        v_flex()
+            .children(items.iter().enumerate().map(|(index, item)| {
+                let (marker, text, spoken) = step(index, item);
+                h_flex()
+                    .id(SharedString::from(format!("{id}-step-{index}")))
+                    .role(Role::ListItem)
+                    .aria_label(spoken)
+                    .gap(px(space::S))
+                    .items_start()
+                    .child(
+                        v_flex()
+                            .items_center()
+                            .flex_none()
+                            .child(marker)
+                            .when(index + 1 < count, |column| column.child(div().w(px(2.)).h(px(space::XL)).bg(line(index < current)))),
+                    )
+                    .child(text.pb(px(space::S)))
+            }))
+            .into_any_element()
+    } else {
+        h_flex()
+            .w_full()
+            .items_start()
+            .children(items.iter().enumerate().map(|(index, item)| {
+                let (marker, text, spoken) = step(index, item);
+                v_flex()
+                    .id(SharedString::from(format!("{id}-step-{index}")))
+                    .role(Role::ListItem)
+                    .aria_label(spoken)
+                    .flex_1()
+                    .min_w(px(0.))
+                    .gap(px(space::XS))
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .child(marker)
+                            .when(index + 1 < count, |row| row.child(div().flex_1().h(px(2.)).mx(px(space::XS)).bg(line(index < current)))),
+                    )
+                    .child(text.pr(px(space::S)))
+            }))
+            .into_any_element()
+    }
+}
+
+/// 时间线：每项左边一个圆点（按 `tone` 着色，或者一个图标），点之间连一条竖线；右边是标题、时间和详情。
+fn timeline(node: &Value, id: &SharedString, p: &Palette) -> AnyElement {
+    let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+    let count = items.len();
+    v_flex()
+        .children(items.into_iter().enumerate().map(|(index, item)| {
+            let text = |key: &str| item.get(key).and_then(Value::as_str).map(str::to_owned);
+            let color = tone_color(item.get("tone").and_then(Value::as_str), p).unwrap_or(p.accent);
+            let marker: AnyElement = match icon_of(&item) {
+                Some(icon) => Icon::new(icon).size(px(crate::design::size::ICON_MD)).text_color(color).into_any_element(),
+                None => div().size(px(10.)).m(px(3.)).rounded_full().bg(color).into_any_element(),
+            };
+            let spoken = [text("time"), text("title"), text("detail")].into_iter().flatten().collect::<Vec<_>>().join("，");
+            h_flex()
+                .id(SharedString::from(format!("{id}-event-{index}")))
+                .role(Role::ListItem)
+                .aria_label(spoken)
+                .gap(px(space::S))
+                .items_start()
+                .child(
+                    v_flex()
+                        .items_center()
+                        .flex_none()
+                        .w(px(crate::design::size::ICON_MD))
+                        .h_full()
+                        .pt(px(3.))
+                        .child(marker)
+                        .when(index + 1 < count, |column| column.child(div().w(px(2.)).flex_1().min_h(px(space::L)).bg(p.border))),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .pb(px(space::M))
+                        .child(
+                            h_flex()
+                                .gap(px(space::S))
+                                .items_center()
+                                .child(div().text_label().child(text("title").unwrap_or_default()))
+                                .children(text("time").map(|time| div().text_caption().text_color(p.text_secondary).child(time))),
+                        )
+                        .children(text("detail").map(|detail| div().text_body().text_color(p.text_secondary).child(detail))),
+                )
+        }))
+        .into_any_element()
+}
+
+/// 树的交互：展开 / 收起一项（项的 id），点了一项（动作名, `payload`）。
+struct TreeHandlers {
+    toggle: ToggleItem,
+    pick: PickAction,
+}
+
+/// 展开（`true`）或收起树的一项（项的 id）。
+type ToggleItem = std::rc::Rc<dyn Fn(String, bool, &mut Window, &mut App)>;
+/// 执行一个动作：(动作名, `payload`)。
+type PickAction = std::rc::Rc<dyn Fn(String, Value, &mut Window, &mut App)>;
+
+/// 树：每一层缩进 16；有子项的项前面是展开箭头。`is_open` 说某一项是否展开。没有 `handlers` 时只显示。
+fn tree(node: &Value, id: &SharedString, is_open: &dyn Fn(&str) -> bool, handlers: Option<&TreeHandlers>, p: &Palette) -> AnyElement {
+    fn rows(
+        items: &[Value],
+        level: usize,
+        id: &SharedString,
+        is_open: &dyn Fn(&str) -> bool,
+        handlers: Option<&TreeHandlers>,
+        p: &Palette,
+        out: &mut Vec<AnyElement>,
+    ) {
+        for item in items {
+            let item_id = item.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let label = item.get("label").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let detail = item.get("detail").and_then(Value::as_str).map(str::to_owned);
+            let children = item.get("children").and_then(Value::as_array).cloned().unwrap_or_default();
+            let has_children = !children.is_empty();
+            let open = has_children && is_open(&item_id);
+            let action = item.get("action").and_then(Value::as_str).map(str::to_owned);
+            let element_id = SharedString::from(format!("{id}-tree-{item_id}"));
+            let chevron = Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight })
+                .size(px(crate::design::size::ICON_SM))
+                .text_color(p.text_secondary);
+            let content = h_flex()
+                .w_full()
+                .gap(px(space::XS))
+                .items_center()
+                .pl(px(level as f32 * 16.))
+                .child(div().size(px(crate::design::size::ICON_SM)).flex_none().when(has_children, |slot| slot.child(chevron)))
+                .children(icon_of(item).map(|icon| Icon::new(icon).size(px(crate::design::size::ICON_MD)).text_color(p.text_secondary)))
+                .child(div().flex_1().min_w(px(0.)).truncate().text_body().child(label.clone()))
+                .children(detail.clone().map(|detail| div().flex_none().text_caption().text_color(p.text_secondary).child(detail)));
+            let row = match handlers {
+                Some(handlers) if action.is_some() || has_children => {
+                    let (toggle, pick) = (handlers.toggle.clone(), handlers.pick.clone());
+                    let payload = item.get("payload").cloned().unwrap_or(Value::Null);
+                    let target = item_id.clone();
+                    pressable(element_id, p)
+                        .role(Role::TreeItem)
+                        .accessibility_label(label)
+                        .when_some(detail, |row, detail| row.aria_description(detail))
+                        .when(has_children, |row| row.aria_expanded(open))
+                        .relative()
+                        .w_full()
+                        .px(px(space::S))
+                        .py(px(space::XS))
+                        .rounded(px(radius::MD))
+                        .cursor_pointer()
+                        .hover_fill(p, radius::MD, false)
+                        // 有动作的项点了执行动作（展开靠前面的箭头）；没有动作的项点了展开 / 收起。
+                        .on_click(move |_, window, cx| match &action {
+                            Some(action) => pick(action.clone(), payload.clone(), window, cx),
+                            None => toggle(target.clone(), !open, window, cx),
+                        })
+                        .child(content)
+                        .into_any_element()
+                }
+                _ => div()
+                    .id(element_id)
+                    .role(Role::TreeItem)
+                    .aria_label(label)
+                    .when(has_children, |row| row.aria_expanded(open))
+                    .px(px(space::S))
+                    .py(px(space::XS))
+                    .child(content)
+                    .into_any_element(),
+            };
+            // 有动作又有子项的项：前面的箭头单独能点，用来展开 / 收起。
+            let row = match handlers {
+                Some(handlers) if has_children && item.get("action").is_some() => {
+                    let toggle = handlers.toggle.clone();
+                    let target = item_id.clone();
+                    div()
+                        .relative()
+                        .child(row)
+                        .child(
+                            pressable(SharedString::from(format!("{id}-tree-{item_id}-toggle")), p)
+                                .accessibility_label(t!("plugin_page.toggle_item").to_string())
+                                .aria_expanded(open)
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .left(px(level as f32 * 16.))
+                                .w(px(crate::design::size::ICON_SM + space::S * 2.))
+                                .cursor_pointer()
+                                .on_click(move |_, window, cx| toggle(target.clone(), !open, window, cx)),
+                        )
+                        .into_any_element()
+                }
+                _ => row,
+            };
+            out.push(row);
+            if open {
+                rows(&children, level + 1, id, is_open, handlers, p, out);
+            }
+        }
+    }
+    let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut out = Vec::new();
+    rows(&items, 0, id, is_open, handlers, p, &mut out);
+    v_flex().id(SharedString::from(format!("{id}-tree"))).role(Role::Tree).w_full().gap(px(2.)).children(out).into_any_element()
+}
+
+/// 头像：`src` 是图片时画圆形图片，否则写 `text` 的第一个字。`size` 是直径 24 / 32 / 40。
+fn avatar(node: &Value, id: &SharedString, inherited: Option<NodeSize>, p: &Palette) -> Stateful<Div> {
+    let size = NodeSize::of(node, inherited, NodeSize::Medium);
+    let diameter = match size {
+        NodeSize::Small => crate::design::size::CONTROL_XS,
+        NodeSize::Medium => crate::design::size::CONTROL_MD,
+        NodeSize::Large => crate::design::size::CONTROL_LG,
+    };
+    let text = node.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let name = node.get("alt").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| text.clone());
+    let initial: String = text.trim().chars().next().map(|first| first.to_uppercase().collect()).unwrap_or_default();
+    let color = tone_color(node.get("tone").and_then(Value::as_str), p);
+    let circle = div()
+        .id(SharedString::from(format!("{id}-avatar")))
+        .role(Role::Image)
+        .aria_label(name)
+        .size(px(diameter))
+        .flex_none()
+        .rounded_full()
+        .overflow_hidden()
+        .flex()
+        .items_center()
+        .justify_center();
+    match node.get("src").and_then(Value::as_str).and_then(data_image) {
+        // 图片自己也要圆角：外层的 `overflow_hidden` 不裁切图片。
+        Some(image) => circle.child(img(image).size_full().rounded_full().object_fit(ObjectFit::Cover)),
+        None => {
+            let circle = match color {
+                Some(color) => circle.bg(color.opacity(0.15)).text_color(color),
+                None => circle.bg(p.accent_soft).text_color(p.accent),
+            };
+            size.text(circle).font_weight(FontWeight::MEDIUM).child(initial)
+        }
+    }
+}
+
+/// 一组标签：`value` 那个是选中的样子（实底）。有 `on_pick` 时每个标签能点（`action`，`value` 是标签的文字）。
+fn tags(node: &Value, id: &SharedString, on_pick: Option<PickDate>, p: &Palette) -> AnyElement {
+    let items = node.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+    let selected = node.get("value").and_then(Value::as_str);
+    let size = NodeSize::of(node, None, NodeSize::Small);
+    h_flex()
+        .flex_wrap()
+        .gap(px(space::XS))
+        .children(items.into_iter().enumerate().map(|(index, item)| {
+            let text = item.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let is_selected = selected == Some(text.as_str());
+            let tag = badge_view(
+                text.clone(),
+                item.get("tone").and_then(Value::as_str),
+                Some(if is_selected { "solid" } else { "soft" }),
+                icon_of(&item),
+                size,
+                p,
+            );
+            match &on_pick {
+                Some(pick) => {
+                    let pick = pick.clone();
+                    let value = text.clone();
+                    pressable(SharedString::from(format!("{id}-tag-{index}")), p)
+                        .accessibility_label(text)
+                        .aria_selected(is_selected)
+                        .rounded_full()
+                        .cursor_pointer()
+                        .on_click(move |_, window, cx| pick(value.clone(), window, cx))
+                        .child(tag)
+                        .into_any_element()
+                }
+                None => tag.into_any_element(),
+            }
+        }))
+        .into_any_element()
+}
+
+/// 加载占位：几行灰色的条，最后一行短一些。`size` 定行高。
+fn skeleton(node: &Value, inherited: Option<NodeSize>) -> AnyElement {
+    use gpui_kit::component::skeleton::Skeleton;
+    let lines = node.get("lines").and_then(Value::as_u64).unwrap_or(3).clamp(1, 10) as usize;
+    let height = match NodeSize::of(node, inherited, NodeSize::Medium) {
+        NodeSize::Small => 10.,
+        NodeSize::Medium => 14.,
+        NodeSize::Large => 20.,
+    };
+    v_flex()
+        .w_full()
+        .gap(px(space::S))
+        .children((0..lines).map(|index| {
+            let width = if index + 1 == lines && lines > 1 { 0.6 } else { 1. };
+            Skeleton::new().h(px(height)).w(relative(width)).rounded(px(radius::SM))
+        }))
+        .into_any_element()
+}
+
+/// 状态行：一个状态点（`busy` 时是转圈）加一段文字。颜色不单独表达意思：文字本身要说清楚。
+fn status(node: &Value, id: &SharedString, inherited: Option<NodeSize>, p: &Palette) -> Stateful<Div> {
+    use gpui_kit::component::spinner::Spinner;
+    let text = node.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let size = NodeSize::of(node, inherited, NodeSize::Medium);
+    let state = node.get("state").and_then(Value::as_str).unwrap_or("idle");
+    let marker: AnyElement = match state {
+        "busy" => Spinner::new().small().color(p.accent).into_any_element(),
+        state => {
+            let color = match state {
+                "ok" => p.success,
+                "warn" => p.warning,
+                "error" => p.danger,
+                _ => p.text_secondary,
+            };
+            div().size(px(crate::design::size::STATUS_DOT)).flex_none().rounded_full().bg(color).into_any_element()
+        }
+    };
+    h_flex()
+        .id(SharedString::from(format!("{id}-status")))
+        .role(Role::Status)
+        .aria_label(text.clone())
+        .gap(px(space::S))
+        .items_center()
+        .child(marker)
+        .child(size.text(div()).child(text))
 }
 
 /// 解码过的 `data:` 图片，按内容记住最近用过的几张。插件的节点树每帧重建，
