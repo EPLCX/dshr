@@ -12,7 +12,7 @@
 //! - [`presence`] + [`pop`]：浮层（弹窗、菜单、下拉框）的进场。关上时 [`presence`] 直接返回 `None`。
 //! - [`Highlight`]：悬停、按下、选中的底色，画在控件的最底层。
 //! - [`tween`]：一个数值（不透明度、角度）的过渡。[`turn`] 用它转动展开箭头。
-//! - [`spinner`] / [`typing_dots`]：只用在图标和小圆点上。GPUI 只能变换 SVG 和图片，
+//! - [`spinner`]：只用在图标上。GPUI 只能变换 SVG 和图片，
 //!   不能缩放、旋转整块内容。
 //!
 //! GPUI 没有图层合成：`opacity` 按每个图元分别相乘。带阴影的浮层淡入时，阴影会先于卡片显出来、
@@ -24,7 +24,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::base::motion::{Easing, Presence, PresencePhase, Transition, TransitionId};
-use gpui_kit::component::{Icon, IconName, h_flex};
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::*;
 
 // ---- 时长、位移 ----
@@ -639,24 +639,6 @@ pub fn spinner(id: impl Into<ElementId>, icon_size: f32, color: Hsla) -> Animati
     )
 }
 
-/// 正在回复、还没有文字时的三个点：依次亮起。减少动态效果时三个点一样淡，读作“…”。
-pub fn typing_dots(color: Hsla) -> Div {
-    h_flex().h(px(24.)).gap(px(NUDGE)).items_center().children((0..3).map(move |index| {
-        div().size(px(6.)).rounded_full().bg(color).with_animation(
-            ("typing-dot", index),
-            Animation::new(Duration::from_millis(1200)).repeat_synced().with_max_fps(LOOP_FPS),
-            move |dot, t| dot.opacity(pulse(t, index)),
-        )
-    }))
-}
-
-/// 第 `index` 个点在 `t` 时的不透明度。`t = 0`（也就是减少动态效果时）三个点一样。
-fn pulse(t: f32, index: usize) -> f32 {
-    let x = (t - index as f32 * 0.2).rem_euclid(1.);
-    let bump = if x < 0.6 { (PI * x / 0.6).sin() } else { 0. };
-    0.35 + 0.65 * bump
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -665,7 +647,7 @@ mod tests {
     use gpui::TestAppContext;
     use gpui_kit::{AnyWindowHandle, AppContext as _, Context, Entity, IntoElement, Render, Window, div};
 
-    use super::{BASE, FAST, Phase, SLOW, enter, presence, pulse, standard};
+    use super::{BASE, FAST, Phase, SLOW, enter, presence, standard};
 
     /// 每次渲染记下 [`presence`] 的结果。
     struct Host {
@@ -773,12 +755,5 @@ mod tests {
             assert!((0. ..=1.).contains(&visibility));
         }
         assert_eq!(Phase::SETTLED.visibility(), 1.);
-    }
-
-    #[test]
-    fn dots_look_the_same_when_still() {
-        let still: Vec<f32> = (0..3).map(|index| pulse(0., index)).collect();
-        assert!(still.iter().all(|value| close(*value, still[0])));
-        assert!((0..3).all(|index| (0..=10).map(|step| pulse(step as f32 / 10., index)).fold(0., f32::max) > 0.9));
     }
 }

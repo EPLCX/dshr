@@ -35,7 +35,9 @@ use crate::design::{
     mono_font, motion, palette, pressable, radius, readable_with_id, size, space, truncated, with_focus_ring,
 };
 use crate::plugin::{ComposerControl, PanelContext, UiRegistry};
-use crate::transcript::{PluginViewResolver, Row, ToolRow, ToolStatus, Transcript, TurnFooter, tail_lines};
+use crate::transcript::{
+    Activity, PluginViewResolver, Row, Thought, ToolRow, ToolStatus, Transcript, TurnFooter, WorkGroup, WorkItem, tail_lines,
+};
 
 /// 图片附件气泡的图标（完整 Lucide 目录在 `gpui_kit::assets`，组件兼容枚举里没有图片图标）。
 const IMAGE_ICON: gpui_kit::assets::IconName = gpui_kit::assets::IconName::Image;
@@ -238,6 +240,8 @@ pub struct ConversationView {
     session_id: Option<String>,
     /// 正在后台读 `session_id` 的日志（见 [`Self::open_session`]）。
     loading: bool,
+    /// 列表末尾现在有没有状态行（见 `sync_rows`）。
+    status_row: bool,
     transcript: Transcript,
     /// 消息列表的虚拟化状态：只有看得见的行会被渲染，行数与 `transcript.rows` 保持一致（[`Self::sync_rows`]）。
     list: Entity<MessageScrollerState>,
@@ -378,6 +382,7 @@ impl ConversationView {
             session: None,
             session_id: None,
             loading: false,
+            status_row: false,
             transcript,
             ui,
             list,
@@ -431,6 +436,10 @@ impl ConversationView {
     /// 每次改动 `self.transcript` 之后调用。
     fn sync_rows(&mut self, cx: &mut Context<Self>) {
         let rows = self.transcript.rows.len();
+        // 运行期间列表末尾多一项：加载图标和实时状态（见 `render_status_row`）。
+        let status_row = self.is_running();
+        let had_status_row = std::mem::replace(&mut self.status_row, status_row);
+        let items = rows + usize::from(status_row);
         let dirty = self.transcript.take_dirty();
         self.last_message_row = self.transcript.rows.iter().rposition(is_message);
         // 行没了（换会话、重新载入）就丢掉它们的焦点句柄和位置。
@@ -439,9 +448,11 @@ impl ConversationView {
         self.row_bounds.borrow_mut().retain(|index, _| *index < rows);
         self.list.update(cx, |list, cx| {
             let known = list.item_count();
-            let kept = known.min(rows);
-            if known != rows {
-                list.splice(kept..known, rows - kept, cx);
+            // 原来的状态行不算已知的记录行：先去掉它，记录行对齐之后再按需要放回最后。
+            // 不然新加的记录行会接手它的下标和量好的高度。
+            let kept = known.saturating_sub(usize::from(had_status_row)).min(rows);
+            if known != items || had_status_row != status_row || (status_row && kept < rows) {
+                list.splice(kept..known, items - kept, cx);
             }
             for index in dirty.into_iter().filter(|index| *index < kept) {
                 list.remeasure_items(index..index + 1, cx);
@@ -513,7 +524,7 @@ impl ConversationView {
 
     /// 有工具调用在等用户审批。
     pub fn needs_attention(&self) -> bool {
-        self.transcript.rows.iter().any(|row| matches!(row, Row::Tool(tool) if tool.awaiting_approval()))
+        self.transcript.pending_approval().is_some()
     }
 
     /// 设置保存后刷新：当前模型被删掉时回到默认模型，并更新随语言变化的占位文字。
@@ -1231,6 +1242,7 @@ impl ConversationView {
         self.ui_event_sink = Some(event_tx.clone());
         let cancel = CancellationToken::new();
         self.cancel = Some(cancel.clone());
+        self.sync_rows(cx);
         self.steer = Some(steer);
         self.steered.clear();
 
@@ -1400,6 +1412,7 @@ impl ConversationView {
             let result = turn.await;
             this.update(cx, |this, cx| {
                 this.cancel = None;
+                this.sync_rows(cx);
                 this.finish_steering();
                 let mut continue_queue = false;
                 match result {
@@ -1465,6 +1478,7 @@ impl ConversationView {
             cancel.cancel();
             // 还没被取走的插队消息不会再被接进这一轮：现在就放回排队，免得停止后又被当成插队。
             self.finish_steering();
+            self.sync_rows(cx);
             // 立即退出“运行中”：停止按钮马上变回发送按钮、Esc/队列等不再被当成运行中；
             // 后台那一轮随后照常收尾（写 turn/end、恢复会话），不再动 self.cancel。
             cx.notify();
@@ -2978,7 +2992,7 @@ impl ConversationView {
     /// 只是猜：猜错了（比如分叉按钮正好不可用）就接着找下一行。
     fn row_may_have_tab_stop(&self, index: usize) -> bool {
         match self.transcript.rows.get(index) {
-            Some(Row::Tool(_) | Row::TurnFooter { .. } | Row::Ext(_) | Row::Plugin { .. }) => true,
+            Some(Row::Work(_) | Row::TurnFooter { .. } | Row::Ext(_) | Row::Plugin { .. }) => true,
             Some(row) if is_message(row) => {
                 let stop = self.current_message.filter(|current| *current < self.transcript.rows.len());
                 stop.map_or(self.last_message_row == Some(index), |stop| stop == index)
@@ -3179,8 +3193,11 @@ impl ConversationView {
         {
             self.rows_rendered += 1;
         }
-        // 列表的行数在 `sync_rows` 里与记录对齐；万一不一致，多出来的行画成空的。
+        // 列表的行数在 `sync_rows` 里与记录对齐；运行期间多出来的最后一行是状态行，其余万一不一致的画成空的。
         let Some(row) = self.transcript.rows.get(index) else {
+            if index == self.transcript.rows.len() && self.is_running() {
+                return self.render_status_row(cx);
+            }
             return div().into_any_element();
         };
         // 读屏软件没连着时不拼名称：回复的名称是去掉 Markdown 标记的全文，正在输出的那一行每一帧都要重算一遍，
@@ -3335,18 +3352,18 @@ impl ConversationView {
                 })
                 .into_any_element(),
             // 正在输出的那一行文本每帧都在变；纯文本在事件到达时已经算好（见 `Transcript::apply`）。
-            Row::Streaming { text, thinking, .. } => {
+            Row::Streaming { text, .. } => {
                 // 纯文本只给读屏软件用：没连着时不算（流式输出时每帧都得重算整段）。
                 let plain = (!text.is_empty())
                     .then(|| if window.is_a11y_active() { row.plain().map(SharedString::from) } else { Some(SharedString::default()) })
                     .flatten();
-                self.render_reply(index, thinking.clone().into(), text.clone().into(), plain, true, &p)
+                self.render_reply(index, text.clone().into(), plain)
             }
-            Row::Assistant { text, thinking, .. } => {
+            Row::Assistant { text, .. } => {
                 let plain = if window.is_a11y_active() { row.plain().map(SharedString::from) } else { Some(SharedString::default()) };
-                self.render_reply(index, thinking.clone().into(), text.clone().into(), plain, false, &p)
+                self.render_reply(index, text.clone().into(), plain)
             }
-            Row::Tool(tool) => self.render_tool(index, tool, window, cx),
+            Row::Work(group) => self.render_work_group(index, group, window, cx),
             Row::Notice { text, error } => {
                 // 同样的提示可能出现多次（如多次压缩），按行号给 id。
                 let tone = if *error { Tone::Danger } else { Tone::Neutral };
@@ -3363,50 +3380,156 @@ impl ConversationView {
         }
     }
 
-    /// 一条回复：思考（次要色、左侧竖线）加 Markdown 正文。`plain` 是给读屏软件的纯文本。
-    fn render_reply(
-        &self,
-        index: usize,
-        thinking: SharedString,
-        text: SharedString,
-        plain: Option<SharedString>,
-        streaming: bool,
-        p: &crate::design::Palette,
-    ) -> AnyElement {
-        let mut column = v_flex().gap(px(space::S));
-        if !thinking.is_empty() {
-            column = column.child(
-                div()
-                    .pl(px(space::M))
-                    .border_l_2()
-                    .border_color(p.border)
-                    .text_body()
-                    .text_color(p.text_secondary)
-                    .child(readable_with_id(("thinking", index), thinking)),
-            );
-        }
+    /// 一条回复的 Markdown 正文。`plain` 是给读屏软件的纯文本。思考与工具调用在单独的分组里
+    /// （见 `render_work_group`），还没有文字时由列表末尾的状态行表示“正在进行”。
+    fn render_reply(&self, index: usize, text: SharedString, plain: Option<SharedString>) -> AnyElement {
         match plain {
             // Markdown 视图本身不进入无障碍树，外层给读屏软件一份去掉标记的纯文本。
-            Some(plain) if !text.is_empty() => {
-                column = column.child(
-                    div()
-                        .id(("assistant-reply", index))
-                        .role(Role::Label)
-                        .aria_value(plain)
-                        .text_content()
-                        .child(TextView::markdown(("assistant", index), text)),
-                );
+            Some(plain) if !text.is_empty() => div()
+                .id(("assistant-reply", index))
+                .role(Role::Label)
+                .aria_value(plain)
+                .text_content()
+                .child(TextView::markdown(("assistant", index), text))
+                .into_any_element(),
+            _ => div().into_any_element(),
+        }
+    }
+
+    /// 运行期间常驻在消息列表末尾的一行：加载图标，右边是实时状态（思考中、正在执行某个工具、等待审批……）。
+    fn render_status_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let label = self.status_label();
+        div()
+            .w_full()
+            .max_w(px(size::CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .px(px(space::XXL))
+            .child(
+                h_flex()
+                    .id("working-status")
+                    .role(Role::Status)
+                    .aria_label(label.clone())
+                    .min_h(px(size::LIST_ITEM))
+                    .gap(px(space::S))
+                    .items_center()
+                    .text_caption()
+                    .text_color(p.text_secondary)
+                    .child(motion::spinner("working-spinner", size::ICON_SM, p.text_secondary))
+                    .child(div().min_w(px(0.)).truncate().child(label)),
+            )
+            .into_any_element()
+    }
+
+    /// 状态行的文字：等审批优先，否则按 [`Activity`]。
+    fn status_label(&self) -> String {
+        if self.transcript.pending_approval().is_some() {
+            return t!("status.approval").to_string();
+        }
+        match self.transcript.activity() {
+            Activity::Waiting => t!("status.waiting").to_string(),
+            Activity::Thinking => t!("status.thinking").to_string(),
+            Activity::Writing => t!("status.writing").to_string(),
+            Activity::Tool(name) => {
+                let tool = tool_description(name).unwrap_or_else(|| name.to_string());
+                t!("status.tool", tool = tool).to_string()
             }
-            // 还没有文字：三个点依次亮起（减少动态效果时是三个一样淡的点）。读屏软件读“正在回复”。
-            _ if streaming => {
-                column = column.child(motion::typing_dots(p.text_secondary));
-            }
-            _ => {}
+            Activity::Retrying(attempt) => t!("status.retrying", attempt = attempt).to_string(),
+        }
+    }
+
+    /// 一段连续的思考与工具调用：收起时是一行摘要（“思考过程 · 3 次工具调用”），点开后逐项列出。
+    fn render_work_group(&self, index: usize, group: &WorkGroup, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let tools = group.tools().count();
+        let thought = group.items.iter().any(|item| matches!(item, WorkItem::Thinking(_)));
+        let title = match (thought, tools) {
+            (_, 0) => t!("work.thinking").to_string(),
+            (false, count) => t!("work.tools", count = count).to_string(),
+            (true, count) => t!("work.thinking_and_tools", count = count).to_string(),
+        };
+        // 摘要右边的小圆点：等审批、有失败的调用时提醒一下，不用展开也看得到。
+        let tone = if group.awaiting_approval() {
+            Some(Tone::Warning)
+        } else if group.has_error() {
+            Some(Tone::Danger)
+        } else {
+            None
+        };
+        // 收起时显示最近一次调用做了什么，一眼看出这一段停在哪里。
+        let latest = (!group.expanded)
+            .then(|| group.tools().next_back())
+            .flatten()
+            .map(|tool| tool_description(&tool.name).unwrap_or_else(|| tool.name.to_string()));
+        let header = pressable(("work-header", index), &p)
+            .accessibility_label(title.clone())
+            .aria_expanded(group.expanded)
+            .rounded(px(radius::LG))
+            .flex()
+            .items_center()
+            .gap(px(space::XS))
+            .px(px(space::S))
+            .min_h(px(size::LIST_ITEM))
+            .cursor_pointer()
+            .relative()
+            .hover_fill(&p, radius::LG, false)
+            .text_caption()
+            .row_color(p.text_secondary, &p)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let expanded = this.transcript.toggle_group(index);
+                this.sync_rows(cx);
+                // 展开后变高，列表停在底部时刚点的标题可能被顶出视口：改为停在这一组上。
+                if expanded {
+                    this.list.update(cx, |list, cx| {
+                        if list.is_following_tail() {
+                            list.scroll_to_item(index, cx);
+                        }
+                    });
+                }
+                cx.notify();
+            }))
+            .child(div().flex_none().child(title))
+            .when_some(latest, |header, latest| {
+                header.child(div().flex_none().child("·")).child(div().min_w(px(0.)).truncate().child(latest))
+            })
+            .children(tone.map(|tone| div().size(px(size::STATUS_DOT)).flex_none().rounded_full().bg(tone.color(&p))))
+            .child(motion::turn(
+                Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)).row_color(p.text_secondary, &p),
+                ("work-turn", index),
+                group.expanded,
+                motion::QUARTER_TURN,
+                window,
+                cx,
+            ));
+        // 标题只占自己的宽度（悬停底色贴着文字）；展开的内容撑满整行，减去左边的缩进。
+        let mut column = v_flex().gap(px(space::XS)).child(h_flex().child(header));
+        if group.expanded {
+            let items = group.items.iter().enumerate().map(|(item, entry)| match entry {
+                WorkItem::Thinking(thought) => div()
+                    .w_full()
+                    .text_body()
+                    .text_color(p.text_secondary)
+                    .child(readable_with_id(
+                        SharedString::from(format!("thinking-{index}-{item}")),
+                        match thought {
+                            // 定稿的思考共用事件里的文本；流式中的每帧拷一份（只在展开时）。
+                            Thought::Done(text) => SharedString::from(text.clone()),
+                            Thought::Live(_) => SharedString::from(thought.text().to_owned()),
+                        },
+                    ))
+                    .into_any_element(),
+                WorkItem::Tool(tool) => div().w_full().child(self.render_tool(index, item, tool, window, cx)).into_any_element(),
+            });
+            column = column
+                .child(v_flex().gap(px(space::S)).ml(px(space::S)).pl(px(space::M)).border_l_2().border_color(p.border).children(items));
         }
         column.into_any_element()
     }
 
-    fn render_tool(&self, index: usize, tool: &ToolRow, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// 分组（第 `index` 行）里第 `item` 项工具调用的卡片。
+    fn render_tool(&self, index: usize, item: usize, tool: &ToolRow, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // 同一行里有多张卡片：元素 id 带上组内下标。
+        let id = |name: &str| SharedString::from(format!("{name}-{index}-{item}"));
         let p = palette(cx);
         let mono = mono_font(cx);
         let (status, tone) = match &tool.status {
@@ -3433,7 +3556,7 @@ impl ConversationView {
         let toggle_id = tool.call_id.clone();
         // 运行结束后标题才能展开、折叠输出；读屏软件读出状态，并把参数作为补充说明。
         let expandable = matches!(tool.status, ToolStatus::Done { .. });
-        let header = pressable(("tool-header", index), &p)
+        let header = pressable(id("tool-header"), &p)
             .accessibility_label(match tool_description(&tool.name) {
                 Some(desc) => format!("{} {}", desc, status),
                 None => format!("{} {}", tool.name, status),
@@ -3487,7 +3610,7 @@ impl ConversationView {
             .when(expandable, |header| {
                 header.child(motion::turn(
                     Icon::new(IconName::ChevronRight).size(px(size::ICON_SM)).row_color(p.text_secondary, &p),
-                    ("tool-turn", index),
+                    id("tool-turn"),
                     tool.expanded,
                     motion::QUARTER_TURN,
                     window,
@@ -3510,7 +3633,7 @@ impl ConversationView {
         if !tool.images.is_empty() {
             let thumbnails = tool.images.iter().enumerate().map(|(image_index, image)| {
                 div()
-                    .id(SharedString::from(format!("tool-image-{index}-{image_index}")))
+                    .id(SharedString::from(format!("tool-image-{index}-{item}-{image_index}")))
                     .role(Role::Image)
                     .aria_label(t!("tool.image", index = image_index + 1).to_string())
                     .child(img(image.clone()).max_w_full().w(px(160.)))
@@ -3527,7 +3650,7 @@ impl ConversationView {
                     .py(px(space::S))
                     .bg(p.sunken)
                     .text_mono(mono.clone())
-                    .child(readable_with_id(("live-output", index), tail)),
+                    .child(readable_with_id(id("live-output"), tail)),
             );
             tool_card = tool_card.child(live);
         }
@@ -3536,15 +3659,15 @@ impl ConversationView {
         if tool.expanded
             && let ToolStatus::Done { output, .. } = &tool.status
         {
-            let body = div().id(("tool-output", index)).max_h(px(320.)).overflow_y_scroll().bg(p.sunken).text_mono(mono);
+            let body = div().id(id("tool-output")).max_h(px(320.)).overflow_y_scroll().bg(p.sunken).text_mono(mono);
             let plugin_body = plugin_card
                 .and_then(|card| card.body.as_ref())
-                .map(|tree| crate::plugin_page::static_tree(tree, &format!("tool-card-{index}"), cx));
+                .map(|tree| crate::plugin_page::static_tree(tree, &format!("tool-card-{index}-{item}"), cx));
             // 界面插件画的输出（如 diff）自己管左右留白：着色的行要铺满整行宽度。
             let body = match (plugin_body, tool_view.as_ref().and_then(|view| view.render_output(tool, cx))) {
                 (Some(content), _) => body.child(div().px(px(space::M)).py(px(space::S)).child(content)),
                 (None, Some(content)) => body.child(content),
-                (None, None) => body.px(px(space::M)).py(px(space::S)).child(readable_with_id("output", output.clone())),
+                (None, None) => body.px(px(space::M)).py(px(space::S)).child(readable_with_id(id("output"), output.clone())),
             };
             tool_card = tool_card.child(v_flex().child(divider(&p)).child(body));
         }
@@ -4545,7 +4668,6 @@ mod menu_tests {
             view.update(cx, |view, cx| {
                 view.transcript.rows.push(super::Row::Assistant {
                     text: "第一段 **加粗** 的正文。\n\n第二段正文，比较长一些，用来点在中间。".into(),
-                    thinking: "先想一想。".into(),
                     plain: Default::default(),
                 });
                 view.sync_rows(cx);
@@ -4555,7 +4677,7 @@ mod menu_tests {
         draw(cx, fixture.window);
         draw(cx, fixture.window);
         let bounds = cx.update(|cx| view.read(cx).row_bounds.borrow().get(&0).copied()).unwrap();
-        // 点在正文（可选择文字的 Markdown）上，而不是思考那一段。
+        // 点在正文（可选择文字的 Markdown）上。
         let position = gpui_kit::point(bounds.center().x, bounds.bottom() - px(20.));
         cx.update_window(fixture.window, |_, window, cx| {
             window.dispatch_event(
@@ -4639,6 +4761,56 @@ mod menu_tests {
             assert!(in_input && !on_message, "焦点应该留在输入框");
         }
         assert!(!cx.update(|cx| view.read(cx).shows_home()), "已经换成对话页");
+    }
+
+    /// 运行期间列表末尾常驻一行状态：记录行增加时它留在最后，结束后去掉。
+    #[gpui::test]
+    fn status_row_stays_last_while_running(cx: &mut TestAppContext) {
+        let fixture = open(cx, 1);
+        let view = fixture.view.clone();
+        let counts = |cx: &mut TestAppContext| {
+            cx.update(|cx| {
+                let view = view.read(cx);
+                (view.transcript.rows.len(), view.list.read(cx).item_count())
+            })
+        };
+        step(cx, fixture.window, |_, cx| {
+            view.update(cx, |view, cx| {
+                view.session_id = Some("test".into());
+                view.cancel = Some(tokio_util::sync::CancellationToken::new());
+                view.transcript.rows.push(super::Row::User { text: "你好".into(), attachments: Vec::new() });
+                view.sync_rows(cx);
+                cx.notify();
+            })
+        });
+        draw(cx, fixture.window);
+        assert_eq!(counts(cx), (1, 2));
+        assert_eq!(cx.update(|cx| view.read(cx).status_label()), rust_i18n::t!("status.waiting").to_string());
+
+        // 工具调用进了分组：状态行仍在最后，文字跟着变。
+        step(cx, fixture.window, |_, cx| {
+            view.update(cx, |view, cx| {
+                let call =
+                    dshr_core::EventBody::ToolCall { call_id: "c".into(), name: "read_file".into(), input: serde_json::json!({}).into() };
+                view.transcript.apply(&dshr_agent::LiveEvent::Durable(Arc::new(dshr_core::SessionEvent { seq: 1, time: 0, body: call })));
+                view.sync_rows(cx);
+                cx.notify();
+            })
+        });
+        draw(cx, fixture.window);
+        assert_eq!(counts(cx), (2, 3));
+        let tool = super::tool_description("read_file").unwrap();
+        assert_eq!(cx.update(|cx| view.read(cx).status_label()), rust_i18n::t!("status.tool", tool = tool).to_string());
+
+        step(cx, fixture.window, |_, cx| {
+            view.update(cx, |view, cx| {
+                view.cancel = None;
+                view.sync_rows(cx);
+                cx.notify();
+            })
+        });
+        draw(cx, fixture.window);
+        assert_eq!(counts(cx), (2, 2));
     }
 
     #[gpui::test]

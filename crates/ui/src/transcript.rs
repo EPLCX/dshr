@@ -29,21 +29,20 @@ pub enum Row {
         text: Arc<str>,
         attachments: Vec<Arc<str>>,
     },
-    /// 模型正在输出的回复：文本还在变，每来一个增量追加一次。
+    /// 模型正在输出的回复正文：文本还在变，每来一个增量追加一次。
     /// 纯文本（给读屏软件）在要用时才算，文本没变就沿用上次的结果，见 [`Row::plain`]。
     Streaming {
         text: String,
-        thinking: String,
         plain: PlainText,
     },
-    /// 定稿的回复。文本与思考直接共用事件里的 `Arc<str>`（只有一个文本块时不拷贝）；
+    /// 定稿的回复正文。直接共用事件里的 `Arc<str>`（只有一个文本块时不拷贝）；
     /// 去掉 Markdown 标记的纯文本同样在要用时才算。
     Assistant {
         text: Arc<str>,
-        thinking: Arc<str>,
         plain: PlainText,
     },
-    Tool(ToolRow),
+    /// 一段连续的思考与工具调用，默认收起成一行；正文不在里面（见 [`WorkGroup`]）。
+    Work(WorkGroup),
     Notice {
         text: Arc<str>,
         error: bool,
@@ -79,8 +78,8 @@ pub struct ExtRow {
 }
 
 impl Row {
-    fn assistant(text: Arc<str>, thinking: Arc<str>) -> Self {
-        Self::Assistant { text, thinking, plain: PlainText::default() }
+    fn assistant(text: Arc<str>) -> Self {
+        Self::Assistant { text, plain: PlainText::default() }
     }
 
     /// 回复的纯文本（去掉 Markdown 标记，给读屏软件、复制用）；不是回复的行为 `None`。
@@ -96,6 +95,89 @@ impl Row {
     fn notice(text: impl Into<Arc<str>>, error: bool) -> Self {
         Self::Notice { text: text.into(), error }
     }
+}
+
+/// 一段连续的思考与工具调用（[`Row::Work`]）。思考或工具调用到来时，末尾已经是这样一组就接着往里放，
+/// 否则新开一组；回复正文总是组外单独的一行，所以记录里是“分组、正文、分组、正文”交替出现。
+#[derive(Debug, Default)]
+pub struct WorkGroup {
+    pub items: Vec<WorkItem>,
+    /// 展开后逐项列出思考与工具卡片；默认收起。
+    pub expanded: bool,
+}
+
+#[derive(Debug)]
+pub enum WorkItem {
+    Thinking(Thought),
+    Tool(ToolRow),
+}
+
+/// 一段思考：流式输出时逐段追加，最终消息到达（或一轮结束）时定稿。
+#[derive(Debug)]
+pub enum Thought {
+    Live(String),
+    Done(Arc<str>),
+}
+
+impl Thought {
+    pub fn text(&self) -> &str {
+        match self {
+            Thought::Live(text) => text,
+            Thought::Done(text) => text,
+        }
+    }
+
+    fn is_live(&self) -> bool {
+        matches!(self, Thought::Live(_))
+    }
+}
+
+impl WorkGroup {
+    /// 组里的工具调用。
+    pub fn tools(&self) -> impl DoubleEndedIterator<Item = &ToolRow> {
+        self.items.iter().filter_map(|item| match item {
+            WorkItem::Tool(tool) => Some(tool),
+            WorkItem::Thinking(_) => None,
+        })
+    }
+
+    /// 还在进行：有正在输出的思考或还在运行的工具。
+    pub fn is_active(&self) -> bool {
+        self.items.iter().any(|item| match item {
+            WorkItem::Thinking(thought) => thought.is_live(),
+            WorkItem::Tool(tool) => tool.status == ToolStatus::Running,
+        })
+    }
+
+    pub fn awaiting_approval(&self) -> bool {
+        self.tools().any(ToolRow::awaiting_approval)
+    }
+
+    /// 有没有失败的工具调用。
+    pub fn has_error(&self) -> bool {
+        self.tools().any(|tool| matches!(tool.status, ToolStatus::Done { is_error: true, .. }))
+    }
+
+    /// 去掉还没定稿的思考（被最终消息取代或因重试作废）；返回第一段原来所在的位置。
+    fn drop_live_thoughts(&mut self) -> Option<usize> {
+        let first = self.items.iter().position(|item| matches!(item, WorkItem::Thinking(thought) if thought.is_live()));
+        self.items.retain(|item| !matches!(item, WorkItem::Thinking(thought) if thought.is_live()));
+        first
+    }
+}
+
+/// 正在做什么，显示在消息列表末尾的状态行里（运行期间常驻）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Activity {
+    /// 等模型回应（刚发出请求、工具都跑完了）。
+    #[default]
+    Waiting,
+    Thinking,
+    Writing,
+    /// 正在执行的工具（名称）。
+    Tool(Arc<str>),
+    /// 请求失败，第几次重试。
+    Retrying(u32),
 }
 
 #[derive(Debug)]
@@ -292,9 +374,10 @@ pub struct Transcript {
     /// 没有界面插件认领的事件和工具，JS 插件给它们画的东西：在后台算好（见 [`PluginViewResolver`]），
     /// 事件到达时取走。
     views: PluginViews,
-    /// 工具调用号 → 行下标：工具输出增量很高频，不能每次都从头扫一遍行。
-    /// 行只往后追加（`drop_streaming` 只弹末尾的流式行，下标不会动），所以存下标是安全的。
-    tools: std::collections::HashMap<String, usize>,
+    /// 工具调用号 → (行下标, 组内下标)：工具输出增量很高频，不能每次都从头扫一遍行。
+    /// 行只往后追加（`drop_streaming` 只弹末尾的流式行），组内只在末尾的组里删掉未定稿的思考，
+    /// 位置变了时查找会核对调用号、对不上就整表扫，所以存下标是安全的。
+    tools: std::collections::HashMap<String, (usize, usize)>,
     /// 内容变过、还没告诉界面的行。界面只渲染看得见的行，行高变了要靠它通知列表重新测量。
     dirty: Vec<usize>,
     /// 这之前的行都已经定稿（上一轮结束时处理过）：轮次结束时只看这之后的行，
@@ -303,6 +386,8 @@ pub struct Transcript {
     /// 正在进行的这一轮从哪一行开始、到现在用了多少 tokens（结束时写进 [`TurnFooter`]）。
     turn_start: usize,
     turn_tokens: u64,
+    /// 正在做什么（状态行）。
+    activity: Activity,
 }
 
 impl std::fmt::Debug for Transcript {
@@ -373,6 +458,11 @@ impl Transcript {
         }
     }
 
+    /// 正在做什么，状态行据此显示（只在运行期间有意义）。
+    pub fn activity(&self) -> &Activity {
+        &self.activity
+    }
+
     /// 界面自己加的一行提示（不进日志），如“由插件 X 发送”。
     pub fn notice(&mut self, text: impl Into<Arc<str>>) {
         self.push(Row::notice(text, false));
@@ -390,12 +480,49 @@ impl Transcript {
         }
     }
 
+    /// 末尾那一组里去掉还没定稿的思考，组空了就整行去掉；返回第一段原来的位置。
+    fn drop_live_thoughts(&mut self) -> Option<usize> {
+        let index = self.rows.len().checked_sub(1)?;
+        let Some(Row::Work(group)) = self.rows.last_mut() else { return None };
+        let first = group.drop_live_thoughts()?;
+        if group.items.is_empty() {
+            self.rows.pop();
+        } else {
+            self.mark(index);
+        }
+        Some(first)
+    }
+
+    /// 末尾的思考与工具分组，没有则新开一组。返回 (行下标, 分组)。
+    fn work_group(&mut self) -> (usize, &mut WorkGroup) {
+        if matches!(self.rows.last(), Some(Row::Work(_))) {
+            self.mark(self.rows.len() - 1);
+        } else {
+            self.push(Row::Work(WorkGroup::default()));
+        }
+        let index = self.rows.len() - 1;
+        match self.rows.last_mut() {
+            Some(Row::Work(group)) => (index, group),
+            _ => unreachable!("刚刚确保了末尾是分组"),
+        }
+    }
+
     pub fn apply(&mut self, event: &LiveEvent) {
         match event {
             LiveEvent::Durable(event) => self.apply_durable(event),
             // 纯文本不在这里算：每个增量都把整段重算一遍，长回复就是平方级的开销；渲染时按需算（见 `Row::plain`）。
-            LiveEvent::Chunk(Chunk::Text(delta)) => self.streaming_row().0.push_str(delta),
-            LiveEvent::Chunk(Chunk::Thinking(delta)) => self.streaming_row().1.push_str(delta),
+            LiveEvent::Chunk(Chunk::Text(delta)) => {
+                self.activity = Activity::Writing;
+                self.streaming_row().push_str(delta);
+            }
+            LiveEvent::Chunk(Chunk::Thinking(delta)) => {
+                self.activity = Activity::Thinking;
+                let (_, group) = self.work_group();
+                match group.items.last_mut() {
+                    Some(WorkItem::Thinking(Thought::Live(text))) => text.push_str(delta),
+                    _ => group.items.push(WorkItem::Thinking(Thought::Live(delta.clone()))),
+                }
+            }
             LiveEvent::Chunk(Chunk::ToolOutput { call_id, text }) => {
                 if let Some(row) = self.tool_mut(call_id) {
                     row.live.push_str(text);
@@ -417,7 +544,9 @@ impl Transcript {
             EventBody::TurnStart { .. } => {
                 self.turn_start = self.rows.len();
                 self.turn_tokens = 0;
+                self.activity = Activity::Waiting;
             }
+            EventBody::StepStart { .. } => self.activity = Activity::Waiting,
             EventBody::UserMessage { text } => self.push(Row::User { text: text.clone(), attachments: Vec::new() }),
             EventBody::UserAttachment { path, .. } => {
                 if let Some(Row::User { attachments, .. }) = self.rows.last_mut() {
@@ -437,14 +566,22 @@ impl Transcript {
                     ContentBlock::Thinking { thinking, .. } => Some(thinking),
                     _ => None,
                 });
-                // 以最终消息为准，覆盖流式拼出来的内容。
+                // 以最终消息为准，覆盖流式拼出来的内容：正文行换成定稿的，分组里的思考也换成定稿的。
                 self.drop_streaming();
-                if !text.is_empty() || !thinking.is_empty() {
-                    self.push(Row::assistant(text, thinking));
+                let at = self.drop_live_thoughts();
+                if !thinking.is_empty() {
+                    let (_, group) = self.work_group();
+                    let at = at.unwrap_or(group.items.len()).min(group.items.len());
+                    group.items.insert(at, WorkItem::Thinking(Thought::Done(thinking)));
+                }
+                if !text.is_empty() {
+                    self.push(Row::assistant(text));
                 }
             }
             EventBody::AssistantAttempt { attempt, error } => {
                 self.drop_streaming();
+                self.drop_live_thoughts();
+                self.activity = Activity::Retrying(*attempt);
                 self.push(Row::notice(t!("notice.retry", attempt = attempt, error = error), true));
             }
             EventBody::ToolCall { call_id, name, input } => {
@@ -456,7 +593,8 @@ impl Transcript {
                         return;
                     }
                 }
-                self.push(Row::Tool(ToolRow {
+                self.activity = Activity::Tool(name.as_str().into());
+                let tool = ToolRow {
                     call_id: call_id.clone(),
                     name: name.as_str().into(),
                     input: preview(&json_prefix(input, INPUT_PREVIEW_CHARS * 4)).into(),
@@ -469,8 +607,11 @@ impl Transcript {
                     live: String::new(),
                     data: None,
                     images: Vec::new(),
-                }));
-                self.tools.insert(call_id.clone(), self.rows.len() - 1);
+                };
+                let (index, group) = self.work_group();
+                group.items.push(WorkItem::Tool(tool));
+                let item = group.items.len() - 1;
+                self.tools.insert(call_id.clone(), (index, item));
             }
             EventBody::ToolResult { call_id, output, is_error } => {
                 let ui = self.ui.clone();
@@ -492,6 +633,15 @@ impl Transcript {
                     // 结果到了，实时输出不再显示，不必继续占着内存。
                     row.live = String::new();
                 }
+                // 同一组里还有在跑的工具（并行的只读调用）就显示它，否则回到等模型。
+                self.activity = match self.rows.last() {
+                    Some(Row::Work(group)) => group
+                        .tools()
+                        .rev()
+                        .find(|tool| tool.status == ToolStatus::Running)
+                        .map_or(Activity::Waiting, |tool| Activity::Tool(tool.name.clone())),
+                    _ => Activity::Waiting,
+                };
             }
             EventBody::Ext { kind, data } if kind == dshr_core::MEDIA_IMAGES => {
                 let call_id = data.get("call_id").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
@@ -535,17 +685,29 @@ impl Transcript {
         for index in self.settled.min(self.rows.len())..self.rows.len() {
             let changed = match &mut self.rows[index] {
                 // 没等到最终消息的半截回复（出错时）：按已收到的内容定稿。
-                Row::Streaming { text, thinking, .. } => {
-                    self.rows[index] = Row::assistant(std::mem::take(text).into(), std::mem::take(thinking).into());
+                Row::Streaming { text, .. } => {
+                    self.rows[index] = Row::assistant(std::mem::take(text).into());
                     true
                 }
-                Row::Tool(tool) if tool.status == ToolStatus::Running => {
-                    tool.status = ToolStatus::Cancelled;
-                    tool.approval = None;
-                    tool.approval_note = None;
-                    tool.approval_mandatory = false;
-                    tool.approval_capabilities = None;
-                    tool.live = String::new();
+                Row::Work(group) if group.is_active() => {
+                    for item in &mut group.items {
+                        match item {
+                            WorkItem::Thinking(thought) => {
+                                if let Thought::Live(text) = thought {
+                                    *thought = Thought::Done(std::mem::take(text).into());
+                                }
+                            }
+                            WorkItem::Tool(tool) if tool.status == ToolStatus::Running => {
+                                tool.status = ToolStatus::Cancelled;
+                                tool.approval = None;
+                                tool.approval_note = None;
+                                tool.approval_mandatory = false;
+                                tool.approval_capabilities = None;
+                                tool.live = String::new();
+                            }
+                            WorkItem::Tool(_) => {}
+                        }
+                    }
                     true
                 }
                 _ => false,
@@ -572,29 +734,48 @@ impl Transcript {
         self.settled = self.rows.len();
     }
 
-    /// 末尾的流式 assistant 行，没有则新建。返回 (文本, 思考) 缓冲。
-    fn streaming_row(&mut self) -> (&mut String, &mut String) {
+    /// 末尾的流式正文行，没有则新建。返回正文缓冲。
+    fn streaming_row(&mut self) -> &mut String {
         if matches!(self.rows.last(), Some(Row::Streaming { .. })) {
             self.mark(self.rows.len() - 1);
         } else {
-            self.push(Row::Streaming { text: String::new(), thinking: String::new(), plain: PlainText::default() });
+            self.push(Row::Streaming { text: String::new(), plain: PlainText::default() });
         }
         match self.rows.last_mut() {
-            Some(Row::Streaming { text, thinking, .. }) => (text, thinking),
+            Some(Row::Streaming { text, .. }) => text,
             _ => unreachable!("刚刚确保了末尾是流式行"),
         }
     }
 
-    /// 找到工具行并记为“内容变过”（调用方拿到可变引用就是要改它）。
+    /// 工具调用在第几行、组里第几项。
+    fn locate_tool(&self, call_id: &str) -> Option<(usize, usize)> {
+        let is_it = |row: &Row, item: usize| matches!(row, Row::Work(group) if matches!(group.items.get(item), Some(WorkItem::Tool(tool)) if tool.call_id == call_id));
+        // 先查缓存的下标，对不上再整表扫（兼容直接改 rows 的调用方）。
+        if let Some(&(index, item)) = self.tools.get(call_id)
+            && self.rows.get(index).is_some_and(|row| is_it(row, item))
+        {
+            return Some((index, item));
+        }
+        self.rows.iter().enumerate().rev().find_map(|(index, row)| match row {
+            Row::Work(group) => group
+                .items
+                .iter()
+                .position(|item| matches!(item, WorkItem::Tool(tool) if tool.call_id == call_id))
+                .map(|item| (index, item)),
+            _ => None,
+        })
+    }
+
+    /// 找到工具调用并把它所在的行记为“内容变过”（调用方拿到可变引用就是要改它）。
     pub fn tool_mut(&mut self, call_id: &str) -> Option<&mut ToolRow> {
-        // 先查缓存的下标；行只追加不搬动，命中即可信，查不到再整表扫（兼容直接改 rows 的调用方）。
-        let index = match self.tools.get(call_id) {
-            Some(&index) if matches!(self.rows.get(index), Some(Row::Tool(tool)) if tool.call_id == call_id) => index,
-            _ => self.rows.iter().rposition(|row| matches!(row, Row::Tool(tool) if tool.call_id == call_id))?,
-        };
+        let (index, item) = self.locate_tool(call_id)?;
+        self.tools.insert(call_id.to_owned(), (index, item));
         self.mark(index);
         match &mut self.rows[index] {
-            Row::Tool(tool) => Some(tool),
+            Row::Work(group) => match &mut group.items[item] {
+                WorkItem::Tool(tool) => Some(tool),
+                WorkItem::Thinking(_) => None,
+            },
             _ => None,
         }
     }
@@ -641,7 +822,7 @@ impl Transcript {
     /// 第一个等待审批的工具调用（审批按顺序一个一个问，同一时刻最多一个）。
     pub fn pending_approval(&self) -> Option<&ToolRow> {
         self.rows.iter().rev().find_map(|row| match row {
-            Row::Tool(tool) if tool.awaiting_approval() => Some(tool),
+            Row::Work(group) => group.tools().find(|tool| tool.awaiting_approval()),
             _ => None,
         })
     }
@@ -675,6 +856,15 @@ impl Transcript {
             }
         }
         (!parts.is_empty()).then(|| parts.join("\n\n") + "\n")
+    }
+
+    /// 展开或收起第 `index` 行的思考与工具分组，返回它是不是展开了。
+    pub fn toggle_group(&mut self, index: usize) -> bool {
+        let Some(Row::Work(group)) = self.rows.get_mut(index) else { return false };
+        group.expanded = !group.expanded;
+        let expanded = group.expanded;
+        self.mark(index);
+        expanded
     }
 
     /// 展开或折叠工具卡片，返回它是不是展开了。
@@ -871,6 +1061,30 @@ mod tests {
         durable(EventBody::AssistantMessage { model: "m".into(), content, stop_reason: None, usage: None })
     }
 
+    /// 第 `row` 行分组里的第 `item` 项工具调用。
+    #[track_caller]
+    fn tool(row: &Row, item: usize) -> &ToolRow {
+        match row {
+            Row::Work(group) => match &group.items[item] {
+                WorkItem::Tool(tool) => tool,
+                other => panic!("应当是工具调用：{other:?}"),
+            },
+            other => panic!("应当是分组：{other:?}"),
+        }
+    }
+
+    /// 第 `row` 行分组里的第 `item` 项思考。
+    #[track_caller]
+    fn thought(row: &Row, item: usize) -> &Thought {
+        match row {
+            Row::Work(group) => match &group.items[item] {
+                WorkItem::Thinking(thought) => thought,
+                other => panic!("应当是思考：{other:?}"),
+            },
+            other => panic!("应当是分组：{other:?}"),
+        }
+    }
+
     #[test]
     fn streaming_text_is_replaced_by_final_message() {
         let mut t = Transcript::default();
@@ -878,14 +1092,16 @@ mod tests {
         t.apply(&LiveEvent::Chunk(Chunk::Thinking("嗯".into())));
         t.apply(&LiveEvent::Chunk(Chunk::Text("你".into())));
         t.apply(&LiveEvent::Chunk(Chunk::Text("好".into())));
-        assert!(matches!(&t.rows[1], Row::Streaming { text, thinking, .. } if text == "你好" && thinking == "嗯"));
+        // 思考进分组，正文是组外单独的一行。
+        assert!(matches!(thought(&t.rows[1], 0), Thought::Live(text) if text == "嗯"));
+        assert!(matches!(&t.rows[2], Row::Streaming { text, .. } if text == "你好"));
+        assert_eq!(t.activity(), &Activity::Writing);
 
-        t.apply(&assistant(vec![ContentBlock::Thinking { thinking: "嗯".into(), signature: None }, ContentBlock::text("你好！")]));
-        assert_eq!(t.rows.len(), 2);
-        assert!(matches!(
-            &t.rows[1],
-            Row::Assistant { text, thinking, .. } if &**text == "你好！" && &**thinking == "嗯"
-        ));
+        t.apply(&assistant(vec![ContentBlock::Thinking { thinking: "嗯嗯".into(), signature: None }, ContentBlock::text("你好！")]));
+        assert_eq!(t.rows.len(), 3);
+        assert!(matches!(thought(&t.rows[1], 0), Thought::Done(text) if &**text == "嗯嗯"));
+        assert!(matches!(&t.rows[1], Row::Work(group) if group.items.len() == 1 && !group.is_active() && !group.expanded));
+        assert!(matches!(&t.rows[2], Row::Assistant { text, .. } if &**text == "你好！"));
     }
 
     #[test]
@@ -894,12 +1110,13 @@ mod tests {
         t.apply(&assistant(vec![ContentBlock::ToolUse { id: "c1".into(), name: "x".into(), input: json!({}).into() }]));
         t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "list_dir".into(), input: json!({"path": "."}).into() }));
         assert_eq!(t.rows.len(), 1);
-        assert!(matches!(&t.rows[0], Row::Tool(tool) if &*tool.input == r#"{"path":"."}"#));
+        assert_eq!(&*tool(&t.rows[0], 0).input, r#"{"path":"."}"#);
+        assert_eq!(t.activity(), &Activity::Tool("list_dir".into()));
 
         t.apply(&durable(EventBody::ToolResult { call_id: "c1".into(), output: "a.txt".into(), is_error: false }));
-        assert!(
-            matches!(&t.rows[0], Row::Tool(tool) if tool.status == ToolStatus::Done { output: "a.txt".into(), is_error: false } && tool.data.is_none())
-        );
+        let done = tool(&t.rows[0], 0);
+        assert!(done.status == ToolStatus::Done { output: "a.txt".into(), is_error: false } && done.data.is_none());
+        assert_eq!(t.activity(), &Activity::Waiting);
     }
 
     #[tokio::test]
@@ -925,7 +1142,7 @@ mod tests {
         t.apply(&durable(EventBody::ToolResult { call_id: "c1".into(), output: INTERRUPTED_TOOL_OUTPUT.into(), is_error: true }));
         t.apply(&durable(EventBody::TurnEnd { turn: 1, reason: TurnEndReason::Interrupted, error: None }));
         assert!(rx.await.is_err());
-        assert!(matches!(&t.rows[0], Row::Tool(tool) if tool.status == ToolStatus::Cancelled));
+        assert_eq!(tool(&t.rows[0], 0).status, ToolStatus::Cancelled);
         assert!(matches!(&t.rows[1], Row::Notice { text, error: false } if **text == *t!("notice.interrupted")));
     }
 
@@ -985,7 +1202,8 @@ mod tests {
         // `plan` 插件的界面那一半没装时，`update_plan` 就是一张普通的工具卡片。
         let mut t = Transcript::default();
         t.apply(&plan_call);
-        assert!(matches!(&t.rows[..], [Row::Tool(tool)] if &*tool.name == UPDATE_PLAN));
+        assert_eq!(t.rows.len(), 1);
+        assert_eq!(&*tool(&t.rows[0], 0).name, UPDATE_PLAN);
         assert!(t.state().get::<Plan>().is_none());
     }
 
@@ -1164,10 +1382,10 @@ mod tests {
         let t = Transcript::new(Rc::default()).with_plugin_views(views).replay(&events);
         let Row::Plugin { tree } = &t.rows[0] else { panic!("应当是插件画的行：{:?}", t.rows[0]) };
         assert_eq!(tree["type"], "progress");
-        let Row::Tool(count) = &t.rows[1] else { panic!() };
+        let count = tool(&t.rows[1], 0);
         let card = count.data.as_ref().and_then(|data| data.downcast_ref::<PluginCard>()).expect("应当有插件卡片");
         assert_eq!((card.0.title.as_deref(), card.0.body.as_ref().map(|body| body["text"].clone())), (Some("2 lines"), Some(json!("2"))));
-        let Row::Tool(other) = &t.rows[2] else { panic!() };
+        let other = tool(&t.rows[1], 1);
         assert!(other.data.is_none());
     }
 
@@ -1228,12 +1446,14 @@ mod tests {
         t.apply(&assistant(vec![ContentBlock::text("你好！")]));
         assert_eq!((t.rows.len(), t.take_dirty()), (2, vec![1]));
 
-        // 工具卡片的输出、审批、展开都算内容变化。
+        // 工具卡片的输出、审批、展开，分组的展开都算内容变化。
         t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.take_dirty();
         t.apply(&LiveEvent::Chunk(Chunk::ToolOutput { call_id: "c1".into(), text: "building…\n".into() }));
         assert_eq!(t.take_dirty(), [2]);
         t.toggle_tool("c1");
+        assert_eq!(t.take_dirty(), [2]);
+        assert!(t.toggle_group(2));
         assert_eq!(t.take_dirty(), [2]);
 
         // 一轮结束时还在运行的卡片变成已取消。
@@ -1283,22 +1503,21 @@ mod tests {
         t.apply(&LiveEvent::Chunk(Chunk::ToolOutput { call_id: "e1".into(), text: "x".into() }));
         let output = "Edited a.rs (+1 -1)\n\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n";
         t.apply(&durable(EventBody::ToolResult { call_id: "e1".into(), output: output.into(), is_error: false }));
-        let Row::Tool(tool) = &t.rows[0] else { panic!() };
-        assert!(tool.live.is_empty());
-        let report = tool.data.as_ref().and_then(|data| data.downcast_ref::<ChangeSummary>()).expect("应当解析出改动报告");
+        let edited = tool(&t.rows[0], 0);
+        assert!(edited.live.is_empty());
+        let report = edited.data.as_ref().and_then(|data| data.downcast_ref::<ChangeSummary>()).expect("应当解析出改动报告");
         assert_eq!((report.added, report.removed, report.blocks.len()), (1, 1, 3));
 
         // 失败的调用不解析报告，即使输出长得像。
         t.apply(&durable(EventBody::ToolCall { call_id: "e2".into(), name: "edit_file".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::ToolResult { call_id: "e2".into(), output: output.into(), is_error: true }));
-        assert!(
-            matches!(&t.rows[1], Row::Tool(tool) if tool.data.is_none() && matches!(tool.status, ToolStatus::Done { is_error: true, .. }))
-        );
+        let failed = tool(&t.rows[0], 1);
+        assert!(failed.data.is_none() && matches!(failed.status, ToolStatus::Done { is_error: true, .. }));
 
         // 别的工具的输出即使长得像改动报告，也按普通输出显示。
         t.apply(&durable(EventBody::ToolCall { call_id: "s1".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::ToolResult { call_id: "s1".into(), output: output.into(), is_error: false }));
-        assert!(matches!(&t.rows[2], Row::Tool(tool) if tool.data.is_none()));
+        assert!(tool(&t.rows[0], 2).data.is_none());
     }
 
     #[test]
@@ -1320,10 +1539,7 @@ mod tests {
         t.apply(&durable(EventBody::ToolCall { call_id: "c".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::ToolResult { call_id: "c".into(), output: output.clone(), is_error: false }));
         assert!(matches!(&t.rows[0], Row::Assistant { text, .. } if std::sync::Arc::ptr_eq(text, &reply)));
-        assert!(matches!(
-            &t.rows[1],
-            Row::Tool(ToolRow { status: ToolStatus::Done { output: shown, .. }, .. }) if std::sync::Arc::ptr_eq(shown, &output)
-        ));
+        assert!(matches!(&tool(&t.rows[1], 0).status, ToolStatus::Done { output: shown, .. } if std::sync::Arc::ptr_eq(shown, &output)));
         // 纯文本要时才算；没有标记的回复直接共用原文。
         assert_eq!(t.rows[0].plain().as_deref(), Some("你好"));
         let mut plain_only = Transcript::default();
@@ -1360,9 +1576,9 @@ mod tests {
                 { "media_type": "image/png", "data": "not base64!" },
             ] }),
         }));
-        let Row::Tool(tool) = &t.rows[0] else { panic!("expected a tool row") };
-        assert_eq!(tool.images.len(), 1);
-        assert_eq!(tool.images[0].format, gpui_kit::ImageFormat::Png);
+        let shell = tool(&t.rows[0], 0);
+        assert_eq!(shell.images.len(), 1);
+        assert_eq!(shell.images[0].format, gpui_kit::ImageFormat::Png);
     }
 
     #[test]
@@ -1390,5 +1606,64 @@ mod tests {
         t.apply(&durable(EventBody::AssistantAttempt { attempt: 1, error: "HTTP 503".into() }));
         assert_eq!(t.rows.len(), 1);
         assert!(matches!(&t.rows[0], Row::Notice { error: true, .. }));
+        assert_eq!(t.activity(), &Activity::Retrying(1));
+
+        // 重试时没定稿的思考也作废；分组里只剩它时整组去掉。
+        let mut t = Transcript::default();
+        t.apply(&LiveEvent::Chunk(Chunk::Thinking("想".into())));
+        t.apply(&durable(EventBody::AssistantAttempt { attempt: 1, error: "HTTP 503".into() }));
+        assert!(matches!(&t.rows[..], [Row::Notice { .. }]));
+    }
+
+    /// 连续的思考与工具调用归进同一组；正文把它们隔开，之后的思考、调用另起一组。
+    #[test]
+    fn thinking_and_tools_are_grouped_between_replies() {
+        let call = |id: &str| durable(EventBody::ToolCall { call_id: id.into(), name: "read_file".into(), input: json!({}).into() });
+        let think = |text: &str| ContentBlock::Thinking { thinking: text.into(), signature: None };
+        let mut t = Transcript::default();
+        t.apply(&durable(EventBody::UserMessage { text: "看看".into() }));
+        t.apply(&assistant(vec![think("先读文件")]));
+        t.apply(&call("a"));
+        t.apply(&call("b"));
+        t.apply(&assistant(vec![think("再想想"), ContentBlock::text("读完了，接着改。")]));
+        t.apply(&call("c"));
+        assert_eq!(t.rows.len(), 4, "{:?}", t.rows);
+        assert!(matches!(&t.rows[1], Row::Work(group) if group.items.len() == 4 && group.tools().count() == 2));
+        assert!(matches!(thought(&t.rows[1], 3), Thought::Done(text) if &**text == "再想想"));
+        assert!(matches!(&t.rows[2], Row::Assistant { .. }));
+        assert_eq!(tool(&t.rows[3], 0).call_id, "c");
+        assert!(matches!(&t.rows[3], Row::Work(group) if group.is_active()));
+
+        // 结果按调用号找回各自所在的组。
+        t.apply(&durable(EventBody::ToolResult { call_id: "b".into(), output: "ok".into(), is_error: true }));
+        assert!(matches!(&t.rows[1], Row::Work(group) if group.has_error()));
+        assert_eq!(t.activity(), &Activity::Tool("read_file".into()));
+
+        // 一轮结束：还在跑的调用取消，分组不再处于进行中。
+        t.apply(&durable(EventBody::TurnEnd { turn: 1, reason: TurnEndReason::Interrupted, error: None }));
+        assert_eq!(tool(&t.rows[3], 0).status, ToolStatus::Cancelled);
+        assert!(matches!(&t.rows[3], Row::Work(group) if !group.is_active()));
+    }
+
+    /// 流式输出的思考在最终消息到达时定稿，结果和直接重放日志一样。
+    #[test]
+    fn streamed_groups_match_replayed_groups() {
+        let message = EventBody::AssistantMessage {
+            model: "m".into(),
+            content: vec![ContentBlock::Thinking { thinking: "想好了".into(), signature: None }, ContentBlock::text("好")],
+            stop_reason: None,
+            usage: None,
+        };
+        let call = EventBody::ToolCall { call_id: "c".into(), name: "list_dir".into(), input: json!({}).into() };
+        let mut live = Transcript::default();
+        live.apply(&LiveEvent::Chunk(Chunk::Thinking("想".into())));
+        live.apply(&LiveEvent::Chunk(Chunk::Thinking("好了".into())));
+        assert_eq!(live.activity(), &Activity::Thinking);
+        live.apply(&LiveEvent::Chunk(Chunk::Text("好".into())));
+        live.apply(&durable(message.clone()));
+        live.apply(&durable(call.clone()));
+        let events = [SessionEvent { seq: 1, time: 0, body: message }, SessionEvent { seq: 2, time: 0, body: call }];
+        let replayed = Transcript::from_events(Rc::default(), &events);
+        assert_eq!(format!("{:?}", live.rows), format!("{:?}", replayed.rows));
     }
 }
