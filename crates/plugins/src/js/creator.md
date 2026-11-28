@@ -213,7 +213,7 @@ export const ui = {
 
 - **Nodes**:
   - Any node: `hidden` (skip it), `disabled` (controls greyed out), `tooltip`, `icon` (see Icons), `tone`: neutral|secondary|accent|success|warning|danger.
-  - `size`: small|medium|large (control height 28 / 36 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `number`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`. On `row` it is the default for the controls inside.
+  - `size`: small|medium|large (control height 28 / 32 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `number`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`. On `row` it is the default for the controls inside.
   - `column` / `row` (`children`, `gap`: small|medium|large, `align`: start|center|end|stretch, `justify`: start|center|end|between, `padding`: none|small|medium|large; `row` also `wrap`: false)
   - `grid` (`children`, `columns` 1–6, `gap`), `spacer` (in a `row`, without `size` it pushes what follows to the right)
   - `card` (`title`, `description`, `icon`, `children`, `actions`: nodes on the right of the title, `variant`: outlined|filled|plain, `collapsible`, `open`)

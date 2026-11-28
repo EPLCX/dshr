@@ -125,7 +125,7 @@ impl PromptContributor for Environment {
 
 fn system_line() -> String {
     match std::env::consts::OS {
-        "windows" => "Windows; run_shell uses `cmd /C`, so use Windows command syntax.".to_owned(),
+        "windows" => "Windows; run_shell uses `cmd /C` by default, so use Windows command syntax. For PowerShell syntax (`$var`, pipelines) pass shell \"powershell\" instead of nesting `powershell -Command \"...\"` in cmd.".to_owned(),
         "macos" => "macOS; run_shell uses `sh -c`.".to_owned(),
         "linux" => "Linux; run_shell uses `sh -c`.".to_owned(),
         other => format!("{other}; run_shell uses `sh -c`."),

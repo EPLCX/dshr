@@ -7,11 +7,11 @@
 //! 在 IO 运行时上跑，返回一个操作编号，`prelude.js` 把它包成 Promise。
 
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -709,9 +709,7 @@ impl State {
         }
         self.require_read()?;
         let options: Options = serde_json::from_str(options).map_err(|error| format!("invalid grep options: {error}"))?;
-        let regex = regex::RegexBuilder::new(pattern)
-            .case_insensitive(options.ignore_case)
-            .build()
+        let matcher = dshr_tools::LineSearch::matcher(pattern, options.ignore_case)
             .map_err(|error| format!("invalid regular expression: {error}"))?;
         let filter = match &options.glob {
             Some(glob) => Some(
@@ -727,37 +725,16 @@ impl State {
         let root = self.with_call(|call| Ok(call.ctx.workspace.clone()))?;
         let work = async move {
             tokio::task::spawn_blocking(move || {
-                let mut matches = Vec::new();
-                // 按文件名排序遍历：目录项的原始顺序随文件系统而变，结果顺序要稳定。
-                let walker = ignore::WalkBuilder::new(&root).sort_by_file_name(|a, b| a.cmp(b)).build();
-                'files: for entry in walker.flatten() {
-                    if !entry.file_type().is_some_and(|kind| kind.is_file()) {
-                        continue;
-                    }
-                    let Ok(relative) = entry.path().strip_prefix(&root) else { continue };
-                    let relative = relative.to_string_lossy().replace('\\', "/");
-                    if filter.as_ref().is_some_and(|filter| !filter.is_match(&relative)) {
-                        continue;
-                    }
-                    if entry.metadata().map_or(true, |metadata| metadata.len() > MAX_FILE_BYTES) {
-                        continue;
-                    }
-                    let Ok(bytes) = std::fs::read(entry.path()) else { continue };
-                    // 二进制文件（开头有 NUL）跳过，和 tools 里的 grep 一样。
-                    if bytes.iter().take(8192).any(|byte| *byte == 0) {
-                        continue;
-                    }
-                    let Ok(text) = String::from_utf8(bytes) else { continue };
-                    for (index, line) in text.lines().enumerate() {
-                        if regex.is_match(line) {
-                            let line_text: String = line.chars().take(500).collect();
-                            matches.push(json!({ "path": relative, "line": index + 1, "text": line_text }));
-                            if matches.len() >= limit {
-                                break 'files;
-                            }
-                        }
-                    }
-                }
+                // 和 tools 里的 grep 同一套：并行遍历、ripgrep 内核整块搜索、跳过二进制和超过 2 MB 的文件。
+                // 不看隐藏文件（和以前一样）。找完按路径（逐级目录）和行号排序，结果顺序与遍历先后无关。
+                let search = dshr_tools::LineSearch { matcher: &matcher, hidden: false, per_file: limit, stop: None };
+                let keep = |relative: &str, _: &Path| filter.as_ref().is_none_or(|filter| filter.is_match(relative));
+                let clip = |line: &str| line.trim_end_matches(['\n', '\r']).chars().take(500).collect();
+                let mut found = search.run(&root, &root, &keep, clip);
+                found.sort_by(|a, b| Path::new(&a.0).cmp(Path::new(&b.0)).then(a.1.cmp(&b.1)));
+                found.truncate(limit);
+                let matches: Vec<Value> =
+                    found.into_iter().map(|(path, line, text)| json!({ "path": path, "line": line, "text": text })).collect();
                 Ok(Value::Array(matches).to_string())
             })
             .await
@@ -857,14 +834,16 @@ impl State {
         }
         let resolved = confine_data(&self.data_dir, path)?;
         let existing = std::fs::metadata(&resolved).map(|metadata| metadata.len()).unwrap_or(0);
-        let total = folder_size(&self.data_dir);
+        let total = data_usage(&self.data_dir);
         if total.saturating_sub(existing) + text.len() as u64 > MAX_DATA_BYTES {
             return Err(format!("the plugin's data folder would exceed {} MB", MAX_DATA_BYTES / 1024 / 1024));
         }
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent).map_err(|error| format!("cannot write data {path}: {error}"))?;
         }
-        std::fs::write(&resolved, text).map_err(|error| format!("cannot write data {path}: {error}"))
+        std::fs::write(&resolved, text).map_err(|error| format!("cannot write data {path}: {error}"))?;
+        adjust_data_usage(&self.data_dir, existing, text.len() as u64);
+        Ok(())
     }
 
     /// 接在数据文件末尾（没有时新建）：日志、JSONL 记录不用先读出整个文件。
@@ -876,21 +855,28 @@ impl State {
                 "data {path} would grow past {MAX_DATA_FILE_BYTES} bytes; start a new file, trim it with writeData, or use host.db"
             ));
         }
-        if folder_size(&self.data_dir) + text.len() as u64 > MAX_DATA_BYTES {
+        if data_usage(&self.data_dir) + text.len() as u64 > MAX_DATA_BYTES {
             return Err(format!("the plugin's data folder would exceed {} MB", MAX_DATA_BYTES / 1024 / 1024));
         }
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent).map_err(|error| format!("cannot write data {path}: {error}"))?;
         }
-        append_to(&resolved, text.as_bytes()).map_err(|error| format!("cannot write data {path}: {error}"))
+        append_to(&resolved, text.as_bytes()).map_err(|error| format!("cannot write data {path}: {error}"))?;
+        adjust_data_usage(&self.data_dir, 0, text.len() as u64);
+        Ok(())
     }
 
     /// 删除数据目录里的一个文件；不存在时什么也不做。
     fn remove_data(&self, path: &str) -> Result<(), String> {
         let resolved = confine_data(&self.data_dir, path)?;
+        let size = std::fs::metadata(&resolved).map(|metadata| metadata.len()).unwrap_or(0);
         match std::fs::remove_file(&resolved) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("cannot remove data {path}: {error}")),
-            _ => Ok(()),
+            Err(_) => Ok(()),
+            Ok(()) => {
+                adjust_data_usage(&self.data_dir, size, 0);
+                Ok(())
+            }
         }
     }
 
@@ -1326,7 +1312,7 @@ fn event_type(line: &str) -> Option<std::borrow::Cow<'_, str>> {
 /// 从文件末尾往前一行行读（跳过空行、不是 UTF-8 的行）。只读到调用方停下的位置为止。
 ///
 /// 先往前找换行符定出一行的起止，再一次读出整行：再长的行也只读、只分配一次。
-struct ReverseLines {
+pub(super) struct ReverseLines {
     file: std::fs::File,
     /// 下一行（往前数）的结束位置（不含换行符）；`None` 表示已经读到文件开头。
     end: Option<u64>,
@@ -1336,13 +1322,13 @@ struct ReverseLines {
 impl ReverseLines {
     const CHUNK: u64 = 64 * 1024;
 
-    fn open(path: &Path) -> std::io::Result<Self> {
+    pub(super) fn open(path: &Path) -> std::io::Result<Self> {
         let file = std::fs::File::open(path)?;
         let end = file.metadata()?.len();
         Ok(Self { file, end: Some(end), chunk: Vec::new() })
     }
 
-    fn next_line(&mut self) -> std::io::Result<Option<String>> {
+    pub(super) fn next_line(&mut self) -> std::io::Result<Option<String>> {
         use std::io::{Read as _, Seek as _, SeekFrom};
         while let Some(end) = self.end {
             let start = self.line_start(end)?;
@@ -1416,7 +1402,34 @@ pub(super) fn confine_data(dir: &Path, path: &str) -> Result<PathBuf, String> {
     Ok(dir.join(relative))
 }
 
-pub(super) fn folder_size(dir: &Path) -> u64 {
+/// 数据目录的占用多久重新统计一次。期间 `writeData` / `appendData` / `removeData` 自己增减；
+/// 别的途径（`host.db` 的数据库文件变大、用户手动删文件）在下次统计时算进来。配额本来就是防失控的粗略上限。
+const DATA_USAGE_TTL: Duration = Duration::from_secs(10);
+
+/// 各个插件数据目录的占用（同一个插件的几个实例共用一份）。
+static DATA_USAGE: LazyLock<Mutex<HashMap<PathBuf, (Instant, u64)>>> = LazyLock::new(Default::default);
+
+/// 数据目录现在的占用：缓存没过期时直接用，不用每写一次都把目录里每个文件 stat 一遍。
+pub(super) fn data_usage(dir: &Path) -> u64 {
+    let now = Instant::now();
+    if let Some((counted, bytes)) = DATA_USAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(dir)
+        && now.duration_since(*counted) < DATA_USAGE_TTL
+    {
+        return *bytes;
+    }
+    let bytes = folder_size(dir);
+    DATA_USAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(dir.to_owned(), (now, bytes));
+    bytes
+}
+
+/// 一个文件从 `before` 字节变成 `after` 字节之后，更新缓存的占用（没有缓存时不用管，下次会统计）。
+fn adjust_data_usage(dir: &Path, before: u64, after: u64) {
+    if let Some((_, bytes)) = DATA_USAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get_mut(dir) {
+        *bytes = (*bytes + after).saturating_sub(before);
+    }
+}
+
+fn folder_size(dir: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     entries
         .flatten()
@@ -1602,7 +1615,23 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, state: &Rc<State>) -> rquickjs::Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{ReverseLines, recent_event_lines};
+    use super::{ReverseLines, adjust_data_usage, data_usage, recent_event_lines};
+
+    #[test]
+    fn data_usage_is_cached_and_adjusted_by_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/a"), [0; 100]).unwrap();
+        assert_eq!(data_usage(dir.path()), 100);
+        // 别的途径写的文件要等缓存过期才算进来；自己写的立刻增减。
+        std::fs::write(dir.path().join("b"), [0; 50]).unwrap();
+        assert_eq!(data_usage(dir.path()), 100);
+        adjust_data_usage(dir.path(), 0, 30);
+        adjust_data_usage(dir.path(), 100, 20);
+        assert_eq!(data_usage(dir.path()), 50);
+        adjust_data_usage(dir.path(), 500, 0);
+        assert_eq!(data_usage(dir.path()), 0);
+    }
 
     fn event(seq: usize, kind: &str, text: &str) -> String {
         serde_json::json!({ "seq": seq, "time": 1, "type": kind, "data": { "text": text } }).to_string()

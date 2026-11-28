@@ -23,16 +23,17 @@ use gpui_kit::*;
 
 use crate::design::palette;
 
-/// 滚轮缓动的衰减率（1/秒）：每秒剩余距离按 e^(-rate·t) 缩小，一格约 0.15 秒滚完九成五。
-/// 第一帧就走掉一大截（60Hz 下约 28%），拨下去立刻有反应，不会像从静止起步的弹簧那样发粘。
-const WHEEL_RATE: f32 = 20.;
+/// 滚轮缓动的衰减率（1/秒）：每秒剩余距离按 e^(-rate·t) 缩小，一格约 0.1 秒滚完九成五。
+/// 第一帧就走掉一大截（60Hz 下约 39%），拨下去立刻有反应，不会像从静止起步的弹簧那样发粘。
+const WHEEL_RATE: f32 = 30.;
 /// 收尾时的最低速度（逻辑像素/秒）：指数衰减的尾巴越走越慢，低于这个速度就按它匀速滚完，
 /// 不拖着几个像素慢慢挪。
 const WHEEL_MIN_SPEED: f32 = 240.;
 /// 剩余距离小于这个值时一次滚完。
 const WHEEL_REST_DISTANCE: f32 = 0.5;
 /// 两帧之间按多长时间算：太长（比如窗口卡顿）时截断，避免一下子跳太远。
-const MAX_FRAME: Duration = Duration::from_millis(50);
+/// 不能太短：界面卡顿时每帧只按这么长推进，截得太狠滚动会越来越落后于实际时间。
+const MAX_FRAME: Duration = Duration::from_millis(100);
 /// 自动滚动时锚点周围不滚动的半径。
 const AUTO_DEAD_ZONE: f32 = 10.;
 /// 按住中键拖出这么远后松开才结束；没拖这么远就当作单击，进入保持模式。
@@ -147,7 +148,7 @@ fn indicator(anchor: Point<Pixels>, cx: &App) -> impl IntoElement {
                 .bg(p.raised.opacity(0.92))
                 .border_1()
                 .border_color(p.border)
-                .shadow_md()
+                .shadow(crate::design::shadow::menu(&p))
                 .text_color(p.text_secondary)
                 .child(Icon::new(IconName::ChevronUp).xsmall())
                 .child(Icon::new(IconName::ChevronDown).xsmall()),

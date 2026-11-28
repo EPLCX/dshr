@@ -5,7 +5,7 @@ pub struct ApprovalRequest {
     /// 对应 `tool/call` 事件的 `call_id`，界面据此把审批挂到工具卡片上。
     pub call_id: String,
     pub tool: String,
-    pub input: Value,
+    pub input: std::sync::Arc<Value>,
     /// 附在审批处的说明，如自动审查判断有风险的理由。
     pub note: Option<String>,
     /// 必须由用户亲自确认（[`crate::Gate::Require`]）：界面不提供“本会话不再询问”，

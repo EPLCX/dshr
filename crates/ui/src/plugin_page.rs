@@ -20,7 +20,8 @@ use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
 use crate::design::{
-    Palette, Tone, Typography as _, badge, card, divider, hint, mono_font, palette, panel, pressable, radius, readable_with_id, space,
+    ControlSize as _, HoverFill as _, Palette, RowColor as _, Tone, Typography as _, badge, card, divider, hint, mono_font, palette, panel,
+    pressable, radius, readable_with_id, space,
 };
 use crate::reveal::reveal_in;
 
@@ -454,12 +455,13 @@ impl PluginPageView {
             "alert" | "empty" => {
                 let button = optional("action").map(|action| {
                     let value = node.get("payload").cloned().unwrap_or(Value::Null);
-                    let button = Button::new(id("-action")).small().label(string("actionLabel")).disabled(off);
-                    let button = if kind == "empty" { button.outline() } else { button.ghost() };
+                    let button = Button::new(id("-action")).control_sm().label(string("actionLabel")).disabled(off);
+                    let button = if kind == "empty" { button } else { button.subtle(cx) };
                     crate::design::framed(
                         id("-action"),
                         button.on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx))),
                     )
+                    .inert(off)
                     .into_any_element()
                 });
                 let button = button.map(|button| reveal_in(&self.scroll, id("-action-reveal"), button).into_any_element());
@@ -486,9 +488,9 @@ impl PluginPageView {
                 let button = match (node.get("variant").and_then(Value::as_str), confirming) {
                     (_, true) | (Some("danger"), _) => button.danger(),
                     (Some("primary"), _) => button.primary(),
-                    (Some("ghost"), _) => button.ghost(),
+                    (Some("ghost"), _) => button.subtle(cx),
                     (Some("link"), _) => button.link(),
-                    _ => button.outline(),
+                    _ => button,
                 };
                 let button = button.when(full, |button| button.w_full()).on_click(cx.listener(move |this, _, window, cx| {
                     if confirm.is_some() && this.pending_confirm.as_deref() != Some(element_id.as_str()) {
@@ -498,7 +500,7 @@ impl PluginPageView {
                         this.act(action.clone(), value.clone(), None, window, cx)
                     }
                 }));
-                div().when(full, |wrapper| wrapper.w_full()).child(crate::design::framed(id(""), button)).into_any_element()
+                div().when(full, |wrapper| wrapper.w_full()).child(crate::design::framed(id(""), button).inert(off)).into_any_element()
             }
             "input" | "number" => {
                 let control_id = string("id");
@@ -520,12 +522,13 @@ impl PluginPageView {
                                 id(suffix),
                                 control_size
                                     .apply(Button::new(id(suffix)))
-                                    .ghost()
+                                    .subtle(cx)
                                     .icon(icon)
                                     .accessibility_label(spoken)
                                     .disabled(off)
                                     .on_click(cx.listener(move |this, _, window, cx| this.step_number(&control_id, delta, window, cx))),
                             )
+                            .inert(off)
                         };
                         h_flex()
                             .gap(px(space::XS))
@@ -640,8 +643,8 @@ impl PluginPageView {
                             // 选择框：选项不多时一排按钮最直接，读屏软件也能逐个读出；选中的那个是主按钮。
                             "buttons" => {
                                 let button = control_size.apply(Button::new(item_id.clone())).label(text).disabled(off);
-                                let button = if selected { button.primary() } else { button.outline() };
-                                crate::design::framed(item_id, button.on_click(pick)).into_any_element()
+                                let button = if selected { button.primary() } else { button };
+                                crate::design::framed(item_id, button.on_click(pick)).inert(off).into_any_element()
                             }
                             // 分段控件：下沉底色里一排，选中的那段是表面色底。
                             "segmented" => pressable(item_id, &p)
@@ -720,7 +723,6 @@ impl PluginPageView {
                 if items.is_empty() {
                     return hint(optional("empty").unwrap_or_default(), Tone::Neutral, &p).into_any_element();
                 }
-                let selected = p.selected;
                 let list_size = NodeSize::of(node, size, NodeSize::Medium);
                 let dividers = node.get("dividers").and_then(Value::as_bool) == Some(true);
                 let mut rows = Vec::new();
@@ -742,10 +744,13 @@ impl PluginPageView {
                             pressable(item_id, &p)
                                 .accessibility_label(title.clone())
                                 .when_some(detail.clone(), |row, detail| row.aria_description(detail))
+                                .relative()
                                 .flex()
                                 .items_center()
+                                .rounded(px(radius::MD))
                                 .cursor_pointer()
-                                .hover(move |style| style.bg(selected))
+                                // 悬停、按下底色铺满整行，带圆角。
+                                .hover_fill(&p, radius::MD, false)
                                 .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), None, window, cx)))
                                 .child(content.flex_1().min_w(px(0.))),
                         )
@@ -795,7 +800,7 @@ impl PluginPageView {
                     id(""),
                     NodeSize::of(node, size, NodeSize::Small)
                         .apply(Button::new(id("")))
-                        .ghost()
+                        .subtle(cx)
                         .icon(icon_of(node).unwrap_or(IconName::ExternalLink))
                         .label(label)
                         .disabled(off)
@@ -1191,7 +1196,7 @@ fn list_row(item: &Value, size: NodeSize, p: &Palette) -> Div {
         .rounded(px(radius::MD))
         .children(icon_of(item).map(|icon| Icon::new(icon).size(px(size.indicator())).text_color(p.text_secondary)))
         .child(size.text(div().flex_1().min_w(px(0.)).text_color(color)).child(text("title").unwrap_or_default()))
-        .children(text("detail").map(|detail| div().text_caption().text_color(p.text_secondary).child(detail)))
+        .children(text("detail").map(|detail| div().text_caption().row_color(p.text_secondary, p).child(detail)))
         .children(text("badge").map(|text| badge(text, p)))
         .children(text("trailing").map(|text| size.text(div().flex_none().text_color(p.text_secondary)).child(text)))
 }
@@ -1284,13 +1289,13 @@ fn table(node: &Value, id: &SharedString, inherited: Option<NodeSize>, on_row: O
             match &on_row {
                 Some(pick) => {
                     let (pick, row_value) = (pick.clone(), Value::Array(values.clone()));
-                    let hover = p.selected;
                     line.child(
                         pressable(SharedString::from(format!("{id}-row-{index}")), &p)
                             .accessibility_label(spoken)
+                            .relative()
                             .w_full()
                             .cursor_pointer()
-                            .hover(move |style| style.bg(hover))
+                            .hover_fill(&p, 0., false)
                             .on_click(move |_, window, cx| pick(index, row_value.clone(), window, cx))
                             .child(content),
                     )
@@ -1594,13 +1599,13 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
             .rounded(px(radius::SM))
             .when(mark.is_some(), |cell| cell.bg(p.accent_soft))
             .child(div().text_caption().child(day.to_string()))
-            .children(mark.map(|mark| div().text_caption().text_color(p.accent).truncate().child(mark)));
+            .children(mark.map(|mark| div().text_caption().truncate().row_color(p.accent, &p).child(mark)));
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());
-                let selected_bg = p.selected;
                 cell.cursor_pointer()
-                    .hover(move |style| style.bg(selected_bg))
+                    .relative()
+                    .hover_fill(&p, radius::SM, false)
                     .on_click(move |_, window, cx| pick(date.clone(), window, cx))
                     .into_any_element()
             }
@@ -1878,7 +1883,7 @@ fn visit_nodes(node: &Value, visit: &mut impl FnMut(&Value)) {
     }
 }
 
-/// 控件、文字的尺寸（`size`）：对应设计规范的控件高度 28 / 36 / 40。
+/// 控件、文字的尺寸（`size`）：对应设计规范的控件高度 28 / 32 / 40。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NodeSize {
     Small,
@@ -1901,12 +1906,12 @@ impl NodeSize {
         Self::parse(node.get("size").and_then(Value::as_str)).or(inherited).unwrap_or(default)
     }
 
-    /// 组件库的控件（按钮、输入框）。
-    fn apply<T: Sizable>(self, element: T) -> T {
+    /// 组件库的控件（按钮、输入框）：`small` 是 `SM` 28，`medium` 是 `MD` 32（组件库的默认），`large` 是 `LG` 40。
+    fn apply<T: Sizable + Styled>(self, element: T) -> T {
         match self {
-            Self::Small => element.small(),
-            Self::Medium => element.with_size(gpui_kit::component::Size::Medium),
-            Self::Large => element.large(),
+            Self::Small => element.small().min_h(px(crate::design::size::CONTROL_SM)),
+            Self::Medium => element.with_size(gpui_kit::component::Size::Medium).min_h(px(crate::design::size::CONTROL_MD)),
+            Self::Large => element.large().min_h(px(crate::design::size::CONTROL_LG)),
         }
     }
 
@@ -1921,9 +1926,9 @@ impl NodeSize {
 
     fn height(self) -> f32 {
         match self {
-            Self::Small => 28.,
+            Self::Small => crate::design::size::CONTROL_SM,
             Self::Medium => crate::design::size::CONTROL_MD,
-            Self::Large => 40.,
+            Self::Large => crate::design::size::CONTROL_LG,
         }
     }
 
@@ -2027,8 +2032,8 @@ impl Render for PluginPageView {
                     crate::design::framed(
                         "plugin-page-retry",
                         Button::new("plugin-page-retry")
-                            .ghost()
-                            .xsmall()
+                            .subtle(cx)
+                            .control_xs()
                             .label(t!("plugin_page.retry").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))),
                     ),
@@ -2111,6 +2116,7 @@ mod tests {
         assert_eq!(NodeSize::of(&node, Some(NodeSize::Small), NodeSize::Medium), NodeSize::Small);
         assert_eq!(NodeSize::of(&node, None, NodeSize::Medium), NodeSize::Medium);
         assert_eq!(NodeSize::Small.height(), 28.);
+        assert_eq!(NodeSize::Medium.height(), 32.);
         assert_eq!(NodeSize::Large.height(), 40.);
     }
 

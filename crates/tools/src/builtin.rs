@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Read as _};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -199,7 +200,8 @@ impl Tool for WriteFile {
             }
         };
         let before = existing.unwrap_or_default();
-        match crate::write_atomic(path, content.clone()).await {
+        let content = Arc::new(content);
+        match crate::write_atomic(path, Arc::clone(&content)).await {
             Ok(()) if large => ToolOutput::ok(format!(
                 "Wrote {} ({} bytes; the previous version was {} bytes, too large to diff)",
                 input.path,
@@ -216,7 +218,7 @@ impl Tool for WriteFile {
 }
 
 /// 原文件超过这个大小时，`write_file` 不读进内存比较差异。
-const MAX_DIFF_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_DIFF_BYTES: u64 = 1024 * 1024;
 
 /// 大文件只看开头一段判断是不是纯 CRLF（取样截在最后一个换行处，免得切在 `\r\n` 中间）。
 async fn sample_is_crlf(path: &Path) -> bool {
@@ -289,6 +291,8 @@ pub struct RunShell;
 struct RunShellInput {
     command: String,
     timeout_ms: Option<u64>,
+    /// 仅 Windows：`cmd`（默认）或 `powershell`。
+    shell: Option<String>,
 }
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
@@ -305,9 +309,11 @@ impl Tool for RunShell {
 
     fn description(&self) -> &str {
         if cfg!(windows) {
-            "Run a command with `cmd /C` in the workspace directory and return exit code, stdout and stderr (long \
-             output is truncated). There is no terminal or input; commands that don't finish are killed at timeout_ms \
-             (default 120 s). Use read_file, list_dir, grep and glob to read and search files."
+            "Run a command with `cmd /C` (or with Windows PowerShell when `shell` is \"powershell\") in the workspace \
+             directory and return exit code, stdout and stderr (long output is truncated). Prefer shell \"powershell\" \
+             for PowerShell syntax (`$var`, pipelines, here-strings): the script reaches PowerShell unchanged, with no \
+             quoting or escaping through cmd. There is no terminal or input; commands that don't finish are killed at \
+             timeout_ms (default 120 s). Use read_file, list_dir, grep and glob to read and search files."
         } else {
             "Run a command with `sh -c` in the workspace directory and return exit code, stdout and stderr (long \
              output is truncated). There is no terminal or input; commands that don't finish are killed at timeout_ms \
@@ -316,14 +322,18 @@ impl Tool for RunShell {
     }
 
     fn input_schema(&self) -> Value {
-        json!({
+        let mut schema = json!({
             "type": "object",
             "properties": {
                 "command": {"type": "string"},
                 "timeout_ms": {"type": "integer", "minimum": 1, "default": DEFAULT_TIMEOUT_MS}
             },
             "required": ["command"]
-        })
+        });
+        if cfg!(windows) {
+            schema["properties"]["shell"] = json!({"type": "string", "enum": ["cmd", "powershell"], "default": "cmd"});
+        }
+        schema
     }
 
     fn access(&self, _input: &Value, _ctx: &ToolContext) -> Access {
@@ -336,12 +346,29 @@ impl Tool for RunShell {
             Err(error) => return error,
         };
         // 插件可以改写要启动的进程：沙箱插件在 macOS 的“工作区内修改”模式下把它放进 Seatbelt。
-        let mut shell = ShellCommand::new(&input.command);
+        let mut shell = match input.shell.as_deref() {
+            None | Some("cmd" | "sh") => ShellCommand::new(&input.command),
+            Some("powershell") if cfg!(windows) => ShellCommand::powershell(&input.command),
+            Some("powershell") => return ToolOutput::error("参数无效: shell \"powershell\" 只在 Windows 上可用"),
+            Some(other) => return ToolOutput::error(format!("参数无效: 不认识的 shell \"{other}\"")),
+        };
         for wrap in ctx.plugins.hooks::<WrapCommand>() {
             wrap(&mut shell, ctx);
         }
-        let mut command = Command::new(shell.program);
-        command.args(shell.args);
+        let mut command = Command::new(&shell.program);
+        // Windows：Rust 会把参数里的 `"` 转义成 `\"`，cmd 不认，引号被破坏（连带 PowerShell 的 `$` 被当成字符串展开）。
+        // 所以 cmd 的命令行自己拼：`/S` 只剥最外层一对引号，里面的内容原样交给 cmd。
+        #[cfg(windows)]
+        if let Some(script) = shell.plain_cmd_script() {
+            let mut line = std::ffi::OsString::from("\"");
+            line.push(script);
+            line.push("\"");
+            command.args(["/S", "/C"]).raw_arg(line);
+        } else {
+            command.args(&shell.args);
+        }
+        #[cfg(not(windows))]
+        command.args(&shell.args);
         command.current_dir(&ctx.workspace).kill_on_drop(true);
         // 桌面版没有控制台，不加这个标志每条命令都会弹出一个黑色控制台窗口。
         #[cfg(windows)]
@@ -727,6 +754,55 @@ mod tests {
         let state = String::from_utf8_lossy(&state.stdout);
         let alive = !state.trim().is_empty() && !state.trim_start().starts_with('Z');
         assert!(!alive, "超时后子进程 {pid} 还在运行");
+    }
+
+    #[test]
+    fn powershell_script_is_passed_encoded_and_unchanged() {
+        use base64::Engine as _;
+        let script = "Write-Output \"a $x 'b'\" | % { $_ }";
+        let shell = ShellCommand::powershell(script);
+        assert_eq!(shell.program, "powershell");
+        assert_eq!(&shell.args[..3], ["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+        let bytes = base64::engine::general_purpose::STANDARD.decode(shell.args[3].to_str().unwrap()).unwrap();
+        let units: Vec<u16> = bytes.chunks(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
+        let decoded = String::from_utf16(&units).unwrap();
+        assert!(decoded.ends_with(script), "{decoded}");
+        assert!(!shell.args[3].to_str().unwrap().contains('"'));
+    }
+
+    #[test]
+    fn plain_cmd_script_only_for_untouched_cmd() {
+        let cmd = ShellCommand { script: "echo \"a b\"".into(), program: "cmd".into(), args: vec!["/C".into(), "echo \"a b\"".into()] };
+        assert_eq!(cmd.plain_cmd_script().unwrap(), "echo \"a b\"");
+        let wrapped = ShellCommand { args: vec!["/C".into(), "x".into(), "y".into()], ..cmd.clone() };
+        assert!(wrapped.plain_cmd_script().is_none());
+        assert!(ShellCommand::powershell("1").plain_cmd_script().is_none());
+    }
+
+    #[tokio::test]
+    async fn shell_rejects_unknown_or_unavailable_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolContext::new(dir.path().to_owned());
+        let out = RunShell.execute(json!({"command": "echo x", "shell": "fish"}), &ctx).await;
+        assert!(out.is_error && out.content.contains("fish"), "{}", out.content);
+        if !cfg!(windows) {
+            let out = RunShell.execute(json!({"command": "echo x", "shell": "powershell"}), &ctx).await;
+            assert!(out.is_error && out.content.contains("Windows"), "{}", out.content);
+        }
+    }
+
+    /// 回归：Rust 把 `"` 转义成 `\"`，cmd 不认，引号被破坏；PowerShell 里的 `$` 因此被当作字符串展开。
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_quotes_and_dollar_survive() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolContext::new(dir.path().to_owned());
+        let out = RunShell.execute(json!({"command": "echo \"a b\""}), &ctx).await;
+        assert!(out.content.contains("\"a b\"") && !out.content.contains("\\\""), "{}", out.content);
+        let out = RunShell.execute(json!({"command": "powershell -NoProfile -Command \"'$x'\""}), &ctx).await;
+        assert!(out.content.contains("$x"), "{}", out.content);
+        let out = RunShell.execute(json!({"command": "$a = 'v'; \"[$a] $env:OS\"", "shell": "powershell"}), &ctx).await;
+        assert!(out.content.contains("[v]") && out.content.contains("Windows_NT"), "{}", out.content);
     }
 
     #[tokio::test]

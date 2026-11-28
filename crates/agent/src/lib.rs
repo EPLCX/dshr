@@ -449,10 +449,7 @@ impl Agent {
                 // 先按顺序写调用事件、逐个把关（审批要一个一个问用户）。
                 let mut jobs = Vec::new();
                 for (call_id, name, input) in batch {
-                    session.append(
-                        EventBody::ToolCall { call_id: call_id.clone(), name: name.clone(), input: serde_json::Value::clone(input) },
-                        sink,
-                    )?;
+                    session.append(EventBody::ToolCall { call_id: call_id.clone(), name: name.clone(), input: Arc::clone(input) }, sink)?;
                     // 工具执行期间写的自定义事件先收着：`tool/result` 必须紧跟在调用后面，事件排在它之后。
                     let emitted = Emitted::default();
                     let Some(tool) = current.tools.get(name) else {
@@ -713,7 +710,7 @@ impl Agent {
         tool: &dyn dshr_tools::Tool,
         call_id: &str,
         name: &str,
-        input: &serde_json::Value,
+        input: &Arc<serde_json::Value>,
         ctx: &ToolContext,
         cancel: &CancellationToken,
     ) -> Option<ToolOutput> {
@@ -741,7 +738,8 @@ impl Agent {
                     Gate::Require(note) => note,
                     _ => None,
                 };
-                let request = ApprovalRequest { call_id: call_id.to_owned(), tool: name.to_owned(), input: input.clone(), note, mandatory };
+                let request =
+                    ApprovalRequest { call_id: call_id.to_owned(), tool: name.to_owned(), input: Arc::clone(input), note, mandatory };
                 // 等审批期间点停止：立刻当作中断返回，不再等用户点允许/拒绝。
                 let decision = tokio::select! {
                     biased;

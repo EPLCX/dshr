@@ -581,7 +581,7 @@ API 密钥在钥匙串里，这里碰不到。
 | `tooltip` | 鼠标停留时显示的提示文字 |
 | `icon` | 图标，取值见下方“图标” |
 | `tone` | 语气：`neutral` / `secondary` / `accent` / `success` / `warning` / `danger` |
-| `size` | 尺寸：`small` / `medium` / `large`，对应控件高度 28 / 36 / 40。仅适用于下表中注明“有 `size`”的节点；不写时与原来的尺寸一致 |
+| `size` | 尺寸：`small` / `medium` / `large`，对应控件高度 28 / 32 / 40。仅适用于下表中注明“有 `size`”的节点；不写时与原来的尺寸一致 |
 
 `row` 的 `size` 是其中控件的默认尺寸：子控件没写 `size` 时沿用，适合把整行工具栏统一调小或调大。
 
