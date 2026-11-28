@@ -1,7 +1,7 @@
 # 开发与贡献
 
 这篇是给参与 dshr 开发的人的操作手册：怎么构建、运行、测试，代码有哪些约定，界面、本地化、第三方声明、打包分别怎么做。
-先读 [架构](architecture.md) 了解各个 crate 的分工。
+先读 [架构](architecture.md) 了解各个 crate 的分工；Issue、PR、版本号与 Release 的规范见 [协作规范](contributing.md)。
 
 ## 环境
 
@@ -196,4 +196,5 @@ cargo build --release -p dshr-desktop
 - [ ] `cargo clippy --workspace` 没有新警告；
 - [ ] 改了依赖：重新生成 `THIRD_PARTY_NOTICES.md`；
 - [ ] 改了界面：按设计规范的检查清单过一遍，新文案有十种语言；
-- [ ] 改了行为、配置项、命令或插件 API：同步更新 `docs/` 下对应的文档。
+- [ ] 改了行为、配置项、命令或插件 API：同步更新 `docs/` 下对应的文档；
+- [ ] 有不兼容变更：按 [协作规范 §4](contributing.md#4-版本号) 判断版本号，PR 加 `breaking` 标签。

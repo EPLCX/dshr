@@ -1,0 +1,17 @@
+# GitHub Release 的“Generate release notes”按此归类合入的 PR，规范见 docs/contributing.md §5。
+changelog:
+  exclude:
+    labels: [chore, duplicate, wontfix]
+  categories:
+    - title: 不兼容变更
+      labels: [breaking]
+    - title: 新功能
+      labels: [enhancement]
+    - title: 修复
+      labels: [bug]
+    - title: 性能与重构
+      labels: [performance, refactor]
+    - title: 文档
+      labels: [documentation]
+    - title: 其他
+      labels: ["*"]

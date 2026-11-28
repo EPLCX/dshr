@@ -1,0 +1,33 @@
+name: 功能建议
+description: 新功能或对现有功能的改进
+title: "[范围] 希望……"
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: 标题格式为“[范围] 希望……”，例如“[插件] 希望插件页面支持表格节点”。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 目前在什么场景下遇到了什么不便。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的方案
+      description: 希望程序怎样工作；涉及界面的可附草图。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的其他方案
+      description: 包括能否通过插件、Skills 或 MCP 实现。
+  - type: checkboxes
+    id: compat
+    attributes:
+      label: 兼容性
+      options:
+        - label: 这项建议会改变现有的配置项、命令行参数、插件 API 或会话日志格式

@@ -1,0 +1,23 @@
+name: 文档问题
+description: 文档错误、缺失或过时
+title: "[文档] 问题概述"
+labels: [documentation]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: 文档位置
+      placeholder: docs/configuration.md#数据目录
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: 问题
+      description: 哪里有误、缺失或与程序实际行为不一致。
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 建议的修改
