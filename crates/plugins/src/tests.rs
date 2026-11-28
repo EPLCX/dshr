@@ -975,9 +975,9 @@ async fn prompt_and_event_projection_exports() {
     let labels = snapshot.items::<dshr_agent::EventLabels>();
     let label = |kind: &str, data: Value| labels.iter().find(|l| l.kind() == kind).unwrap().label(&data);
     let kinds = |items: Vec<&str>| items.into_iter().map(str::to_owned).collect::<std::collections::BTreeSet<_>>();
-    // `plugins/reviewed` 是宿主自己的标签（审查结论），不算插件导出的。
+    // `plugins/reviewed`、`plugins/approved` 是宿主自己的标签（审查、代为审批的结论），不算插件导出的。
     assert_eq!(
-        kinds(labels.iter().map(|l| l.kind()).filter(|kind| *kind != "plugins/reviewed").collect()),
+        kinds(labels.iter().map(|l| l.kind()).filter(|kind| !kind.starts_with("plugins/")).collect()),
         kinds(vec!["notes/pinned", "notes/shown"])
     );
     assert!(!projectors.iter().any(|p| p.kind() == "notes/shown"));
@@ -1382,3 +1382,5 @@ mod round3;
 mod round4;
 
 mod dist;
+
+mod round5;

@@ -149,8 +149,12 @@ impl UiSurface for BundleSurface {
         self.inner.as_ref().map_or(&[], |inner| inner.entries())
     }
 
-    fn hidden(&self) -> &[String] {
-        self.inner.as_ref().map_or(&[], |inner| inner.hidden())
+    fn hidden(&self) -> Vec<String> {
+        self.inner.as_ref().map_or_else(Vec::new, |inner| inner.hidden())
+    }
+
+    fn entry_hidden(&self, place: dshr_agent::EntryPlace, id: &str) -> bool {
+        self.inner.as_ref().is_some_and(|inner| inner.entry_hidden(place, id))
     }
 
     fn render(&self, page: &str, workspace: Option<&Path>) -> Result<Value, String> {

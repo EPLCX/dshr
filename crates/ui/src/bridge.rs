@@ -9,7 +9,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use dshr_plugins::app::{ComposerAccess, InstallAnswer, InstallRequest, Notification, OpenSession, SendRequest, SessionControl};
+use dshr_plugins::app::{
+    ComposerAccess, InstallAnswer, InstallRequest, ModelInfo, Notification, OpenSession, OptionChange, SendRequest, SessionControl,
+};
 
 use crate::backend::Backend;
 
@@ -19,6 +21,8 @@ const INSTALL_WAIT: Duration = Duration::from_secs(600);
 pub enum BridgeRequest {
     Send(SendRequest),
     Stop(Option<String>),
+    /// 改会话（`None` 是当前会话）的模型或预设。已经在 [`SessionHandle`] 里检查过。
+    SetOptions(Option<String>, ResolvedChange),
     SetComposer(String),
     Install(Box<InstallRequest>, std::sync::mpsc::SyncSender<InstallAnswer>),
     OpenUrl(String),
@@ -72,7 +76,120 @@ impl UiBridge {
     }
 }
 
+/// 检查过的选项改动：模型已经解析成 `provider/model`，预设已经找到。
+pub enum ResolvedChange {
+    Model { model: Option<dshr_config::ModelRef>, effort: Option<Option<dshr_config::ReasoningEffort>> },
+    Preset(dshr_agent::Preset),
+    PluginPreset(Arc<dshr_agent::PresetDef>),
+}
+
 struct Handle(Arc<UiBridge>);
+
+/// 会话控制：除了转给界面，还要按配置检查插件要换的模型、预设（检查是同步的，插件立刻知道对不对）。
+struct SessionHandle {
+    bridge: Arc<UiBridge>,
+    backend: Arc<Backend>,
+}
+
+impl SessionHandle {
+    /// 要改的会话在快照里的样子。当前会话还没有 id（新会话还没发过消息）时是 `Ok(None)`。
+    fn target(&self, session: &Option<String>) -> Result<Option<OpenSession>, String> {
+        let sessions = self.bridge.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        match session {
+            Some(id) => sessions.into_iter().find(|open| open.id == *id).map(Some).ok_or_else(|| format!("the session {id} is not open")),
+            None => Ok(sessions.into_iter().find(|open| open.current)),
+        }
+    }
+
+    fn resolve(&self, session: &Option<String>, change: OptionChange) -> Result<ResolvedChange, String> {
+        match change {
+            OptionChange::Model { model, effort } => {
+                let model = match model {
+                    None => None,
+                    Some(spec) => {
+                        let config = self.backend.config();
+                        let available = |reference: &dshr_config::ModelRef| {
+                            config
+                                .provider(&reference.provider)
+                                .is_some_and(|provider| provider.models.iter().any(|model| model.id == reference.model))
+                        };
+                        // 先按 `provider/model` 找；找不到时当作模型名，沿用会话现在的提供商（模型名里也可能有 `/`）。
+                        let full = dshr_config::ModelRef::parse(&spec).filter(|reference| available(reference));
+                        let reference = match full {
+                            Some(reference) => reference,
+                            None => {
+                                let current = match self.target(session)? {
+                                    Some(open) => open.model.split_once('/').map(|(provider, _)| provider.to_owned()),
+                                    None => config.default_model().map(|model| model.provider),
+                                };
+                                let provider = current.unwrap_or_default();
+                                Some(dshr_config::ModelRef::new(&provider, &spec))
+                                    .filter(|reference| available(reference))
+                                    .ok_or_else(|| format!("the model {spec} is not configured (see host.session.models())"))?
+                            }
+                        };
+                        Some(reference)
+                    }
+                };
+                let effort = effort.map(|effort| {
+                    effort.and_then(|effort| dshr_config::ReasoningEffort::ALL.into_iter().find(|level| level.as_str() == effort))
+                });
+                Ok(ResolvedChange::Model { model, effort })
+            }
+            OptionChange::Preset(id) => {
+                if let Some((plugin, preset)) = id.split_once('/') {
+                    return self
+                        .backend
+                        .plugin_presets()
+                        .into_iter()
+                        .find(|def| def.plugin == plugin && def.id == preset)
+                        .map(ResolvedChange::PluginPreset)
+                        .ok_or_else(|| format!("no plugin provides the preset {id}"));
+                }
+                match crate::conversation::preset_from_id(&id) {
+                    // 创造模式会让模型直接写插件：只能由用户自己切换。
+                    Some(dshr_agent::Preset::Create) => Err("plugins cannot switch a session to creation mode".into()),
+                    Some(preset) => Ok(ResolvedChange::Preset(preset)),
+                    None => Err(format!("unknown preset {id}: use standard, plan, review or <plugin>/<preset>")),
+                }
+            }
+        }
+    }
+}
+
+impl SessionControl for SessionHandle {
+    fn send(&self, request: SendRequest) -> Result<String, String> {
+        Handle(self.bridge.clone()).send(request)
+    }
+
+    fn stop(&self, session: Option<String>) -> Result<(), String> {
+        Handle(self.bridge.clone()).stop(session)
+    }
+
+    fn list(&self) -> Vec<OpenSession> {
+        Handle(self.bridge.clone()).list()
+    }
+
+    fn set_options(&self, session: Option<String>, change: OptionChange) -> Result<(), String> {
+        self.target(&session)?;
+        let resolved = self.resolve(&session, change)?;
+        self.bridge.push(BridgeRequest::SetOptions(session, resolved));
+        Ok(())
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        self.backend
+            .model_choices()
+            .into_iter()
+            .map(|choice| ModelInfo {
+                model: format!("{}/{}", choice.reference.provider, choice.reference.model),
+                provider: choice.reference.provider,
+                name: choice.label,
+                provider_name: choice.provider_name,
+            })
+            .collect()
+    }
+}
 
 impl SessionControl for Handle {
     fn send(&self, request: SendRequest) -> Result<String, String> {
@@ -129,7 +246,7 @@ fn notify(notification: &Notification) {
 pub fn install(backend: Arc<Backend>) {
     let bridge = UiBridge::global();
     dshr_plugins::app::set_app_services(|services| {
-        services.session = Some(Arc::new(Handle(bridge.clone())));
+        services.session = Some(Arc::new(SessionHandle { bridge: bridge.clone(), backend: backend.clone() }));
         services.composer = Some(Arc::new(Handle(bridge.clone())));
         services.notifier = Some(Arc::new(notify));
         let prompt_bridge = bridge.clone();
@@ -145,6 +262,12 @@ pub fn install(backend: Arc<Backend>) {
         }));
         let reload = backend.clone();
         services.config_changed = Some(Arc::new(move || reload.reload_config()));
+        // 插件写了自己的配置：先重新读文件（免得内存里的旧配置之后把它覆盖掉），再交给插件容器。
+        let configured = backend.clone();
+        services.plugin_config = Some(Arc::new(move |id: &str, _raw: serde_json::Value| {
+            configured.reload_config();
+            configured.apply_plugin_config(id);
+        }));
         let resolver = backend.clone();
         services.models = Some(Arc::new(move |spec: &str| resolver.llm_for(&dshr_config::ModelRef::parse(spec)?)));
         let backend = backend.clone();

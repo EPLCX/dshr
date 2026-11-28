@@ -593,6 +593,22 @@ impl SettingsView {
 
     /// 插件容器发布新快照（热重载、装上新插件、开关、授权）时刷新插件列表：新装的插件马上出现，不用重新打开设置。
     fn follow_plugin_changes(&self, window: &mut Window, cx: &mut Context<Self>) {
+        // 插件在运行时藏起、显示设置页（`host.ui.hide("settings:<id>")`）：重新算导航，停在原来那一页上。
+        let mut entry_changes = dshr_agent::entry_changes();
+        cx.spawn_in(window, async move |this, cx| {
+            while entry_changes.changed().await.is_ok() {
+                let updated = this.update(cx, |this, cx| {
+                    let current = this.pages.get(this.page).map(|page| page.id);
+                    this.pages = settings_pages(&this.backend, cx);
+                    this.page = current.and_then(|id| this.pages.iter().position(|page| page.id == id)).unwrap_or(0);
+                    cx.notify();
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         let mut changes = self.backend.plugin_changes();
         cx.spawn_in(window, async move |this, cx| {
             while changes.changed().await.is_ok() {
@@ -1126,8 +1142,11 @@ impl SettingsView {
             return;
         };
         let result = self.backend.update_config(|config| config.set_plugin_value(id, &key, value));
+        // JS 插件即时生效（`host.config` 换成新的）；内置插件重启后生效。
+        let live = result.is_ok() && self.backend.apply_plugin_config(id);
         self.refresh_extensions(cx);
         self.plugin_rows[row].message = Some(match result {
+            Ok(()) if live => (t!("settings.plugin_saved_live").to_string(), false),
             Ok(()) => (t!("settings.plugin_saved").to_string(), false),
             Err(error) => (error, true),
         });
@@ -3056,7 +3075,8 @@ fn settings_pages(backend: &Arc<Backend>, cx: &App) -> Vec<SettingsPage> {
     let mut pages: Vec<SettingsPage> =
         UiRegistry::global(cx).settings_pages().iter().filter(|page| !hidden.contains(&format!("settings:{}", page.id))).cloned().collect();
     for surface in backend.surfaces() {
-        for entry in surface.entries().iter().filter(|entry| entry.place == dshr_agent::EntryPlace::Settings) {
+        let entries = surface.entries().iter().filter(|entry| entry.place == dshr_agent::EntryPlace::Settings);
+        for entry in entries.filter(|entry| !surface.entry_hidden(entry.place, &entry.id)) {
             let (plugin, page, label) = (surface.plugin().to_owned(), entry.page.clone(), entry.label.clone());
             pages.push(SettingsPage {
                 id: intern(&format!("plugin:{plugin}:{}", entry.id)),

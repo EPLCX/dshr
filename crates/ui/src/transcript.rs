@@ -121,6 +121,13 @@ pub struct ToolRow {
     pub images: Vec<Arc<Image>>,
 }
 
+impl ToolRow {
+    /// 还在等用户审批：有审批请求，而且没有被别处先答复（插件的 `hooks.approve` 先给了结论时，agent 那边已经不再等）。
+    pub fn awaiting_approval(&self) -> bool {
+        self.approval.as_ref().is_some_and(|respond| !respond.is_closed())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolStatus {
     Running,
@@ -634,7 +641,7 @@ impl Transcript {
     /// 第一个等待审批的工具调用（审批按顺序一个一个问，同一时刻最多一个）。
     pub fn pending_approval(&self) -> Option<&ToolRow> {
         self.rows.iter().rev().find_map(|row| match row {
-            Row::Tool(tool) if tool.approval.is_some() => Some(tool),
+            Row::Tool(tool) if tool.awaiting_approval() => Some(tool),
             _ => None,
         })
     }

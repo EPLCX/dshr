@@ -65,6 +65,10 @@ pub struct Capabilities {
     pub mcp: bool,
     /// `plugins:install`：下载并安装插件（每次都要用户确认）。
     pub plugins_install: bool,
+    /// `permissions:mode`：导出 `permissions`，提供权限模式（选中时由插件决定每次工具调用放不放行）。
+    pub permissions_mode: bool,
+    /// `permissions:approve`：`hooks.approve` 代用户回答审批（和界面同时等，先答的生效）。
+    pub permissions_approve: bool,
     /// 插件自带的 MCP 服务器派生的能力：`mcp:<名字>@<启动参数的哈希>`（见 `bundle.rs`）。不在清单的
     /// `capabilities` 里写，由 `[mcp.servers]` 推出来。
     pub mcp_servers: Vec<String>,
@@ -98,6 +102,8 @@ const FLAGS: &[(&str, FlagField)] = &[
     ("dshr:sessions:write", |c| &mut c.sessions_write),
     ("dshr:mcp", |c| &mut c.mcp),
     ("plugins:install", |c| &mut c.plugins_install),
+    ("permissions:mode", |c| &mut c.permissions_mode),
+    ("permissions:approve", |c| &mut c.permissions_approve),
 ];
 
 /// 现在认识的能力，报错时列出来。

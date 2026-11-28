@@ -78,14 +78,16 @@ impl Scaffold {
             "# 能用的宿主功能：fs:workspace:read、fs:workspace:write、net:<主机>、exec:<程序>、llm、session:read、\n\
              # session:control、agent:run、hooks:gate、hooks:review、hooks:tool-output、context:compact、context:rewrite、\n\
              # model:route、provider、oauth、notify、background、dshr:config:read、dshr:config:write、dshr:skills、\n\
-             # dshr:sessions:read、dshr:sessions:write、dshr:mcp、plugins:install（见 docs/plugins.md）\n\
+             # dshr:sessions:read、dshr:sessions:write、dshr:mcp、plugins:install、permissions:mode、permissions:approve\n\
+             # （见 docs/plugins.md）\n\
              capabilities = [{}]\n",
             capabilities.join(", ")
         ));
         text.push_str(
             "# timeout_ms = 30000                  # 单次工具调用的时限，默认 30 秒\n\
              \n\
-             # 配置的 JSON Schema：设置页据此生成表单，值在 config.toml 的 [plugins.<id>] 里，脚本里是 host.config。\n\
+             # 配置的 JSON Schema：设置页据此生成表单，值在 config.toml 的 [plugins.<id>] 里，脚本里是 host.config，\n\
+             # 也可以用 host.setConfig({ greeting: \"Hi\" }) 写入声明过的键。\n\
              [config.properties.greeting]\n\
              type = \"string\"\n\
              default = \"Hello\"\n\

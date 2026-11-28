@@ -261,7 +261,7 @@ pub struct ConversationView {
     collapsed_panels: HashSet<&'static str>,
     /// JS 插件加在输入卡片上方的面板（`ui.panels`），和上次建它们时插件的组成。
     plugin_panels: Vec<PluginPanel>,
-    plugin_panels_generation: usize,
+    plugin_panels_generation: (usize, u64),
     /// 折叠起来的插件面板，按 `<插件>/<id>`。
     collapsed_plugin_panels: HashSet<String>,
     /// 输入卡片上已选的附件，随下一条消息发送。
@@ -326,6 +326,7 @@ impl ConversationView {
             permission: default_permission(&config),
             preset: default_preset(&config),
             plugin_preset: None,
+            plugin_permission: None,
         };
 
         let input = cx.new(|cx| {
@@ -393,7 +394,7 @@ impl ConversationView {
             preset_menu_open: false,
             collapsed_panels: HashSet::new(),
             plugin_panels: Vec::new(),
-            plugin_panels_generation: 0,
+            plugin_panels_generation: (0, 0),
             collapsed_plugin_panels: HashSet::new(),
             attachments: Vec::new(),
             mention_query: None,
@@ -512,7 +513,7 @@ impl ConversationView {
 
     /// 有工具调用在等用户审批。
     pub fn needs_attention(&self) -> bool {
-        self.transcript.rows.iter().any(|row| matches!(row, Row::Tool(tool) if tool.approval.is_some()))
+        self.transcript.rows.iter().any(|row| matches!(row, Row::Tool(tool) if tool.awaiting_approval()))
     }
 
     /// 设置保存后刷新：当前模型被删掉时回到默认模型，并更新随语言变化的占位文字。
@@ -550,9 +551,15 @@ impl ConversationView {
                 }
             }
         }
-        // 旧版本的“只读”已经去掉，按“手动模式”恢复（见 `PermissionMode::from_id`）。
-        if let Some(mode) = PermissionMode::from_id(&stored.permission) {
+        // 插件提供的权限模式写成 `<插件>/<id>`：插件还在才恢复。旧版本的“只读”已经去掉，按“手动模式”恢复
+        // （见 `PermissionMode::from_id`）。
+        if let Some((plugin, id)) = stored.permission.split_once('/') {
+            if let Some(def) = self.backend.plugin_permissions().into_iter().find(|def| def.plugin == plugin && def.id == id) {
+                self.options.plugin_permission = Some(def);
+            }
+        } else if let Some(mode) = PermissionMode::from_id(&stored.permission) {
             self.options.permission = mode;
+            self.options.plugin_permission = None;
         }
         let config = self.backend.config();
         let available =
@@ -572,7 +579,7 @@ impl ConversationView {
         let body = dshr_core::EventBody::SessionOptions {
             preset: preset_id(self.options.preset).to_owned(),
             plugin_preset,
-            permission: self.options.permission.id().to_owned(),
+            permission: options_permission_key(&self.options),
             model_provider: self.options.model.provider.clone(),
             model: self.options.model.model.clone(),
         };
@@ -735,14 +742,49 @@ impl ConversationView {
     }
 
     /// 插件替用户发来的一条消息（`host.session.send`）：对话区先加一行“由插件 X 发送”，正在运行时排队。
-    pub fn plugin_send(&mut self, text: String, plugin: &str, cx: &mut Context<Self>) {
+    pub fn plugin_send(&mut self, text: String, images: Vec<dshr_agent::UserAttachment>, plugin: &str, cx: &mut Context<Self>) {
         self.transcript.notice(t!("conversation.sent_by_plugin", plugin = plugin).to_string());
         self.sync_rows(cx);
+        // 插件附上的图片已经检查过类型和大小，和粘贴的截图一样直接带着 base64 发出去。
+        let attachments: Vec<PendingAttachment> = images
+            .into_iter()
+            .filter_map(|image| match image {
+                dshr_agent::UserAttachment::Image { path, media_type, data } => {
+                    Some(PendingAttachment::Screenshot { name: path, media_type, data })
+                }
+                dshr_agent::UserAttachment::Text(..) => None,
+            })
+            .collect();
         if self.is_running() {
-            self.queue.push((text, Vec::new()));
-        } else if !self.start_turn(text, Vec::new(), cx) {
+            self.queue.push((text, attachments));
+        } else if !self.start_turn(text, attachments, cx) {
             tracing::warn!(plugin, "插件发的消息没能开始一轮（可能缺少工作区或 API Key）");
         }
+        cx.notify();
+    }
+
+    /// 插件改了模型、思考等级或预设（`host.session.setModel` / `setPreset`，已在桥里检查过）：从下一轮起生效。
+    pub fn plugin_set_options(&mut self, change: crate::bridge::ResolvedChange, cx: &mut Context<Self>) {
+        match change {
+            crate::bridge::ResolvedChange::Model { model, effort } => {
+                if let Some(model) = model {
+                    self.model_label = self.backend.config().model_display_name(&model).into();
+                    self.options.model = model;
+                }
+                if let Some(effort) = effort {
+                    self.options.effort = effort;
+                }
+            }
+            crate::bridge::ResolvedChange::Preset(preset) => {
+                self.options.preset = preset;
+                self.options.plugin_preset = None;
+            }
+            crate::bridge::ResolvedChange::PluginPreset(def) => {
+                self.options.preset = Preset::Standard;
+                self.options.plugin_preset = Some(def);
+            }
+        }
+        self.persist_options(cx);
         cx.notify();
     }
 
@@ -1489,7 +1531,21 @@ impl ConversationView {
 
     /// 权限模式菜单（输入卡片左下角，对应原版的“工作区内修改”）。
     fn render_permission_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // 选了插件的权限模式时，内置的四项都不勾选。
+        let plugin_modes = self.backend.plugin_permissions();
+        // 提供它的插件停用、卸载之后，这一轮按内置的权限模式进行：菜单上也按内置的显示。
+        let plugin_current = self
+            .options
+            .plugin_permission
+            .clone()
+            .filter(|chosen| plugin_modes.iter().any(|mode| mode.plugin == chosen.plugin && mode.id == chosen.id));
         let current = self.options.permission;
+        let builtin_current = plugin_current.is_none().then_some(current);
+        let trigger_label = plugin_current.as_ref().map_or_else(|| permission_label(current), |mode| mode.label.clone());
+        let trigger_icon: gpui_kit::component::Icon = match &plugin_current {
+            Some(mode) => Icon::new(crate::plugin_page::entry_icon(mode.icon.as_deref())),
+            None => Icon::new(permission_icon(current)),
+        };
         let view = cx.entity().downgrade();
         // 菜单打开的那一刻焦点留在这个按钮上，菜单画出来再移进去（见 `menu_popover`）。
         let trigger_focus = option_focus(OptionSlot::Permission, window, cx);
@@ -1501,14 +1557,20 @@ impl ConversationView {
                 .subtle(cx)
                 .control_sm()
                 .shrinkable(OPTION_MIN_WIDTH)
-                .icon(permission_icon(current))
-                .child(truncated(permission_label(current)))
+                .icon(trigger_icon)
+                .child(truncated(trigger_label.clone()))
                 // 只读“工作区内修改”听不出这是什么：带上“修改策略”。
-                .accessibility_label(t!("a11y.choice", group = t!("a11y.permission_menu"), value = permission_label(current)).to_string())
+                .accessibility_label(t!("a11y.choice", group = t!("a11y.permission_menu"), value = trigger_label).to_string())
                 .child(Icon::new(IconName::ChevronDown).size(px(size::ICON_SM)).flex_none()),
         );
         let modes = [PermissionMode::Manual, PermissionMode::Workspace, PermissionMode::AutoReview, PermissionMode::FullAccess];
-        let initial = modes.iter().position(|mode| *mode == current).unwrap_or(0);
+        let builtin = modes.len();
+        let initial = match &plugin_current {
+            Some(chosen) => {
+                plugin_modes.iter().position(|mode| mode.plugin == chosen.plugin && mode.id == chosen.id).map_or(0, |i| builtin + i)
+            }
+            None => modes.iter().position(|mode| *mode == current).unwrap_or(0),
+        };
         // 菜单向上展开（锚在输入卡片底部）。
         let body = move |menu: &MenuFocus, _: &mut Window, cx: &mut App| {
             let p = palette(cx);
@@ -1521,7 +1583,7 @@ impl ConversationView {
                     // 用可聚焦的按钮：Tab 能走到、Enter / 空格能选，读屏软件读出名称、说明和是否勾选。
                     let item = menu_choice(
                         pressable(("permission-mode", mode as usize), &p).focus_on_hover().track_focus(&menu.item(index, cx)),
-                        mode == current,
+                        builtin_current == Some(mode),
                     )
                     .accessibility_label(permission_label(mode))
                     .aria_description(permission_description(mode))
@@ -1543,12 +1605,55 @@ impl ConversationView {
                             &p,
                         )),
                     )
-                    .when(mode == current, |item| {
+                    .when(builtin_current == Some(mode), |item| {
                         item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
                     })
                     .on_click(move |_, _, cx| {
                         view.update(cx, |this, cx| {
                             this.options.permission = mode;
+                            this.options.plugin_permission = None;
+                            this.permission_menu_open = false;
+                            this.persist_options(cx);
+                            cx.notify();
+                        })
+                        .ok();
+                    });
+                    item.into_any_element()
+                }))
+                // 插件提供的权限模式排在内置的后面。
+                .children(plugin_modes.iter().enumerate().map(|(index, mode)| {
+                    let view = view.clone();
+                    let chosen = plugin_current.as_ref().is_some_and(|current| current.plugin == mode.plugin && current.id == mode.id);
+                    let picked = mode.clone();
+                    let item = menu_choice(
+                        pressable(("plugin-permission", index), &p).focus_on_hover().track_focus(&menu.item(builtin + index, cx)),
+                        chosen,
+                    )
+                    .accessibility_label(mode.label.clone())
+                    .aria_description(mode.description.clone())
+                    .relative()
+                    .px(px(space::S))
+                    .py(px(space::S))
+                    .flex()
+                    .gap(px(space::S))
+                    .items_start()
+                    .rounded(px(radius::SM))
+                    .cursor_pointer()
+                    .hover_fill(&p, radius::SM, false)
+                    .child(Icon::new(crate::plugin_page::entry_icon(mode.icon.as_deref())).size(px(size::ICON_MD)).mt(px(2.)))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(div().text_label().child(mode.label.clone()))
+                            .children((!mode.description.is_empty()).then(|| hint(mode.description.clone(), Tone::Neutral, &p))),
+                    )
+                    .when(chosen, |item| {
+                        item.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                    })
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.options.plugin_permission = Some(picked.clone());
                             this.permission_menu_open = false;
                             this.persist_options(cx);
                             cx.notify();
@@ -2109,7 +2214,8 @@ impl ConversationView {
         let mut panels = Vec::new();
         for surface in self.backend.surfaces() {
             let plugin = surface.plugin().to_owned();
-            for entry in surface.entries().iter().filter(|entry| entry.place == dshr_agent::EntryPlace::Panel) {
+            let visible = surface.entries().iter().filter(|entry| entry.place == dshr_agent::EntryPlace::Panel);
+            for entry in visible.filter(|entry| !surface.entry_hidden(entry.place, &entry.id)) {
                 let key = format!("{plugin}/{}", entry.id);
                 // 已有的面板（同一个插件、同一页）接着用，输入框里打的字不丢。
                 let view = match self.plugin_panels.iter().position(|panel| panel.key == key && panel.page == entry.page) {
@@ -3304,7 +3410,7 @@ impl ConversationView {
         let p = palette(cx);
         let mono = mono_font(cx);
         let (status, tone) = match &tool.status {
-            ToolStatus::Running if tool.approval.is_some() => (t!("tool.waiting"), Tone::Warning),
+            ToolStatus::Running if tool.awaiting_approval() => (t!("tool.waiting"), Tone::Warning),
             ToolStatus::Running => (t!("tool.running"), Tone::Neutral),
             ToolStatus::Done { is_error: false, .. } => (t!("tool.done"), Tone::Success),
             ToolStatus::Done { is_error: true, .. } => (t!("tool.failed"), Tone::Danger),
@@ -3392,7 +3498,7 @@ impl ConversationView {
         let mut tool_card = card(&p).overflow_hidden().child(header);
 
         // 审批在输入框的位置（见 `render_approval`）；卡片上只提示一句，状态由标题里的“等待审批”表达。
-        if tool.approval.is_some() {
+        if tool.awaiting_approval() {
             tool_card = tool_card.child(divider(&p)).child(div().px(px(space::M)).py(px(space::S)).child(hint(
                 t!("tool.approval_below").to_string(),
                 Tone::Warning,
@@ -3701,12 +3807,28 @@ pub(crate) fn preset_id(preset: Preset) -> &'static str {
     }
 }
 
+/// 插件读到的预设：内置的是 [`preset_id`]，插件预设是 `<插件 id>/<预设 id>`。
+pub(crate) fn options_preset_key(options: &TurnOptions) -> String {
+    match &options.plugin_preset {
+        Some(preset) => format!("{}/{}", preset.plugin, preset.id),
+        None => preset_id(options.preset).to_owned(),
+    }
+}
+
+/// 插件读到的权限模式：内置的是 [`PermissionMode::id`]，插件提供的是 `<插件 id>/<模式 id>`。
+pub(crate) fn options_permission_key(options: &TurnOptions) -> String {
+    match &options.plugin_permission {
+        Some(mode) => mode.key(),
+        None => options.permission.id().to_owned(),
+    }
+}
+
 /// 把当前输入卡片上的选项变成一条 `session/options` 事件（首轮开始时、或选项变化时写入）。
 fn options_event_body(options: &TurnOptions) -> dshr_core::EventBody {
     dshr_core::EventBody::SessionOptions {
         preset: preset_id(options.preset).to_owned(),
         plugin_preset: options.plugin_preset.as_ref().map(|preset| format!("{}/{}", preset.plugin, preset.id)),
-        permission: options.permission.id().to_owned(),
+        permission: options_permission_key(options),
         model_provider: options.model.provider.clone(),
         model: options.model.model.clone(),
     }
