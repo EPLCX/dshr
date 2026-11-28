@@ -56,8 +56,8 @@ pub use session::{Session, SessionOptions};
 pub use steer::{SteerMessage, SteerQueue};
 pub use surface::{
     CommandEntry, CommandResult, EntryPlace, FileMentions, MAX_MENTION_BYTES, MAX_MENTION_ITEMS, MentionContent, MentionItem,
-    MentionSource, MentionSources, SlashEntry, ThemeDef, ToolCardView, UiEntry, UiSurface, UiSurfaces, hideable, notify_page_refresh,
-    page_refreshes, validate_tree,
+    MentionSource, MentionSources, NODE_ICONS, NODE_TONES, SlashEntry, ThemeDef, ToolCardView, UiEntry, UiSurface, UiSurfaces, hideable,
+    notify_page_refresh, page_refreshes, validate_tree,
 };
 pub use system_prompt::DEFAULT_SYSTEM_PROMPT;
 pub use title::{TitlePlugin, title_changes};

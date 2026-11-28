@@ -254,15 +254,14 @@ export const ui = {
 | 字段 | 说明 |
 |---|---|
 | `pages` | 页面名 → `{ render, actions }`，或直接一个 `render` 函数。`render(host)` 返回节点树，最多等 3 秒 |
-| `actions` | 动作名 → `(payload, host)`；`payload = { value, inputs, checked }`：节点的 `payload`、各输入框的文字、开关的新状态。返回字符串显示为提示 |
+| `actions` | 动作名 → `(payload, host)`；`payload = { value, inputs, checked }`：节点的 `payload`、页面上各表单控件的值（见“界面节点”中的“控件”）、开关或复选框的新状态。返回字符串显示为提示 |
 | `sidebar` | 侧边栏入口，点开以弹窗显示页面 |
 | `settings` | 设置弹窗里的一页（排在“扩展”之后） |
 | `panels` | 输入框上方可折叠的面板 |
 | `status` | 侧边栏底部的状态行，显示页面里的第一段文字 |
 | `hide` | 要藏起来的内置入口：`settings:<页>`（不含 `extensions`）、`composer:presets`、`composer:permission`、`sidebar:<id>`、`status:<id>` |
 
-入口的 `icon`：star、heart、bell、book、bot、calendar、chart、cpu、file、folder、globe、inbox、map、mic、moon、sun、network、
-palette、search、settings、terminal、user、info。
+入口的 `icon` 取值见“界面节点”一节的“图标”。
 
 `render` 是只读的；动作可以使用插件的全部能力而不再询问（用户亲手点的），也可以用 `host.composer`。
 
@@ -568,32 +567,83 @@ API 密钥在钥匙串里，这里碰不到。
 
 ## 界面节点
 
-页面、卡片和事件的 `render` 返回节点树：节点是带 `type` 的普通对象，直接写字符串等于一个 `text` 节点。每棵树最多 1000 个节点、嵌套 16 层。
+页面、卡片和事件的 `render` 返回节点树：节点是带 `type` 的普通对象，直接写字符串等于一个 `text` 节点。每棵树最多 1000 个节点、嵌套 16 层；
+卡片的 `actions`、标签页各页的 `children` 也计入。
+
+### 通用属性
+
+所有节点都可以有以下属性，均为可选：
+
+| 属性 | 说明 |
+|---|---|
+| `hidden` | 为 `true` 时不显示这个节点 |
+| `disabled` | 为 `true` 时控件显示为禁用，不能点击，也不能修改 |
+| `tooltip` | 鼠标停留时显示的提示文字 |
+| `icon` | 图标，取值见下方“图标” |
+| `tone` | 语气：`neutral` / `secondary` / `accent` / `success` / `warning` / `danger` |
+| `size` | 尺寸：`small` / `medium` / `large`，对应控件高度 28 / 36 / 40。仅适用于下表中注明“有 `size`”的节点；不写时与原来的尺寸一致 |
+
+`row` 的 `size` 是其中控件的默认尺寸：子控件没写 `size` 时沿用，适合把整行工具栏统一调小或调大。
+
+### 布局
 
 | 类型 | 属性 |
 |---|---|
-| `column`、`row` | `children`、`gap`（`small` / `medium` / `large`） |
-| `card` | `title`、`children`、`gap` |
-| `text` | `text`、`style`（`title` / `heading` / `body` / `caption` / `mono`）、`tone`（`neutral` / `accent` / `success` / `danger`） |
-| `markdown` | `text` |
+| `column`、`row` | `children`、`gap`（`small` / `medium` / `large`）、`align`（`start` / `center` / `end` / `stretch`）、`justify`（`start` / `center` / `end` / `between`）、`padding`（`none` / `small` / `medium` / `large`）；`row` 另有 `wrap`（默认换行，`false` 不换行）和 `size` |
+| `grid` | `children`、`columns`（1–6，默认 2）、`gap`；等宽网格 |
+| `spacer` | `size`（`small` / `medium` / `large`，表示间距）；不写 `size` 时占满剩余空间，在 `row` 中可把后面的内容推到最右 |
+| `card` | `title`、`description`、`icon`、`children`、`gap`、`actions`（标题行右侧的节点，通常是按钮）、`variant`（`outlined` 描边，默认 / `filled` 下沉底色 / `plain` 无边框）、`collapsible`（标题可点击折叠）、`open`（可折叠时默认是否展开，默认 `true`） |
+| `collapsible` | `title`、`description`、`icon`、`children`、`open`（默认 `false`）、`id` |
+| `tabs` | `tabs`：`[{ id, label, icon, children }]`、`value`（默认选中的标签页 `id`）、`action`、`id`；有 `size` |
+
+折叠区的展开状态和标签页的选择由界面记住（按节点的 `id`，没有 `id` 时按节点位置），切换时不重新渲染页面。
+`tabs` 写了 `action` 时，切换标签页还会执行该动作，`value` 为标签页的 `id`。只读场合（工具卡片、对话区）中，
+`tabs` 只显示 `value` 指定的那一页（没写时显示第一页），折叠区按 `open` 显示。
+
+### 文字与展示
+
+| 类型 | 属性 |
+|---|---|
+| `text` | `text`、`style`（`title` / `heading` / `body` / `caption` / `mono`）、`tone`、`weight`（`regular` / `medium` / `bold`）、`align`（`start` / `center` / `end`）、`truncate`（单行截断）、`lines`（1–10，超出行数截断） |
+| `markdown` | `text`、`size`（`body` / `caption`） |
 | `code` | `text`、`language` |
 | `diff` | `text`（统一 diff），或 `before` + `after`；`path` |
-| `badge` | `text` |
+| `badge` | `text`、`tone`、`variant`（`soft` 浅底，默认 / `outline` 描边 / `solid` 实底）、`icon`；有 `size` |
 | `divider` | — |
-| `button` | `label`、`action`、`payload`、`variant`（`primary` / `outline` / `ghost` / `danger`） |
-| `input` | `id`、`label`、`placeholder`、`value` |
-| `textarea` | `id`、`label`、`placeholder`、`value`、`rows`（1–40） |
-| `select` | `id`、`options`（字符串或 `{ value, label }`）、`label`、`value`、`action` |
-| `switch` | `id`、`label`、`checked`、`action` |
-| `link` | `label`、`url`（http / https；点击后经用户确认，用系统浏览器打开） |
-| `list` | `items`：`[{ title, detail, action, payload }]` |
-| `table` | `columns`（字符串数组）、`rows`（每行一个数组，每列一个字符串 / 数字 / 布尔 / `null`） |
+| `stat` | `label`、`value`（字符串或数字）、`delta`（数字，或 `"+3%"` 这样的文字；正数显示为绿色，负数为红色）、`caption`、`icon`、`tone`（数值颜色）、`spark`（数字数组，画一条迷你折线，最多 2000 个点）；有 `size` |
+| `alert` | `text`、`title`、`tone`、`icon`、`action`、`actionLabel`、`payload`；`warning` 和 `danger` 使用浅色底色，其余只有描边 |
+| `empty` | `title`、`description`、`icon`、`action`、`actionLabel`、`payload`；空状态占位 |
+| `list` | `items`：`[{ title, detail, icon, badge, trailing, tone, action, payload }]`（`trailing` 是行右侧的文字）、`dividers`（行间分隔线）、`empty`（没有项时显示的文字）；有 `size`（行高） |
+| `table` | `columns`（字符串数组）、`rows`（每行一个数组，每列一个字符串 / 数字 / 布尔 / `null`，或 `{ text, tone, badge }`）、`align`（每列一个 `left` / `center` / `right`）、`widths`（每列一个相对宽度）、`striped`（隔行底色）、`maxHeight`（80–1200，超出时内部滚动）、`empty`、`rowAction`（点击行时执行，`value` 为 `{ index, row }`）；有 `size` |
 | `kv` | `items`：`[{ key, value }]` |
 | `progress` | `value`（0–1）、`label` |
 | `chart` | `kind`（`line` / `bar` / `area` / `pie` / `candlestick`）、`series`：`[{ name, data }]`（`data` 是 `[x, y]`，K 线是 `[x, 开, 高, 低, 收]`；最多 20 组、每组 2000 点）、`height`（80–600） |
 | `heatmap` | `rows`、`columns`（标签，各最多 100）、`values`（每行一个数字数组，可以有 `null`） |
 | `calendar` | `month`（`2026-11`）、`marks`（`{ "2026-11-16": "说明" }`）、`action` |
 | `image` | `src`（`data:image/…` URI，或相对路径，`data/…` 指插件数据目录；≤ 4 MB）、`alt`、`width`（16–1200） |
+
+### 控件
+
+| 类型 | 属性 | `inputs` 中的值 |
+|---|---|---|
+| `button` | `label`、`action`、`payload`、`variant`（`primary` / `outline` / `ghost` / `danger` / `link`）、`icon`、`iconOnly`（只显示图标，需要 `icon`，`label` 用作读屏名称和提示）、`full`（占满宽度）、`confirm`（第一次点击时按钮上显示这句话，再次点击才执行）；有 `size`，默认 `small` | — |
+| `link` | `label`、`url`（http / https；点击后经用户确认，用系统浏览器打开）、`icon`；有 `size` | — |
+| `input` | `id`、`label`、`placeholder`、`value`；有 `size` | 字符串 |
+| `textarea` | `id`、`label`、`placeholder`、`value`、`rows`（1–40）；有 `size` | 字符串 |
+| `number` | `id`、`label`、`placeholder`、`value`、`min`、`max`、`step`（加减按钮的步长，默认 1）、`unit`；有 `size` | 数字（超出范围时取边界值），为空或不是数字时为 `null` |
+| `select` | `id`、`options`（字符串或 `{ value, label }`）、`label`、`value`、`action`；有 `size`，默认 `small` | 字符串 |
+| `radio` | `id`、`options`、`label`、`value`、`action`、`style`（`list` 竖排，默认 / `segmented` 分段控件，最多 4 项）；有 `size` | 字符串 |
+| `checkbox` | `id`、`label`、`checked`、`description`、`action`；有 `size` | `true` / `false` |
+| `switch` | `id`、`label`、`checked`、`action`、`description`；有 `size`（影响文字） | — |
+
+`select`、`radio`、`checkbox` 写了 `action` 时，选择后立即执行（`checkbox` 的 `checked` 为新状态）；没写 `action` 时只记录选择，
+在下一次执行其他动作时随 `inputs` 一并提交。
+
+### 图标
+
+入口的 `icon` 和节点的 `icon` 使用同一组名称：star、heart、bell、book、bot、calendar、chart、cpu、file、folder、globe、inbox、map、
+mic、moon、sun、network、palette、search、settings、terminal、user、info、check、x、plus、minus、trash、copy、refresh、external、
+warning、alert、success、error、play、pause、eye、chevron-right、chevron-down、arrow-up、arrow-down。
 
 不认识的类型、缺少必填属性时整页渲染失败，错误信息里有节点路径。
 

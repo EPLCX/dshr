@@ -610,8 +610,9 @@ impl Tool for PageTool {
 
     fn description(&self) -> &str {
         "Use one page of a dshr plugin the way the user would. Without `action`, render the page and return its node tree. \
-         With `action`, run it as if the user clicked it: `inputs` holds the text typed into the page's input boxes, \
-         `value` is the clicked node's payload, `checked` is a switch's new state. Then render the page again. \
+         With `action`, run it as if the user clicked it: `inputs` holds the values of the page's form controls \
+         (text for input / textarea / select / radio, a number or null for number, true / false for checkbox), \
+         `value` is the clicked node's payload, `checked` is a switch's or checkbox's new state. Then render the page again. \
          Runs against the open workspace."
     }
 
@@ -622,7 +623,11 @@ impl Tool for PageTool {
                 "id": { "type": "string", "description": "Plugin id" },
                 "page": { "type": "string", "description": "Page name from ui.pages" },
                 "action": { "type": "string", "description": "Action to run; omit to only render" },
-                "inputs": { "type": "object", "description": "Input box id → text", "additionalProperties": { "type": "string" } },
+                "inputs": {
+                    "type": "object",
+                    "description": "Form control id → value (text, number, boolean or null)",
+                    "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+                },
                 "value": { "description": "The clicked node's payload" },
                 "checked": { "type": "boolean", "description": "A switch's new state" }
             },

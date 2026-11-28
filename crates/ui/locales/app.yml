@@ -4866,6 +4866,28 @@ plugin_page:
     es: "Vuelva a hacer clic para abrir %{url} en el navegador"
     fr: "Cliquez à nouveau pour ouvrir %{url} dans le navigateur"
     pt: "Clique novamente para abrir %{url} no navegador"
+  decrease:
+    zh-CN: "减小%{name}"
+    en: "Decrease %{name}"
+    zh-HK: "減少%{name}"
+    zh-TW: "減少%{name}"
+    de: "%{name} verringern"
+    el: "Μείωση: %{name}"
+    ja: "%{name}を減らす"
+    es: "Reducir %{name}"
+    fr: "Diminuer %{name}"
+    pt: "Diminuir %{name}"
+  increase:
+    zh-CN: "增大%{name}"
+    en: "Increase %{name}"
+    zh-HK: "增加%{name}"
+    zh-TW: "增加%{name}"
+    de: "%{name} erhöhen"
+    el: "Αύξηση: %{name}"
+    ja: "%{name}を増やす"
+    es: "Aumentar %{name}"
+    fr: "Augmenter %{name}"
+    pt: "Aumentar %{name}"
 plugin_desc:
   fs:
     zh-CN: 读写文件与列目录

@@ -270,17 +270,66 @@ pub const MAX_GRID: usize = 100;
 pub const MAX_IMAGE_SRC: usize = 6 * 1024 * 1024;
 pub const MAX_DEPTH: usize = 16;
 
+/// 节点的 `icon` 能用的图标名（界面里的 `node_icon` 一一对应）。入口图标（侧边栏）也在其中。
+pub const NODE_ICONS: &[&str] = &[
+    "star",
+    "heart",
+    "bell",
+    "book",
+    "bot",
+    "calendar",
+    "chart",
+    "cpu",
+    "file",
+    "folder",
+    "globe",
+    "inbox",
+    "map",
+    "mic",
+    "moon",
+    "sun",
+    "network",
+    "palette",
+    "search",
+    "settings",
+    "terminal",
+    "user",
+    "info",
+    "check",
+    "x",
+    "plus",
+    "minus",
+    "trash",
+    "copy",
+    "refresh",
+    "external",
+    "warning",
+    "alert",
+    "success",
+    "error",
+    "play",
+    "pause",
+    "eye",
+    "chevron-right",
+    "chevron-down",
+    "arrow-up",
+    "arrow-down",
+];
+
+/// 语气：文字、徽标、提示条、列表项、表格单元格等共用。`secondary` 是次要文字色。
+pub const NODE_TONES: &[&str] = &["neutral", "secondary", "accent", "success", "warning", "danger"];
+
+/// 有 `size`（small / medium / large）的节点；`row` 的 `size` 是子控件的默认值。
+const SIZED_NODES: &[&str] = &[
+    "button", "link", "input", "select", "switch", "checkbox", "radio", "number", "badge", "list", "table", "stat", "tabs", "row",
+    "textarea",
+];
+
 /// 检查一棵页面节点树，返回节点数；不合规时说明是哪个节点、哪里不对。界面画之前、创造模式里重载时都用它。
 ///
-/// 节点：`column` / `row`（`children`、可选 `gap`: small|medium|large）、`card`（`children`、可选 `title`）、
-/// `text`（`text`、可选 `style`: title|heading|body|caption|mono、`tone`: neutral|accent|success|danger）、
-/// `button`（`label`、`action`、可选 `payload`、`variant`: primary|outline|ghost|danger）、
-/// `input`（`id`、可选 `label`、`placeholder`、`value`）、`switch`（`id`、`label`、`checked`、`action`）、
-/// `list`（`items`: [{ `title`, 可选 `detail`、`action`、`payload` }]）、`badge`（`text`）、`divider`、
-/// `markdown`（`text`）、`code`（`text`、可选 `language`）、`diff`（统一 diff 的 `text`，或 `before` + `after`，可选 `path`）、
-/// `table`（`columns`、`rows`）、`select`（`id`、`options`、可选 `label`、`value`、`action`）、
-/// `textarea`（`id`、可选 `label`、`placeholder`、`value`、`rows`）、`progress`（`value` 0–1、可选 `label`）、
-/// `link`（`label`、`url`：http/https，点了经确认后用系统浏览器打开）。
+/// 节点和各自的属性见 `docs/plugin-api.md` 的“界面节点”一节。所有节点都可以有 `hidden`、`disabled`、`tooltip`、
+/// `icon`（[`NODE_ICONS`]）和 `tone`（[`NODE_TONES`]）；[`SIZED_NODES`] 里的节点可以有 `size`（small|medium|large）。
+/// 子节点除了 `children`，还有卡片的 `actions` 和标签页各页的 `children`，都计入节点数和层数。
 /// 直接写一个字符串等于 `{ type: "text", text: … }`。
 pub fn validate_tree(tree: &Value) -> Result<usize, String> {
     fn check(node: &Value, path: &str, depth: usize, count: &mut usize) -> Result<(), String> {
@@ -302,30 +351,164 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
         let one_of =
             |key: &str, allowed: &[&str]| object.get(key).is_none_or(|value| value.as_str().is_some_and(|value| allowed.contains(&value)));
         let require = |ok: bool, what: &str| if ok { Ok(()) } else { Err(format!("{path} ({kind}): {what}")) };
+        let optional_text = |keys: &[&str]| keys.iter().all(|key| object.get(*key).is_none_or(Value::is_string));
+        let flag = |key: &str| object.get(key).is_none_or(Value::is_boolean);
+        let number_in = |key: &str, min: f64, max: f64| {
+            object.get(key).is_none_or(|value| value.as_f64().is_some_and(|value| (min..=max).contains(&value)))
+        };
+        let icon_ok = |value: Option<&Value>| value.is_none_or(|icon| icon.as_str().is_some_and(|icon| NODE_ICONS.contains(&icon)));
+        let tone_ok = |value: Option<&Value>| value.is_none_or(|tone| tone.as_str().is_some_and(|tone| NODE_TONES.contains(&tone)));
+        let options_ok = |options: Option<&Vec<Value>>| {
+            options.is_some_and(|options| {
+                !options.is_empty()
+                    && options.iter().all(|option| {
+                        option.is_string()
+                            || (option.get("value").is_some_and(Value::is_string) && option.get("label").is_none_or(Value::is_string))
+                    })
+            })
+        };
+        // 一组子节点（`children`、`actions`、标签页的内容）。
+        let nodes = |list: Option<&Value>, at: &str, count: &mut usize| -> Result<(), String> {
+            let children = match list.map(Value::as_array) {
+                None => return Ok(()),
+                Some(Some(children)) => children,
+                Some(None) => return Err(format!("{path} ({kind}): `{at}` must be an array")),
+            };
+            for (index, child) in children.iter().enumerate() {
+                check(child, &format!("{path}.{at}[{index}]"), depth + 1, count)?;
+            }
+            Ok(())
+        };
+
+        // 所有节点都可以有的属性。
+        require(flag("hidden") && flag("disabled"), "`hidden` and `disabled` must be booleans")?;
+        require(optional_text(&["tooltip"]), "`tooltip` must be a string")?;
+        require(icon_ok(object.get("icon")), "unknown `icon`")?;
+        require(tone_ok(object.get("tone")), "`tone` must be neutral, secondary, accent, success, warning or danger")?;
         match kind {
-            "column" | "row" | "card" => {
+            "markdown" => require(one_of("size", &["body", "caption"]), "`size` must be body or caption")?,
+            "spacer" => {}
+            _ if SIZED_NODES.contains(&kind) => {
+                require(one_of("size", &["small", "medium", "large"]), "`size` must be small, medium or large")?
+            }
+            _ => require(object.get("size").is_none(), "this node has no `size`")?,
+        }
+        match kind {
+            "column" | "row" | "card" | "grid" | "collapsible" => {
                 require(one_of("gap", &["small", "medium", "large"]), "`gap` must be small, medium or large")?;
-                require(object.get("title").is_none_or(Value::is_string), "`title` must be a string")?;
-                let children = object.get("children").map(|children| children.as_array());
-                let children = match children {
-                    None => return Ok(()),
-                    Some(Some(children)) => children,
-                    Some(None) => return Err(format!("{path} ({kind}): `children` must be an array")),
-                };
-                for (index, child) in children.iter().enumerate() {
-                    check(child, &format!("{path}.children[{index}]"), depth + 1, count)?;
+                require(optional_text(&["title", "description", "id"]), "`title`, `description` and `id` must be strings")?;
+                require(one_of("align", &["start", "center", "end", "stretch"]), "`align` must be start, center, end or stretch")?;
+                require(one_of("justify", &["start", "center", "end", "between"]), "`justify` must be start, center, end or between")?;
+                require(one_of("padding", &["none", "small", "medium", "large"]), "`padding` must be none, small, medium or large")?;
+                require(flag("wrap") && flag("open") && flag("collapsible"), "`wrap`, `open` and `collapsible` must be booleans")?;
+                require(one_of("variant", &["outlined", "filled", "plain"]), "`variant` must be outlined, filled or plain")?;
+                match kind {
+                    "grid" => require(number_in("columns", 1., 6.), "`columns` must be 1 to 6")?,
+                    "collapsible" => require(text("title"), "needs a string `title`")?,
+                    _ => {}
+                }
+                nodes(object.get("actions"), "actions", count)?;
+                nodes(object.get("children"), "children", count)
+            }
+            "spacer" => require(one_of("size", &["small", "medium", "large"]), "`size` must be small, medium or large"),
+            "tabs" => {
+                let tabs = object.get("tabs").and_then(Value::as_array);
+                let ok = tabs.is_some_and(|tabs| {
+                    !tabs.is_empty()
+                        && tabs.iter().all(|tab| {
+                            tab.get("id").is_some_and(Value::is_string)
+                                && tab.get("label").is_some_and(Value::is_string)
+                                && icon_ok(tab.get("icon"))
+                        })
+                });
+                require(ok, "`tabs` must be a non-empty array of { id, label, icon?, children? }")?;
+                require(optional_text(&["id", "value", "action"]), "`id`, `value` and `action` must be strings")?;
+                let tabs = tabs.cloned().unwrap_or_default();
+                if let Some(value) = object.get("value").and_then(Value::as_str) {
+                    require(
+                        tabs.iter().any(|tab| tab.get("id").and_then(Value::as_str) == Some(value)),
+                        "`value` must be one of the tab ids",
+                    )?;
+                }
+                for (index, tab) in tabs.iter().enumerate() {
+                    nodes(tab.get("children"), &format!("tabs[{index}].children"), count)?;
                 }
                 Ok(())
             }
             "text" => {
                 require(text("text"), "needs a string `text`")?;
                 require(one_of("style", &["title", "heading", "body", "caption", "mono"]), "unknown `style`")?;
-                require(one_of("tone", &["neutral", "accent", "success", "danger"]), "unknown `tone`")
+                require(one_of("weight", &["regular", "medium", "bold"]), "`weight` must be regular, medium or bold")?;
+                require(one_of("align", &["start", "center", "end"]), "`align` must be start, center or end")?;
+                require(flag("truncate"), "`truncate` must be a boolean")?;
+                require(number_in("lines", 1., 10.), "`lines` must be 1 to 10")
             }
-            "badge" => require(text("text"), "needs a string `text`"),
+            "badge" => {
+                require(text("text"), "needs a string `text`")?;
+                require(one_of("variant", &["soft", "outline", "solid"]), "`variant` must be soft, outline or solid")
+            }
             "button" => {
                 require(text("label") && text("action"), "needs a string `label` and `action`")?;
-                require(one_of("variant", &["primary", "outline", "ghost", "danger"]), "unknown `variant`")
+                require(one_of("variant", &["primary", "outline", "ghost", "danger", "link"]), "unknown `variant`")?;
+                require(flag("iconOnly") && flag("full"), "`iconOnly` and `full` must be booleans")?;
+                require(
+                    object.get("iconOnly").and_then(Value::as_bool) != Some(true) || object.get("icon").is_some(),
+                    "`iconOnly` needs an `icon`",
+                )?;
+                require(optional_text(&["confirm"]), "`confirm` must be a string")
+            }
+            "checkbox" => {
+                require(text("id") && text("label"), "needs a string `id` and `label`")?;
+                require(flag("checked"), "`checked` must be a boolean")?;
+                require(optional_text(&["action", "description"]), "`action` and `description` must be strings")
+            }
+            "radio" => {
+                require(text("id"), "needs a string `id`")?;
+                let options = object.get("options").and_then(Value::as_array);
+                require(options_ok(options), "`options` must be a non-empty array of strings or { value, label? }")?;
+                require(optional_text(&["label", "value", "action"]), "`label`, `value` and `action` must be strings")?;
+                require(one_of("style", &["list", "segmented"]), "`style` must be list or segmented")?;
+                require(
+                    object.get("style").and_then(Value::as_str) != Some("segmented") || options.is_some_and(|options| options.len() <= 4),
+                    "a segmented `radio` has at most 4 options",
+                )
+            }
+            "number" => {
+                require(text("id"), "needs a string `id`")?;
+                let all_numbers = ["value", "min", "max", "step"].iter().all(|key| object.get(*key).is_none_or(Value::is_number));
+                require(all_numbers, "`value`, `min`, `max` and `step` must be numbers")?;
+                let (min, max) = (object.get("min").and_then(Value::as_f64), object.get("max").and_then(Value::as_f64));
+                require(!matches!((min, max), (Some(min), Some(max)) if min > max), "`min` must not be greater than `max`")?;
+                require(object.get("step").and_then(Value::as_f64).is_none_or(|step| step > 0.), "`step` must be greater than 0")?;
+                require(
+                    optional_text(&["label", "unit", "placeholder", "action"]),
+                    "`label`, `unit`, `placeholder` and `action` must be strings",
+                )
+            }
+            "alert" => {
+                require(text("text"), "needs a string `text`")?;
+                require(optional_text(&["title", "action", "actionLabel"]), "`title`, `action` and `actionLabel` must be strings")?;
+                require(object.get("action").is_none() || text("actionLabel"), "`action` needs an `actionLabel`")
+            }
+            "empty" => {
+                require(text("title"), "needs a string `title`")?;
+                require(
+                    optional_text(&["description", "action", "actionLabel"]),
+                    "`description`, `action` and `actionLabel` must be strings",
+                )?;
+                require(object.get("action").is_none() || text("actionLabel"), "`action` needs an `actionLabel`")
+            }
+            "stat" => {
+                require(text("label"), "needs a string `label`")?;
+                let scalar = |key: &str| object.get(key).is_some_and(|value| value.is_string() || value.is_number());
+                require(scalar("value"), "needs a string or numeric `value`")?;
+                require(object.get("delta").is_none() || scalar("delta"), "`delta` must be a string or a number")?;
+                require(optional_text(&["caption"]), "`caption` must be a string")?;
+                let spark = object.get("spark").map(Value::as_array);
+                require(
+                    spark.is_none_or(|spark| spark.is_some_and(|spark| spark.len() <= MAX_POINTS && spark.iter().all(Value::is_number))),
+                    "`spark` must be an array of at most 2000 numbers",
+                )
             }
             "input" => {
                 require(text("id"), "needs a string `id`")?;
@@ -334,16 +517,24 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                     "`label`, `placeholder` and `value` must be strings",
                 )
             }
-            "switch" => require(text("id") && text("label") && text("action"), "needs a string `id`, `label` and `action`"),
+            "switch" => {
+                require(text("id") && text("label") && text("action"), "needs a string `id`, `label` and `action`")?;
+                require(optional_text(&["description"]), "`description` must be a string")
+            }
             "list" => {
                 let items = object.get("items").and_then(Value::as_array);
                 let ok = items.is_some_and(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.get("title").is_some_and(Value::is_string) && item.get("action").is_none_or(Value::is_string))
+                    items.iter().all(|item| {
+                        item.get("title").is_some_and(Value::is_string)
+                            && ["detail", "action", "badge", "trailing"].iter().all(|key| item.get(*key).is_none_or(Value::is_string))
+                            && icon_ok(item.get("icon"))
+                            && tone_ok(item.get("tone"))
+                    })
                 });
                 *count += items.map_or(0, Vec::len);
-                require(ok, "`items` must be an array of { title, detail?, action?, payload? }")
+                require(ok, "`items` must be an array of { title, detail?, icon?, badge?, trailing?, tone?, action?, payload? }")?;
+                require(flag("dividers"), "`dividers` must be a boolean")?;
+                require(optional_text(&["empty"]), "`empty` must be a string")
             }
             "divider" => Ok(()),
             "markdown" => require(text("text"), "needs a string `text`"),
@@ -360,29 +551,44 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                 let columns = object.get("columns").and_then(Value::as_array);
                 let rows = object.get("rows").and_then(Value::as_array);
                 let width = columns.map_or(0, Vec::len);
+                // 单元格：字符串、数字、布尔、`null`，或 `{ text, tone?, badge? }`。
+                let cell_ok = |cell: &Value| {
+                    cell.is_string()
+                        || cell.is_number()
+                        || cell.is_boolean()
+                        || cell.is_null()
+                        || (cell.get("text").is_some_and(Value::is_string)
+                            && tone_ok(cell.get("tone"))
+                            && cell.get("badge").is_none_or(Value::is_boolean))
+                };
                 let ok = columns.is_some_and(|columns| !columns.is_empty() && columns.iter().all(Value::is_string))
                     && rows.is_some_and(|rows| {
-                        rows.iter().all(|row| {
-                            row.as_array().is_some_and(|cells| {
-                                cells.len() == width
-                                    && cells.iter().all(|cell| cell.is_string() || cell.is_number() || cell.is_boolean() || cell.is_null())
-                            })
-                        })
+                        rows.iter().all(|row| row.as_array().is_some_and(|cells| cells.len() == width && cells.iter().all(cell_ok)))
                     });
                 *count += rows.map_or(0, Vec::len);
-                require(ok, "needs `columns` (strings) and `rows` (arrays of strings or numbers, one per column)")
+                require(
+                    ok,
+                    "needs `columns` (strings) and `rows` (arrays of strings, numbers or { text, tone?, badge? }, one per column)",
+                )?;
+                let per_column = |key: &str, each: &dyn Fn(&Value) -> bool| {
+                    object.get(key).is_none_or(|list| list.as_array().is_some_and(|list| list.len() == width && list.iter().all(each)))
+                };
+                require(
+                    per_column("align", &|align| matches!(align.as_str(), Some("left" | "center" | "right"))),
+                    "`align` must have one of left, center or right per column",
+                )?;
+                require(
+                    per_column("widths", &|width| width.as_f64().is_some_and(|width| width > 0. && width <= 100.)),
+                    "`widths` must have one positive number (up to 100) per column",
+                )?;
+                require(flag("striped"), "`striped` must be a boolean")?;
+                require(number_in("maxHeight", 80., 1200.), "`maxHeight` must be 80 to 1200")?;
+                require(optional_text(&["empty", "rowAction"]), "`empty` and `rowAction` must be strings")
             }
             "select" => {
                 require(text("id"), "needs a string `id`")?;
                 let options = object.get("options").and_then(Value::as_array);
-                let ok = options.is_some_and(|options| {
-                    !options.is_empty()
-                        && options.iter().all(|option| {
-                            option.is_string()
-                                || (option.get("value").is_some_and(Value::is_string) && option.get("label").is_none_or(Value::is_string))
-                        })
-                });
-                require(ok, "`options` must be a non-empty array of strings or { value, label? }")?;
+                require(options_ok(options), "`options` must be a non-empty array of strings or { value, label? }")?;
                 require(
                     ["label", "value", "action"].iter().all(|key| object.get(*key).is_none_or(Value::is_string)),
                     "`label`, `value` and `action` must be strings",
@@ -546,7 +752,100 @@ mod tests {
         assert!(validate_tree(&json!({ "type": "image", "src": "../secret.png" })).is_err());
         assert!(validate_tree(&json!(42)).is_err());
 
+        assert!(validate_tree(&json!({ "type": "markdown", "text": "x", "size": "caption" })).is_ok());
+
         assert!(hideable("settings:models") && hideable("composer:presets") && hideable("status:account"));
         assert!(!hideable("settings:extensions") && !hideable("sidebar:settings") && !hideable("composer:other") && !hideable("x"));
+    }
+
+    #[test]
+    fn new_controls_layouts_and_sizes_are_checked() {
+        let ok = |tree: Value| validate_tree(&tree).map_err(|error| format!("{tree}: {error}")).unwrap();
+        let bad = |tree: Value, needle: &str| {
+            let error = validate_tree(&tree).expect_err(&tree.to_string());
+            assert!(error.contains(needle), "{error} should mention {needle}");
+        };
+
+        // 通用属性。
+        ok(json!({ "type": "text", "text": "x", "hidden": true, "tooltip": "tip", "tone": "warning", "weight": "bold", "lines": 2 }));
+        bad(json!({ "type": "text", "text": "x", "hidden": "yes" }), "`hidden`");
+        bad(json!({ "type": "text", "text": "x", "tone": "pink" }), "`tone`");
+        bad(json!({ "type": "badge", "text": "x", "icon": "rocket" }), "unknown `icon`");
+        bad(json!({ "type": "text", "text": "x", "lines": 11 }), "`lines`");
+
+        // 尺寸：有尺寸的节点只认 small / medium / large，别的节点不能写。
+        for kind in ["button", "badge", "list", "table", "stat"] {
+            let mut node = match kind {
+                "button" => json!({ "label": "a", "action": "b" }),
+                "badge" => json!({ "text": "a" }),
+                "list" => json!({ "items": [] }),
+                "table" => json!({ "columns": ["a"], "rows": [] }),
+                _ => json!({ "label": "a", "value": 1 }),
+            };
+            node["type"] = json!(kind);
+            node["size"] = json!("large");
+            ok(node.clone());
+            node["size"] = json!("huge");
+            bad(node, "`size`");
+        }
+        ok(json!({ "type": "row", "size": "small", "children": [{ "type": "button", "label": "a", "action": "b" }] }));
+        bad(json!({ "type": "divider", "size": "small" }), "no `size`");
+        ok(json!({ "type": "spacer" }));
+        ok(json!({ "type": "spacer", "size": "large" }));
+
+        // 按钮的新样式。
+        ok(
+            json!({ "type": "button", "label": "Delete", "action": "rm", "variant": "link", "icon": "trash", "iconOnly": true, "confirm": "Sure?" }),
+        );
+        bad(json!({ "type": "button", "label": "a", "action": "b", "iconOnly": true }), "`iconOnly` needs an `icon`");
+
+        // 表单控件。
+        ok(json!({ "type": "checkbox", "id": "agree", "label": "Agree", "checked": true, "size": "small" }));
+        bad(json!({ "type": "checkbox", "id": "agree" }), "`label`");
+        ok(json!({ "type": "radio", "id": "mode", "options": ["a", { "value": "b", "label": "B" }], "value": "a", "style": "segmented" }));
+        bad(json!({ "type": "radio", "id": "mode", "options": ["a", "b", "c", "d", "e"], "style": "segmented" }), "at most 4");
+        bad(json!({ "type": "radio", "id": "mode", "options": [] }), "`options`");
+        ok(json!({ "type": "number", "id": "n", "value": 3, "min": 0, "max": 10, "step": 0.5, "unit": "px" }));
+        bad(json!({ "type": "number", "id": "n", "min": 5, "max": 1 }), "`min`");
+        bad(json!({ "type": "number", "id": "n", "step": 0 }), "`step`");
+        bad(json!({ "type": "number", "id": "n", "value": "3" }), "must be numbers");
+
+        // 布局：标签页、折叠区、网格；子节点计入节点数。
+        let tabs = json!({ "type": "tabs", "value": "b", "tabs": [
+            { "id": "a", "label": "A", "children": ["one"] },
+            { "id": "b", "label": "B", "icon": "star", "children": ["two", "three"] }
+        ]});
+        assert_eq!(validate_tree(&tabs), Ok(4));
+        bad(json!({ "type": "tabs", "tabs": [{ "id": "a", "label": "A" }], "value": "z" }), "`value`");
+        bad(json!({ "type": "tabs", "tabs": [] }), "`tabs`");
+        bad(json!({ "type": "tabs", "tabs": [{ "id": "a", "label": "A", "children": [{ "type": "gauge" }] }] }), "tabs[0].children[0]");
+        ok(json!({ "type": "collapsible", "title": "More", "open": true, "children": ["x"] }));
+        bad(json!({ "type": "collapsible", "children": [] }), "`title`");
+        ok(json!({ "type": "grid", "columns": 3, "children": ["a", "b", "c"] }));
+        bad(json!({ "type": "grid", "columns": 7 }), "`columns`");
+        ok(json!({ "type": "column", "align": "center", "justify": "between", "padding": "small" }));
+        bad(json!({ "type": "row", "justify": "around" }), "`justify`");
+        let card = json!({ "type": "card", "title": "T", "variant": "filled", "collapsible": true,
+            "actions": [{ "type": "button", "label": "a", "action": "b" }], "children": [] });
+        assert_eq!(validate_tree(&card), Ok(2));
+        bad(json!({ "type": "card", "variant": "glass" }), "`variant`");
+
+        // 展示类。
+        ok(json!({ "type": "alert", "tone": "danger", "title": "Oops", "text": "Failed", "action": "retry", "actionLabel": "Retry" }));
+        bad(json!({ "type": "alert", "text": "x", "action": "retry" }), "`actionLabel`");
+        ok(json!({ "type": "empty", "title": "Nothing here", "icon": "inbox" }));
+        ok(json!({ "type": "stat", "label": "Tokens", "value": 1200, "delta": -3.5, "spark": [1, 2, 3] }));
+        bad(json!({ "type": "stat", "label": "Tokens" }), "`value`");
+        bad(json!({ "type": "stat", "label": "a", "value": 1, "spark": ["x"] }), "`spark`");
+
+        // 列表、表格的新属性。
+        ok(json!({ "type": "list", "dividers": true, "empty": "None", "items": [
+            { "title": "a", "icon": "file", "badge": "new", "trailing": "3 KB", "tone": "danger" }
+        ]}));
+        bad(json!({ "type": "list", "items": [{ "title": "a", "badge": 1 }] }), "`items`");
+        ok(json!({ "type": "table", "columns": ["a", "b"], "rows": [["x", { "text": "ok", "tone": "success", "badge": true }]],
+            "align": ["left", "right"], "widths": [2, 1], "striped": true, "rowAction": "open", "maxHeight": 300 }));
+        bad(json!({ "type": "table", "columns": ["a", "b"], "rows": [], "align": ["left"] }), "`align`");
+        bad(json!({ "type": "table", "columns": ["a"], "rows": [[{ "text": "x", "tone": "pink" }]] }), "`rows`");
     }
 }
