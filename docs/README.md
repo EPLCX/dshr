@@ -33,6 +33,7 @@ DSHR 是 DeepSeek Harness 的 Rust 原生分支版（非官方）：一个在你
 | [架构](architecture.md) | crate 地图、插件内核、agent 循环、事件日志、模型层、界面层 |
 | [会话与日志格式](sessions.md) | 会话目录、事件类型、从日志到模型上下文的投影、分叉与删除 |
 | [开发与贡献](development.md) | 构建、测试、演示模式、本地化、第三方声明、补丁版依赖、打包 |
+| [协作规范](contributing.md) | 分支、Issue 与 PR 的写法、版本号规则、Release 流程 |
 | [设计规范](design.md) | 界面的 token、组件、页面结构、辅助功能与动效规则 |
 
 ## 约定

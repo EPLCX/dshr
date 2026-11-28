@@ -390,7 +390,7 @@ impl DropdownState {
         window.focus_prev(cx);
     }
 
-    /// 展开的列表。`phase` 是展开、收起的进度：从展开的方向带一点过冲地滑出，收起时退回去淡出。
+    /// 展开的列表。`phase` 是进场进度：从展开的方向淡入并移过来一点；收起时立即移除。
     fn render_list(&self, phase: motion::Phase, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = palette(cx);
         let count = self.items.len();
@@ -398,8 +398,7 @@ impl DropdownState {
         let rows = count as f32;
         let row_height = size::LIST_ITEM;
         let headers = (0..count).filter(|index| self.starts_group(*index).is_some()).count() as f32;
-        let wanted = (rows * row_height + (rows - 1.).max(0.) * 2. + headers * (GROUP_HEADER_HEIGHT + 2.) + space::XS * 2. + 2.)
-            .min(MAX_LIST_HEIGHT);
+        let wanted = (rows * row_height + headers * GROUP_HEADER_HEIGHT + space::XS * 2. + 2.).min(MAX_LIST_HEIGHT);
         let max_width = px(MAX_LIST_WIDTH).min(window.viewport_size().width - px(WINDOW_MARGIN * 2.)).max(self.width);
         let (down, max_height) = match self.trigger_bounds.get() {
             Some(bounds) => place(bounds.top().as_f32(), bounds.bottom().as_f32(), window.viewport_size().height.as_f32(), wanted),
@@ -419,7 +418,8 @@ impl DropdownState {
                     // 组名只是给眼睛看的（每一项的名字里已经有它），不进无障碍树。
                     div()
                         .flex_none()
-                        .px(px(space::M))
+                        // 和选项文字左对齐（选项左右内边距 8，加 2px 的焦点框）。
+                        .px(px(space::S + 2.))
                         .pt(px(space::S))
                         .pb(px(space::XS))
                         .text_caption()
@@ -439,10 +439,11 @@ impl DropdownState {
                     .flex()
                     .items_center()
                     .gap(px(space::S))
-                    .h(px(row_height))
-                    .px(px(space::M))
+                    .min_h(px(row_height))
+                    .px(px(space::S))
                     .rounded(px(radius::SM))
                     .text_body()
+                    .when(selected, |option| option.font_weight(FontWeight::MEDIUM))
                     .cursor_pointer()
                     .border_2()
                     .border_color(transparent_black())
@@ -451,6 +452,8 @@ impl DropdownState {
                     .map(|option| crate::design::with_focus_ring(option, self.options[index].is_focused(window), radius::SM, window, &p))
                     // 高亮项的底色有过渡（铺到焦点框外沿）。悬停就是高亮（见 `hover`），只有一项亮着。
                     .child(motion::highlight("option-fill", hover_bg, radius::SM, highlighted).without_hover().outset(2.))
+                    // 高对比度：高亮项是“选定文本”的配色（`selected` 底、`on_selected` 字）。
+                    .when(p.high_contrast && highlighted, |option| option.text_color(p.on_selected))
                     // 和系统组合框一样：鼠标移到哪一项，哪一项就是高亮项并获得焦点，读屏软件随之读出它
                     // （不只是键盘）。之后按 Enter、方向键也从这一项接着走。
                     .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, window, cx| this.hover(index, window, cx)))
@@ -467,7 +470,9 @@ impl DropdownState {
                             view.update(cx, |this, cx| this.focus_highlighted(window, cx)).ok();
                         }))
                     })
-                    .when(selected, |option| option.child(Icon::new(IconName::Check).size(px(size::ICON_SM)).text_color(p.accent)));
+                    .when(selected, |option| {
+                        option.child(crate::design::row_icon(Icon::new(IconName::Check).size(px(size::ICON_SM)), p.accent, &p))
+                    });
                 [header.map(IntoElement::into_any_element), Some(option.into_any_element())]
             })
             .flatten();
@@ -490,13 +495,12 @@ impl DropdownState {
                     .max_h(px(max_height))
                     .overflow_y_scroll()
                     .p(px(space::XS))
-                    .gap(px(2.))
-                    .rounded(px(radius::MD))
+                    .rounded(px(radius::LG))
                     .border_1()
                     .border_color(p.border)
                     .bg(p.raised)
                     .text_color(p.text)
-                    .map(|list| motion::pop(list, if down { Edge::Top } else { Edge::Bottom }, motion::SHORT, phase, shadow::menu()))
+                    .map(|list| motion::pop(list, if down { Edge::Top } else { Edge::Bottom }, motion::NUDGE, phase, shadow::menu(&p)))
                     .on_action(cx.listener(Self::on_up))
                     .on_action(cx.listener(Self::on_down))
                     .on_action(cx.listener(Self::on_first))
@@ -514,9 +518,7 @@ impl DropdownState {
                     .child({
                         let bounds = self.list_bounds.clone();
                         canvas(move |area, _, _| bounds.set(Some(area)), |_, _, _, _| {}).absolute().top_0().left_0().size_full()
-                    })
-                    // 收起途中只是残影：不响应操作。
-                    .map(|list| if phase.leaving { motion::inert(list).into_any_element() } else { list.into_any_element() }),
+                    }),
             ),
         )
         .with_priority(1)
@@ -545,23 +547,30 @@ impl Render for DropdownState {
             .when_some(self.disabled.clone(), |trigger, reason| trigger.aria_description(reason).opacity(0.5).cursor_default())
             .w(self.width)
             .max_w_full()
-            .h(px(size::CONTROL_MD))
-            .px(px(space::M))
+            .min_h(px(size::CONTROL_MD))
+            .px(px(10.))
             .gap(px(space::S))
             .items_center()
             .rounded(px(radius::MD))
             .border_1()
-            .border_color(cx.theme().input)
+            .border_color(p.control_border)
             .bg(p.surface)
             .text_body()
-            .when(self.disabled.is_none(), |trigger| trigger.cursor_pointer())
+            .when(self.disabled.is_none(), |trigger| {
+                // 悬停、按下时叠一层底色（画在内容下面），和按钮一样即时生效。
+                trigger.cursor_pointer().child(
+                    motion::highlight("trigger-fill", transparent_black(), radius::MD, false).hover_color(p.hover).pressed_color(p.pressed),
+                )
+            })
             .when(self.open, |trigger| trigger.border_color(ring))
             .when(high_visibility_outlines() && self.trigger.is_focused(window), |trigger| {
                 // 触发框本来有 1px 的边框：聚焦时加粗成焦点框，外面再画一圈。
                 trigger.border_2().border_color(ring).child(crate::design::focus_outline(Corners::all(px(radius::MD)), 2., &p))
             })
             .when(!high_visibility_outlines() && crate::design::focus_from_keyboard(), |trigger| {
-                trigger.focus(move |style| style.border_color(ring).border_2())
+                // 描边保持 1px（加粗会让内容挪动），外面再用 1px 的投影补成 2px 的焦点框。
+                trigger
+                    .focus(move |style| style.border_color(ring).shadow(vec![BoxShadow::new(px(0.), px(0.), ring).spread_radius(px(1.))]))
             })
             .on_action(cx.listener(Self::on_up))
             .on_action(cx.listener(Self::on_down))
@@ -602,13 +611,11 @@ impl Render for DropdownState {
         // 记下触发框的位置（不触发重绘：只在下次展开时用）。
         let trigger =
             trigger.child(canvas(move |area, _, _| bounds.set(Some(area)), |_, _, _, _| {}).absolute().top_0().left_0().size_full());
-        // 收起后列表还要画一小段退场。
-        let phase = motion::presence("dropdown-list-presence", self.open, motion::BASE, motion::FAST, window, cx);
+        // 展开时淡入；收起时立即移除。
+        let phase = motion::presence("dropdown-list-presence", self.open, motion::BASE, window, cx);
         v_flex().child(trigger).children(phase.map(|phase| self.render_list(phase, window, cx)))
     }
 }
-
-use gpui_kit::component::ActiveTheme as _;
 
 #[cfg(test)]
 mod tests {

@@ -1,3 +1,7 @@
+// This file was modified by the dshr project from gpui-pre-windows 0.3.12 as published on crates.io.
+// The changes are described in vendor/gpui-pre-windows/PATCHED.md.
+// Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE in this crate).
+
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -50,6 +54,10 @@ pub struct WindowsWindowState {
     pub border_offset: WindowBorderOffset,
     pub appearance: Cell<WindowAppearance>,
     pub background_appearance: Cell<WindowBackgroundAppearance>,
+    /// Whether the window is active, tracked from `WM_ACTIVATE`. Decides
+    /// whether the inactive top border is shown; see
+    /// [`WindowsWindowInner::update_top_border`].
+    pub active: Cell<bool>,
     pub scale_factor: Cell<f32>,
     pub restore_from_minimized: Cell<Option<Box<dyn FnMut(RequestFrameOptions)>>>,
 
@@ -166,6 +174,7 @@ impl WindowsWindowState {
             border_offset,
             appearance: Cell::new(appearance),
             background_appearance: Cell::new(WindowBackgroundAppearance::Opaque),
+            active: Cell::new(false),
             scale_factor: Cell::new(scale_factor),
             restore_from_minimized: Cell::new(restore_from_minimized),
             min_size,
@@ -573,7 +582,7 @@ impl WindowsWindow {
 
         register_drag_drop(&this)?;
         set_non_rude_hwnd(hwnd, true);
-        configure_dwm_dark_mode(hwnd, appearance);
+        configure_dwm_dark_mode(hwnd, appearance, this.needs_win10_top_border());
         this.state.border_offset.update(hwnd)?;
         let placement =
             retrieve_window_placement(hwnd, display, params.bounds, &this.state.border_offset)?;
@@ -1036,10 +1045,15 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn draw(&self, scene: &Scene) {
+        let top_border_height = self.top_border_height();
         self.state
             .renderer
             .borrow_mut()
-            .draw(scene, self.state.background_appearance.get())
+            .draw(
+                scene,
+                self.state.background_appearance.get(),
+                top_border_height,
+            )
             .log_err();
     }
 

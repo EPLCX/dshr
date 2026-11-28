@@ -206,7 +206,7 @@ impl PluginViews {
 pub struct PluginViewResolver {
     source: Arc<dyn PluginViewSource>,
     /// 还没出结果、有插件给它画卡片的工具调用：调用号 → (工具名, 参数)。
-    inputs: std::collections::HashMap<String, (String, serde_json::Value)>,
+    inputs: std::collections::HashMap<String, (String, std::sync::Arc<serde_json::Value>)>,
 }
 
 impl PluginViewResolver {
@@ -327,13 +327,24 @@ impl Transcript {
         Self::new(ui).replay(events)
     }
 
-    /// 把历史事件依次放进来；之后没有待通知的变化。
+    /// 把历史事件依次放进来；之后没有待通知的变化。界面上打开会话时分段放（见 `ConversationView::open_session`）。
+    #[cfg(test)]
     pub fn replay<'a>(mut self, events: impl IntoIterator<Item = &'a SessionEvent>) -> Self {
+        self.replay_part(events);
+        self.finish_replay();
+        self
+    }
+
+    /// 分段重放：放进一段历史事件（长会话分几帧放完，界面不卡）。全部放完后调用 [`Self::finish_replay`]。
+    pub fn replay_part<'a>(&mut self, events: impl IntoIterator<Item = &'a SessionEvent>) {
         for event in events {
             self.apply_durable(event);
         }
+    }
+
+    /// 分段重放结束：重放过程中记下的变化不用通知（界面拿到的是完整的结果）。
+    pub fn finish_replay(&mut self) {
         self.dirty.clear();
-        self
     }
 
     /// 不在行里的界面状态（面板据此渲染）。
@@ -874,7 +885,7 @@ mod tests {
     fn tool_only_message_leaves_no_empty_bubble() {
         let mut t = Transcript::default();
         t.apply(&assistant(vec![ContentBlock::ToolUse { id: "c1".into(), name: "x".into(), input: json!({}).into() }]));
-        t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "list_dir".into(), input: json!({"path": "."}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "list_dir".into(), input: json!({"path": "."}).into() }));
         assert_eq!(t.rows.len(), 1);
         assert!(matches!(&t.rows[0], Row::Tool(tool) if &*tool.input == r#"{"path":"."}"#));
 
@@ -887,7 +898,7 @@ mod tests {
     #[tokio::test]
     async fn approval_round_trip_and_cancel() {
         let mut t = Transcript::default();
-        t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "run_shell".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "run_shell".into(), input: json!({}).into() }));
 
         let (tx, rx) = oneshot::channel();
         t.attach_approval("c1", tx, Some("有风险".into()));
@@ -953,7 +964,7 @@ mod tests {
         let plan_call = durable(EventBody::ToolCall {
             call_id: "p1".into(),
             name: UPDATE_PLAN.into(),
-            input: json!({"steps": [{"title": "读代码", "status": "in_progress"}]}),
+            input: json!({"steps": [{"title": "读代码", "status": "in_progress"}]}).into(),
         });
         let mut t = Transcript::new(builtin_ui());
         t.apply(&plan_call);
@@ -1038,7 +1049,7 @@ mod tests {
         let plain = [
             event(1, EventBody::UserMessage { text: "hi".into() }),
             event(2, EventBody::ext("other/thing", json!({})).unwrap()),
-            event(3, EventBody::ToolCall { call_id: "c1".into(), name: "read_file".into(), input: json!({}) }),
+            event(3, EventBody::ToolCall { call_id: "c1".into(), name: "read_file".into(), input: json!({}).into() }),
             event(4, EventBody::ToolResult { call_id: "c1".into(), output: "x".into(), is_error: false }),
         ];
         resolver.record_calls(&plain);
@@ -1047,7 +1058,7 @@ mod tests {
         assert_eq!(plugins.asked.load(std::sync::atomic::Ordering::Relaxed), 0);
 
         // 有插件画卡片的工具：调用和结果分在两批到达也行；结果到了才需要问插件。
-        let call = [event(5, EventBody::ToolCall { call_id: "c2".into(), name: "count".into(), input: json!({"text": "a"}) })];
+        let call = [event(5, EventBody::ToolCall { call_id: "c2".into(), name: "count".into(), input: json!({"text": "a"}).into() })];
         resolver.record_calls(&call);
         assert!(!resolver.needs_plugins(&call));
         resolver.resolve(&call);
@@ -1059,7 +1070,7 @@ mod tests {
 
         // 被中断的调用不交给卡片。
         let cancelled = [
-            event(7, EventBody::ToolCall { call_id: "c3".into(), name: "count".into(), input: json!({}) }),
+            event(7, EventBody::ToolCall { call_id: "c3".into(), name: "count".into(), input: json!({}).into() }),
             event(8, EventBody::ToolResult { call_id: "c3".into(), output: INTERRUPTED_TOOL_OUTPUT.into(), is_error: true }),
         ];
         resolver.record_calls(&cancelled);
@@ -1123,9 +1134,9 @@ mod tests {
     fn js_plugins_draw_event_trees_and_tool_cards() {
         let events: Vec<SessionEvent> = [
             EventBody::ext("chart/point", json!({"value": 0.5})).unwrap(),
-            EventBody::ToolCall { call_id: "c1".into(), name: "count".into(), input: json!({"text": "a\nb"}) },
+            EventBody::ToolCall { call_id: "c1".into(), name: "count".into(), input: json!({"text": "a\nb"}).into() },
             EventBody::ToolResult { call_id: "c1".into(), output: "2".into(), is_error: false },
-            EventBody::ToolCall { call_id: "c2".into(), name: "other".into(), input: json!({}) },
+            EventBody::ToolCall { call_id: "c2".into(), name: "other".into(), input: json!({}).into() },
             EventBody::ToolResult { call_id: "c2".into(), output: "x".into(), is_error: false },
         ]
         .into_iter()
@@ -1211,7 +1222,7 @@ mod tests {
         assert_eq!((t.rows.len(), t.take_dirty()), (2, vec![1]));
 
         // 工具卡片的输出、审批、展开都算内容变化。
-        t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "run_shell".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "c1".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.take_dirty();
         t.apply(&LiveEvent::Chunk(Chunk::ToolOutput { call_id: "c1".into(), text: "building…\n".into() }));
         assert_eq!(t.take_dirty(), [2]);
@@ -1227,10 +1238,41 @@ mod tests {
         assert!(Transcript::from_events(Rc::default(), &events).take_dirty().is_empty());
     }
 
+    /// 打开会话时分段重放（每段长短不一，可能把一轮从中间切开），结果和一次放完一样。
+    #[test]
+    fn replaying_in_parts_matches_replaying_at_once() {
+        let mut events = Vec::new();
+        for turn in 0..20u32 {
+            let seq = |offset: u64| u64::from(turn) * 4 + offset;
+            events
+                .push(SessionEvent { seq: seq(0), time: 0, body: EventBody::UserMessage { text: format!("第 {turn} 个问题").into() } });
+            events.push(SessionEvent {
+                seq: seq(1),
+                time: 0,
+                body: EventBody::ToolCall { call_id: format!("c{turn}"), name: "run_shell".into(), input: json!({}).into() },
+            });
+            events.push(SessionEvent {
+                seq: seq(2),
+                time: 0,
+                body: EventBody::TurnEnd { turn, reason: TurnEndReason::Completed, error: None },
+            });
+        }
+        let whole = Transcript::from_events(builtin_ui(), &events);
+        for step in [1, 2, 5, 7, 64] {
+            let mut parts = Transcript::new(builtin_ui());
+            for chunk in events.chunks(step) {
+                parts.replay_part(chunk);
+            }
+            parts.finish_replay();
+            assert_eq!(format!("{:?}", parts.rows), format!("{:?}", whole.rows), "每段 {step} 个事件");
+            assert!(parts.take_dirty().is_empty());
+        }
+    }
+
     #[test]
     fn results_cache_reports_and_release_live_output() {
         let mut t = Transcript::new(builtin_ui());
-        t.apply(&durable(EventBody::ToolCall { call_id: "e1".into(), name: "edit_file".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "e1".into(), name: "edit_file".into(), input: json!({}).into() }));
         t.apply(&LiveEvent::Chunk(Chunk::ToolOutput { call_id: "e1".into(), text: "x".into() }));
         let output = "Edited a.rs (+1 -1)\n\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n";
         t.apply(&durable(EventBody::ToolResult { call_id: "e1".into(), output: output.into(), is_error: false }));
@@ -1240,14 +1282,14 @@ mod tests {
         assert_eq!((report.added, report.removed, report.blocks.len()), (1, 1, 3));
 
         // 失败的调用不解析报告，即使输出长得像。
-        t.apply(&durable(EventBody::ToolCall { call_id: "e2".into(), name: "edit_file".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "e2".into(), name: "edit_file".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::ToolResult { call_id: "e2".into(), output: output.into(), is_error: true }));
         assert!(
             matches!(&t.rows[1], Row::Tool(tool) if tool.data.is_none() && matches!(tool.status, ToolStatus::Done { is_error: true, .. }))
         );
 
         // 别的工具的输出即使长得像改动报告，也按普通输出显示。
-        t.apply(&durable(EventBody::ToolCall { call_id: "s1".into(), name: "run_shell".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "s1".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::ToolResult { call_id: "s1".into(), output: output.into(), is_error: false }));
         assert!(matches!(&t.rows[2], Row::Tool(tool) if tool.data.is_none()));
     }
@@ -1268,7 +1310,7 @@ mod tests {
         let output: std::sync::Arc<str> = "x".repeat(1000).into();
         let mut t = Transcript::default();
         t.apply(&assistant(vec![ContentBlock::Text { text: reply.clone() }]));
-        t.apply(&durable(EventBody::ToolCall { call_id: "c".into(), name: "run_shell".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "c".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::ToolResult { call_id: "c".into(), output: output.clone(), is_error: false }));
         assert!(matches!(&t.rows[0], Row::Assistant { text, .. } if std::sync::Arc::ptr_eq(text, &reply)));
         assert!(matches!(
@@ -1302,7 +1344,7 @@ mod tests {
         // 1x1 的透明 PNG。
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
         let mut t = Transcript::default();
-        t.apply(&durable(EventBody::ToolCall { call_id: "c".into(), name: "run_shell".into(), input: json!({}) }));
+        t.apply(&durable(EventBody::ToolCall { call_id: "c".into(), name: "run_shell".into(), input: json!({}).into() }));
         t.apply(&durable(EventBody::Ext {
             kind: dshr_core::MEDIA_IMAGES.into(),
             data: json!({ "call_id": "c", "images": [

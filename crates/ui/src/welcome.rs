@@ -1,5 +1,6 @@
 //! 欢迎窗（600×700）：首次启动、还没有可用凭据时显示，完成后才打开工作区窗口。
 
+use crate::design::ControlSize as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -161,15 +162,17 @@ impl Render for WelcomeView {
                 "reveal-welcome-sign-in",
                 v_flex()
                     .gap(px(space::S))
-                    .child(crate::design::framed(
-                        "welcome-sign-in",
-                        Button::new("welcome-sign-in")
-                            .w_full()
-                            .outline()
-                            .label(t!("welcome.sign_in").to_string())
-                            .disabled(self.sign_in.is_some())
-                            .on_click(cx.listener(|this, _, window, cx| this.sign_in_with_account(window, cx))),
-                    ))
+                    .child(
+                        crate::design::framed(
+                            "welcome-sign-in",
+                            Button::new("welcome-sign-in")
+                                .w_full()
+                                .label(t!("welcome.sign_in").to_string())
+                                .disabled(self.sign_in.is_some())
+                                .on_click(cx.listener(|this, _, window, cx| this.sign_in_with_account(window, cx))),
+                        )
+                        .inert(self.sign_in.is_some()),
+                    )
                     .children(
                         self.sign_in
                             .is_some()
@@ -190,10 +193,15 @@ impl Render for WelcomeView {
                     .gap(px(space::S))
                     .child(crate::design::framed_handle(
                         gpui_kit::Focusable::focus_handle(self.api_key.read(cx), cx),
-                        Input::new(&self.api_key).aria_label(t!("settings.api_key").to_string()),
+                        Input::new(&self.api_key).aria_label(t!("settings.api_key").to_string()).suffix(crate::secret_reveal::toggle(
+                            "toggle-welcome-api-key",
+                            &self.api_key,
+                            crate::secret_reveal::Guard::None,
+                            cx,
+                        )),
                     ))
                     .child(hint(t!("welcome.api_key_hint").to_string(), Tone::Neutral, &p))
-                    .children(self.error.clone().map(|error| motion::error_in(hint(error, Tone::Danger, &p), "welcome-error-enter"))),
+                    .children(self.error.clone().map(|error| motion::fade_in(hint(error, Tone::Danger, &p), "welcome-error-enter"))),
             ));
         crate::design::track_focus_source(v_flex())
             .size_full()
@@ -203,8 +211,7 @@ impl Render for WelcomeView {
             .children(crate::title_bar::title_bar(false, None, window, cx))
             // 平滑滚动层放在最前，先于各滚动容器拿到滚轮事件（见 `smooth_scroll`）。
             .child(self.scroll.layer(cx))
-            // 窗口打开时内容浮上来；底部按钮固定不动。
-            .child(motion::Entrance::new(motion::SLOW).from(motion::Edge::Bottom, motion::PAGE).play(body, "welcome-enter"))
+            .child(body)
             .child(
                 v_flex()
                     .flex_none()
@@ -223,7 +230,7 @@ impl Render for WelcomeView {
                     .child(crate::design::framed(
                         "welcome-later",
                         Button::new("welcome-later")
-                            .ghost()
+                            .subtle(cx)
                             .w_full()
                             .label(t!("welcome.later").to_string())
                             .on_click(cx.listener(|this, _, window, cx| this.set_up_later(window, cx))),

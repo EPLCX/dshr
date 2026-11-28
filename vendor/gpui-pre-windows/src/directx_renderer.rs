@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use gpui_util::ResultExt;
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, RECT},
         Graphics::{
             Direct3D::*,
             Direct3D11::*,
@@ -122,7 +122,57 @@ impl Drop for Annotation<'_> {
 struct DirectComposition {
     comp_device: IDCompositionDevice,
     comp_target: IDCompositionTarget,
+    root_visual: IDCompositionVisual,
     comp_visual: IDCompositionVisual,
+    /// Carries the window's top border while the window is inactive. `None`
+    /// anywhere DWM draws that border itself, which is everywhere but Windows
+    /// 10.
+    border: Option<TopBorderVisual>,
+}
+
+/// The window's inactive top border, as a composition visual of its own rather
+/// than a row of the rendered scene, so that showing and hiding it costs a
+/// composition commit instead of a whole frame. See
+/// [`WindowsWindowInner::update_top_border`].
+struct TopBorderVisual {
+    visual: IDCompositionVisual,
+    /// A single premultiplied pixel of border colour, stretched to the width of
+    /// the window by `scale`. One pixel rather than a wide buffer so there is
+    /// no maximum texture size to bump into on lower feature levels.
+    swap_chain: IDXGISwapChain1,
+    scale: IDCompositionScaleTransform,
+}
+
+impl TopBorderVisual {
+    fn new(comp_device: &IDCompositionDevice, devices: &DirectXRendererDevices) -> Result<Self> {
+        let swap_chain =
+            create_swap_chain_for_composition(&devices.dxgi_factory, &devices.device, 1, 1)
+                .context("Creating the top border swap chain")?;
+        unsafe {
+            let buffer: ID3D11Texture2D = swap_chain.GetBuffer(0)?;
+            let mut view = None;
+            devices
+                .device
+                .CreateRenderTargetView(&buffer, None, Some(&mut view))?;
+            let view = view.context("missing border render target view")?;
+            devices
+                .device_context
+                .ClearRenderTargetView(&view, &top_border_color());
+            swap_chain.Present(0, DXGI_PRESENT(0)).ok()?;
+        }
+
+        let visual = unsafe { comp_device.CreateVisual() }?;
+        let scale = unsafe { comp_device.CreateScaleTransform() }?;
+        unsafe {
+            scale.SetScaleY2(1.0)?;
+            visual.SetTransform(&scale)?;
+        }
+        Ok(Self {
+            visual,
+            swap_chain,
+            scale,
+        })
+    }
 }
 
 impl DirectXRendererDevices {
@@ -178,10 +228,11 @@ impl DirectXRenderer {
         let direct_composition = if disable_direct_composition {
             None
         } else {
-            let composition = DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), hwnd)
-                .context("Creating DirectComposition")?;
+            let composition =
+                DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), hwnd, &devices)
+                    .context("Creating DirectComposition")?;
             composition
-                .set_swap_chain(&resources.swap_chain)
+                .set_swap_chain(&resources.swap_chain, 1)
                 .context("Setting swap chain for DirectComposition")?;
             Some(composition)
         };
@@ -309,8 +360,8 @@ impl DirectXRenderer {
             None
         } else {
             let composition =
-                DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), self.hwnd)?;
-            composition.set_swap_chain(&resources.swap_chain)?;
+                DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), self.hwnd, &devices)?;
+            composition.set_swap_chain(&resources.swap_chain, self.width)?;
             Some(composition)
         };
 
@@ -335,6 +386,7 @@ impl DirectXRenderer {
         &mut self,
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
+        top_border_height: u32,
     ) -> Result<()> {
         if self.skip_draws {
             // skip drawing this frame, we just recovered from a device lost event
@@ -342,7 +394,57 @@ impl DirectXRenderer {
             return Ok(());
         }
         self.render(scene, background_appearance)?;
+        self.draw_top_border(top_border_height).log_err();
         self.present()
+    }
+
+    /// Show or hide the inactive top border. See
+    /// [`WindowsWindowInner::top_border_height`].
+    pub(crate) fn set_top_border_visible(&self, visible: bool) -> Result<()> {
+        let Some(composition) = self.direct_composition.as_ref() else {
+            return Ok(());
+        };
+        composition.set_border_visible(visible)
+    }
+
+    /// Clear the top `height` physical pixels of the frame to transparent.
+    ///
+    /// See [`WindowsWindowInner::top_border_height`]: this only runs on Windows
+    /// 10. While the window is active the cleared row uncovers the pixel of DWM
+    /// frame extended underneath, so the system draws its own border there;
+    /// when it is inactive DWM leaves that pixel alone and the border visual
+    /// composited above the scene supplies it instead.
+    ///
+    /// This needs the premultiplied-alpha DirectComposition swap chain, since
+    /// the row is written with its alpha intact; the fallback swap chain is
+    /// created with [`DXGI_ALPHA_MODE_IGNORE`], which would turn the
+    /// transparent row into an opaque black line.
+    fn draw_top_border(&self, height: u32) -> Result<()> {
+        if height == 0 || self.direct_composition.is_none() {
+            return Ok(());
+        }
+        let resources = self.resources.as_ref().context("resources missing")?;
+        let render_target_view = resources
+            .render_target_view
+            .as_ref()
+            .context("missing render target view")?;
+        let device_context: ID3D11DeviceContext1 = self
+            .devices
+            .as_ref()
+            .context("devices missing")?
+            .device_context
+            .cast()?;
+        let rect = RECT {
+            left: 0,
+            top: 0,
+            right: self.width as i32,
+            bottom: height as i32,
+        };
+        // Cleared, never coloured: whatever occupies the row is composited
+        // underneath by DWM (the active border) or over it by the border visual
+        // (the inactive one), and both are independent of this frame.
+        unsafe { device_context.ClearView(render_target_view, &[0.0; 4], Some(&[rect])) };
+        Ok(())
     }
 
     /// Clear the render target for `background_appearance` and encode every
@@ -543,6 +645,10 @@ impl DirectXRenderer {
             devices
                 .device_context
                 .OMSetRenderTargets(Some(slice::from_ref(&resources.render_target_view)), None);
+        }
+
+        if let Some(composition) = self.direct_composition.as_ref() {
+            composition.set_border_width(width).log_err();
         }
 
         Ok(())
@@ -1055,22 +1161,69 @@ impl DirectXRenderPipelines {
 }
 
 impl DirectComposition {
-    pub fn new(dxgi_device: &IDXGIDevice, hwnd: HWND) -> Result<Self> {
+    pub fn new(
+        dxgi_device: &IDXGIDevice,
+        hwnd: HWND,
+        devices: &DirectXRendererDevices,
+    ) -> Result<Self> {
         let comp_device = get_comp_device(dxgi_device)?;
         let comp_target = unsafe { comp_device.CreateTargetForHwnd(hwnd, false) }?;
+        let root_visual = unsafe { comp_device.CreateVisual() }?;
         let comp_visual = unsafe { comp_device.CreateVisual() }?;
+        unsafe { root_visual.AddVisual(&comp_visual, false, None) }?;
+
+        let border = is_windows_10()
+            .then(|| TopBorderVisual::new(&comp_device, devices))
+            .transpose()?;
+        if let Some(border) = border.as_ref() {
+            // Above the scene, covering the row the renderer keeps clear.
+            unsafe { root_visual.AddVisual(&border.visual, true, &comp_visual) }?;
+        }
 
         Ok(Self {
             comp_device,
             comp_target,
+            root_visual,
             comp_visual,
+            border,
         })
     }
 
-    pub fn set_swap_chain(&self, swap_chain: &IDXGISwapChain1) -> Result<()> {
+    pub fn set_swap_chain(&self, swap_chain: &IDXGISwapChain1, width: u32) -> Result<()> {
         unsafe {
             self.comp_visual.SetContent(swap_chain)?;
-            self.comp_target.SetRoot(&self.comp_visual)?;
+            self.comp_target.SetRoot(&self.root_visual)?;
+        }
+        self.set_border_width(width)?;
+        unsafe { self.comp_device.Commit() }?;
+        Ok(())
+    }
+
+    /// Show or hide the inactive top border. Cheap enough to call from a window
+    /// message: it is a content swap and a commit, with no rendering.
+    fn set_border_visible(&self, visible: bool) -> Result<()> {
+        let Some(border) = self.border.as_ref() else {
+            return Ok(());
+        };
+        unsafe {
+            if visible {
+                border.visual.SetContent(&border.swap_chain)?;
+            } else {
+                border.visual.SetContent(None)?;
+            }
+            self.comp_device.Commit()?;
+        }
+        Ok(())
+    }
+
+    /// Stretch the border across the window. The single pixel of colour is
+    /// scaled rather than redrawn, so this is just a transform update.
+    fn set_border_width(&self, width: u32) -> Result<()> {
+        let Some(border) = self.border.as_ref() else {
+            return Ok(());
+        };
+        unsafe {
+            border.scale.SetScaleX2(width as f32)?;
             self.comp_device.Commit()?;
         }
         Ok(())

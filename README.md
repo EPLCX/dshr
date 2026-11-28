@@ -9,7 +9,7 @@
   也可以接入任意 Messages 兼容或 OpenAI 兼容的接口。
 - **可扩展**：AGENTS.md 项目说明、Skills、MCP 服务器，以及跑在沙箱化 JS 引擎里的插件。
 
-> 当前版本 0.1.0，界面上标为“预览版”。信息结构与交互流程参照原版 DeepSeek Harness，视觉按
+> 当前版本 0.2.0，界面上标为“预览版”。信息结构与交互流程参照原版 DeepSeek Harness，视觉按
 > [设计规范](docs/design.md) 自行实现；不包含原版的代码或资源。
 
 ## 功能一览
@@ -112,7 +112,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/docs"]
 | [MCP 服务器](docs/mcp.md) | stdio / HTTP 服务器、占位符与密钥、OAuth 登录、资源与 prompts |
 | [插件开发指南](docs/plugins.md) · [API 参考](docs/plugin-api.md) · [打包与分发](docs/plugin-publishing.md) | 编写、调试、发布 JS 插件 |
 | [会话与日志格式](docs/sessions.md) | 会话目录、事件类型、投影、分叉 |
-| [架构](docs/architecture.md) · [开发与贡献](docs/development.md) · [设计规范](docs/design.md) | 给参与开发的人 |
+| [架构](docs/architecture.md) · [开发与贡献](docs/development.md) · [协作规范](docs/contributing.md) · [设计规范](docs/design.md) | 给参与开发的人 |
 | [常见问题与排错](docs/troubleshooting.md) | 连不上模型、钥匙串、插件不激活、MCP 连接失败等 |
 
 另有一组独立于构建的静态介绍页面，在 [`site/`](site/) 目录，直接用浏览器打开 `site/index.html` 即可。
@@ -157,7 +157,7 @@ cargo clippy --workspace
 ```
 
 改界面之前先读 [设计规范](docs/design.md)，它的唯一实现是 `crates/ui/src/design.rs`。构建、测试、打包、本地化与第三方声明的
-完整流程见 [开发与贡献](docs/development.md)。
+完整流程见 [开发与贡献](docs/development.md)；Issue、PR、版本号与 Release 的规范见 [协作规范](docs/contributing.md)。
 
 ## 许可
 

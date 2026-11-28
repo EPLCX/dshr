@@ -111,18 +111,28 @@ impl JsSurface {
         Ok(tree)
     }
 
-    /// 把 `image` 节点里的文件路径换成 `data:` URI：`data/…` 是插件自己的数据目录，其余是工作区里的路径
-    /// （要 `fs:workspace:read`）。读不了的图换成一段说明文字。界面只认 `data:` URI。
+    /// 把 `image`、`avatar` 节点里的文件路径换成 `data:` URI：`data/…` 是插件自己的数据目录，其余是工作区里的路径
+    /// （要 `fs:workspace:read`）。读不了的图换成一段说明文字（头像去掉图片，只显示首字）。界面只认 `data:` URI。
+    /// 子节点在 `children`、`actions`、`left`、`right` 和标签页各页的 `children` 里。
     fn inline_images(&self, node: &mut Value, workspace: Option<&Path>) {
         use base64::Engine as _;
-        if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
-            for child in children {
+        for key in ["children", "actions", "left", "right"] {
+            if let Some(children) = node.get_mut(key).and_then(Value::as_array_mut) {
+                for child in children {
+                    self.inline_images(child, workspace);
+                }
+            }
+        }
+        if let Some(tabs) = node.get_mut("tabs").and_then(Value::as_array_mut) {
+            for child in tabs.iter_mut().filter_map(|tab| tab.get_mut("children")).filter_map(Value::as_array_mut).flatten() {
                 self.inline_images(child, workspace);
             }
         }
-        if node.get("type").and_then(Value::as_str) != Some("image") {
+        let kind = node.get("type").and_then(Value::as_str);
+        if kind != Some("image") && !(kind == Some("avatar") && node.get("src").is_some()) {
             return;
         }
+        let avatar = kind == Some("avatar");
         let src = node.get("src").and_then(Value::as_str).unwrap_or_default().to_owned();
         if src.starts_with("data:") {
             return;
@@ -149,6 +159,13 @@ impl JsSurface {
                 image["src"] =
                     Value::String(format!("data:{media_type};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
                 image
+            }
+            None if avatar => {
+                let mut avatar = node.clone();
+                if let Some(object) = avatar.as_object_mut() {
+                    object.remove("src");
+                }
+                avatar
             }
             None => serde_json::json!({ "type": "text", "text": format!("[image {src} cannot be shown]"), "style": "caption" }),
         };

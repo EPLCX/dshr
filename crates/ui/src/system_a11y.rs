@@ -5,6 +5,9 @@
 //! - macOS：“增强对比度”（`NSWorkspace.accessibilityDisplayShouldIncreaseContrast`）；
 //! - 其他平台没有统一的设置，当作关着。
 //!
+//! 高对比度的颜色：Windows 的对比度主题开着时，按系统颜色（`GetSysColor`）画，和系统里选的主题（高对比白、黑、
+//! 水生、沙漠或自定义）一致；macOS 的“增强对比度”没有可读的颜色，用内置的高对比度配色。
+//!
 //! 文字大小：
 //! - Windows：设置 → 辅助功能 → 文本大小（注册表 `HKCU\Software\Microsoft\Accessibility` 的 `TextScaleFactor`，100–225）；
 //! - 其他平台没有全局的文字大小设置，当作 100%。
@@ -20,6 +23,37 @@ pub fn text_scale() -> u16 {
     #[cfg(not(windows))]
     {
         100
+    }
+}
+
+/// Windows 对比度主题里用户可以改的颜色（设置 → 辅助功能 → 对比度主题 → 编辑），`0xRRGGBB`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemColors {
+    /// 背景。
+    pub window: u32,
+    /// 文本。
+    pub window_text: u32,
+    /// 选定文本的底色、文字色。
+    pub highlight: u32,
+    pub highlight_text: u32,
+    /// 超链接。
+    pub hot_light: u32,
+    /// 失效文本。
+    pub gray_text: u32,
+    /// 按钮的底色、文字色。
+    pub button_face: u32,
+    pub button_text: u32,
+}
+
+/// 系统的对比度主题开着时，它的颜色；关着、或者系统没有可读的颜色（macOS、Linux）时为 `None`。
+pub fn high_contrast_colors() -> Option<SystemColors> {
+    #[cfg(windows)]
+    {
+        windows::high_contrast().then(windows::system_colors)
+    }
+    #[cfg(not(windows))]
+    {
+        None
     }
 }
 
@@ -75,6 +109,35 @@ mod windows {
 
     /// `HCF_HIGHCONTRASTON`。
     const HIGH_CONTRAST_ON: u32 = 0x1;
+
+    /// 按 `COLOR_*` 读系统颜色。`GetSysColor` 返回 `0x00BBGGRR`，换成 `0xRRGGBB`。
+    pub fn system_colors() -> super::SystemColors {
+        use windows_sys::Win32::Graphics::Gdi::GetSysColor;
+        let color = |index: i32| {
+            // SAFETY: 只读一个系统颜色，下标都是 `COLOR_*` 里有定义的值。
+            let bgr = unsafe { GetSysColor(index as _) };
+            ((bgr & 0xFF) << 16) | (bgr & 0xFF00) | ((bgr >> 16) & 0xFF)
+        };
+        // `COLOR_*` 的值（winuser.h）。
+        const WINDOW: i32 = 5;
+        const WINDOW_TEXT: i32 = 8;
+        const HIGHLIGHT: i32 = 13;
+        const HIGHLIGHT_TEXT: i32 = 14;
+        const BUTTON_FACE: i32 = 15;
+        const GRAY_TEXT: i32 = 17;
+        const BUTTON_TEXT: i32 = 18;
+        const HOT_LIGHT: i32 = 26;
+        super::SystemColors {
+            window: color(WINDOW),
+            window_text: color(WINDOW_TEXT),
+            highlight: color(HIGHLIGHT),
+            highlight_text: color(HIGHLIGHT_TEXT),
+            hot_light: color(HOT_LIGHT),
+            gray_text: color(GRAY_TEXT),
+            button_face: color(BUTTON_FACE),
+            button_text: color(BUTTON_TEXT),
+        }
+    }
 
     pub fn high_contrast() -> bool {
         let mut info = HighContrast { size: size_of::<HighContrast>() as u32, flags: 0, default_scheme: std::ptr::null_mut() };

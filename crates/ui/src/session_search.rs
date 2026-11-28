@@ -9,14 +9,17 @@
 use std::ops::Range;
 use std::time::{Duration, SystemTime};
 
+use crate::design::RowColor as _;
 use dshr_agent::SessionSummary;
 use gpui_kit::base::FocusTrapElement as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
+
+use crate::design::ControlSize as _;
 
 use crate::design::{Typography as _, motion, palette, radius, readable_with_id, shadow, size, space, with_focus_ring};
 
@@ -226,7 +229,11 @@ impl SessionSearchView {
         }
         let highlights: Vec<(Range<usize>, HighlightStyle)> = match_ranges(&session.title, query)
             .into_iter()
-            .map(|range| (range, HighlightStyle { color: Some(p.accent), font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() }))
+            .map(|range| {
+                // 高对比度：匹配的字只加粗，不换颜色（跟着行的文字色，高亮行上是 `on_selected`）。
+                let color = (!p.high_contrast).then_some(p.accent);
+                (range, HighlightStyle { color, font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() })
+            })
             .collect();
         let title = StyledText::new(session.title.clone()).with_highlights(highlights);
         let row = h_flex()
@@ -243,12 +250,12 @@ impl SessionSearchView {
             .gap(px(space::M))
             .px(px(space::L))
             .py(px(space::S))
-            .rounded(px(radius::LG))
+            .rounded(px(radius::MD))
             // 焦点框：2px 透明边框，聚焦时上色（见 `with_focus_ring`）。
             .border_2()
             .border_color(transparent_black())
             .cursor_pointer()
-            .when(highlighted, |row| row.bg(p.selected))
+            .when(highlighted, |row| row.bg(p.selected).text_color(p.on_selected))
             .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, window, cx| {
                 if this.highlighted != position && !window.last_input_was_touch() {
                     this.highlighted = position;
@@ -259,19 +266,19 @@ impl SessionSearchView {
                 this.highlighted = position;
                 this.open_highlighted(cx);
             }))
-            .child(Icon::new(IconName::ArrowRight).size(px(size::ICON_MD)).flex_none().text_color(if highlighted {
-                p.accent
-            } else {
-                p.text_secondary
-            }))
+            .child(crate::design::row_icon(
+                Icon::new(IconName::ArrowRight).size(px(size::ICON_MD)),
+                if highlighted { p.accent } else { p.text_secondary },
+                p,
+            ))
             .child(
                 v_flex()
                     .flex_1()
                     .min_w(px(0.))
                     .child(div().text_body().truncate().child(title))
-                    .child(div().text_caption().text_color(p.text_secondary).truncate().child(subtitle)),
+                    .child(div().text_caption().row_color(p.text_secondary, p).truncate().child(subtitle)),
             );
-        with_focus_ring(row, focused, radius::LG, window, p).into_any_element()
+        with_focus_ring(row, focused, radius::MD, window, p).into_any_element()
     }
 }
 
@@ -342,13 +349,13 @@ impl Render for SessionSearchView {
             .w(px(DIALOG_WIDTH))
             .max_w(relative(0.94))
             .max_h(relative(0.8))
-            .rounded(px(radius::XXL))
+            .rounded(px(radius::XL))
             .bg(p.raised)
             .border_1()
             .border_color(p.border)
             .text_color(p.text)
             .overflow_hidden()
-            .map(|dialog| motion::pop(dialog, motion::Edge::Top, motion::MEDIUM, self.phase, shadow::modal()))
+            .map(|dialog| motion::pop(dialog, motion::Edge::Top, 0., self.phase, shadow::modal(&p)))
             .child(
                 h_flex()
                     .flex_none()
@@ -369,8 +376,8 @@ impl Render for SessionSearchView {
                     .child(crate::design::framed(
                         "close-session-search",
                         Button::new("close-session-search")
-                            .ghost()
-                            .small()
+                            .subtle(cx)
+                            .control_sm()
                             .icon(IconName::Close)
                             .accessibility_label(t!("search.hint_close").to_string())
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SessionSearchEvent::Close))),
@@ -410,7 +417,7 @@ impl Render for SessionSearchView {
                     .px(px(space::XL))
                     .py(px(space::M))
                     // 外层的裁切是方的：底色自己带上圆角，不从弹窗的圆角里露出来。
-                    .rounded_b(px(radius::XXL))
+                    .rounded_b(px(radius::XL))
                     .bg(p.sidebar)
                     .child(hint("session-search-hint-select", vec!["↑", "↓"], t!("search.hint_select").to_string()))
                     .child(hint("session-search-hint-open", vec!["Enter"], t!("search.hint_open").to_string()))
