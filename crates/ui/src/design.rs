@@ -41,6 +41,8 @@ pub mod size {
     pub const CONTROL_SM: f32 = 28.;
     /// 表单、弹窗里的按钮、输入框、下拉框（默认）。
     pub const CONTROL_MD: f32 = 32.;
+    /// 插件页面上要求大尺寸（`size: "large"`）的控件。应用自己的界面不用。
+    pub const CONTROL_LG: f32 = 40.;
     pub const ICON_SM: f32 = 14.;
     pub const ICON_MD: f32 = 16.;
     pub const ICON_LG: f32 = 20.;

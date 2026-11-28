@@ -540,3 +540,30 @@ fn new_capabilities_round_trip() {
     f.plugin("bad-secret", "secrets = [\"lower\"]\n", "");
     assert!(discover(&f.plugins_dir())[0].manifest.as_ref().unwrap_err().contains("lower"));
 }
+
+#[test]
+fn images_inside_every_container_and_avatars_are_inlined() {
+    let f = Fixture::new();
+    f.plugin(
+        "pics",
+        "",
+        r#"export const ui = { pages: { main: () => ({ type: "column", children: [
+            { type: "tabs", tabs: [{ id: "a", label: "A", children: [{ type: "image", src: "data/dot.png", alt: "in a tab" }] }] },
+            { type: "split", left: [{ type: "avatar", src: "data/dot.png", text: "Ada" }], right: [{ type: "avatar", src: "data/missing.png", text: "Bo" }] },
+            { type: "card", actions: [{ type: "image", src: "data/missing.png" }], children: [] },
+        ]}) }, sidebar: [{ id: "pics", label: "Pics", page: "main" }] };"#,
+    );
+    let data = f.home.path().join("plugin-data").join("pics");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("dot.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+    let cx = f.context();
+    let snapshot = cx.snapshot();
+    let surface = snapshot.items::<UiSurfaces>().iter().find(|surface| surface.plugin() == "pics").unwrap().clone();
+    let tree = surface.render("main", None).unwrap();
+    let children = &tree["children"];
+    assert!(children[0]["tabs"][0]["children"][0]["src"].as_str().unwrap().starts_with("data:image/png;base64,"));
+    assert!(children[1]["left"][0]["src"].as_str().unwrap().starts_with("data:image/png;base64,"));
+    // 读不了的头像去掉图片，只显示首字；读不了的图片换成说明文字。
+    assert_eq!(children[1]["right"][0], json!({ "type": "avatar", "text": "Bo" }));
+    assert_eq!(children[2]["actions"][0]["type"], "text");
+}

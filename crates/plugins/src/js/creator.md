@@ -212,25 +212,43 @@ export const ui = {
 ```
 
 - **Nodes**:
-  - `column` / `row` (`children`, `gap`: small|medium|large)
-  - `card` (`title`, `children`)
-  - `text` (`text`, `style`: title|heading|body|caption|mono, `tone`: neutral|accent|success|danger)
-  - `button` (`label`, `action`, `payload`, `variant`: primary|outline|ghost|danger)
-  - `input` (`id`, `label`, `placeholder`, `value`)
-  - `switch` (`id`, `label`, `checked`, `action`)
-  - `list` (`items`: [{ `title`, `detail`, `action`, `payload` }])
-  - `badge` (`text`)
-  - `divider`
-  - `markdown` (`text`), `code` (`text`, `language`), `diff` (unified diff `text`, or `before` + `after`; `path`)
-  - `table` (`columns`: strings, `rows`: arrays with one cell per column)
-  - `select` (`id`, `options`: strings or { value, label }, `label`, `value`, `action`), `textarea` (`id`, `label`, `placeholder`, `value`, `rows`)
-  - `progress` (`value` 0–1, `label`), `link` (`label`, `url`: http/https, opened in the browser after the user confirms)
+  - Any node: `hidden` (skip it), `disabled` (controls greyed out), `tooltip`, `icon` (see Icons), `tone`: neutral|secondary|accent|success|warning|danger.
+  - `size`: small|medium|large (control height 28 / 32 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `checkboxes`, `number`, `date`, `tags-input`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`, `progress`, `avatar`, `tags`, `status`, `skeleton`, `steps`. On `row` it is the default for the controls inside.
+  - `column` / `row` (`children`, `gap`: small|medium|large, `align`: start|center|end|stretch, `justify`: start|center|end|between, `padding`: none|small|medium|large; `row` also `wrap`: false)
+  - `grid` (`children`, `columns` 1–6, `gap`), `spacer` (in a `row`, without `size` it pushes what follows to the right)
+  - `card` (`title`, `description`, `icon`, `children`, `actions`: nodes on the right of the title, `variant`: outlined|filled|plain, `collapsible`, `open`)
+  - `section` (`title`, `description`, `children`), `split` (`left`, `right`: node arrays, `ratio` 0.2–0.8; the right column wraps below on narrow windows)
+  - `collapsible` (`title`, `children`, `open`, `id`), `tabs` (`tabs`: [{ `id`, `label`, `icon`, `children` }], `value`, `action`): switching tabs and folding are kept by the app and do not re-render; with `action` switching a tab also runs it with the tab id as `value`
+  - `text` (`text`, `style`: title|heading|body|caption|mono, `weight`: regular|medium|bold, `align`: start|center|end, `truncate`, `lines` 1–10)
+  - `button` (`label`, `action`, `payload`, `variant`: primary|outline|ghost|danger|link, `icon`, `iconOnly` (needs `icon`; `label` is read aloud), `full`, `confirm`: a sentence shown on a second click before the action runs)
+  - `input` (`id`, `label`, `placeholder`, `value`, `kind`: text|password|search|url|email, `prefix`, `suffix`, `maxLength`, `submit`: action run on Enter), `textarea` (`id`, `label`, `placeholder`, `value`, `rows`)
+  - `number` (`id`, `label`, `value`, `min`, `max`, `step`, `unit`): `inputs[id]` is a number (clamped to min / max) or null
+  - `checkbox` (`id`, `label`, `checked`, `description`, `action`): `inputs[id]` is true / false; without `action` it is only submitted with the next action
+  - `radio` (`id`, `options`: strings or { value, label }, `value`, `label`, `action`, `style`: list|segmented (at most 4 options))
+  - `select` (`id`, `options`, `label`, `value`, `action`, `style`: buttons|dropdown|segmented|radio, `searchable`: a filter box above a dropdown), `switch` (`id`, `label`, `checked`, `action`, `description`, `layout`: inline|row)
+  - `checkboxes` (`id`, `options`, `value`: array, `label`, `action`, `layout`: vertical|horizontal): `inputs[id]` is the array of checked values
+  - `slider` (`id`, `min`, `max`, `value`, `step`, `label`, `unit`, `showValue`, `action`: runs when the thumb is released, with the number as `value`)
+  - `date` (`id`, `value`: "2026-11-28" or "", `label`, `placeholder`, `action`): a button that opens a month calendar
+  - `tags-input` (`id`, `value`: strings, `label`, `placeholder`, `max`, `action`: runs after a tag is added or removed): Enter adds a tag
+  - `list` (`items`: [{ `title`, `detail`, `icon`, `badge`, `trailing`, `tone`, `action`, `payload` }], `dividers`, `empty`: text when there are no items)
+  - `table` (`columns`: strings, `rows`: arrays with one cell per column; a cell may be { `text`, `tone`, `badge` }; `align`: left|center|right per column, `widths`: relative width per column, `striped`, `maxHeight`, `empty`, `rowAction`: runs with `value` = { index, row })
+  - `badge` (`text`, `tone`, `variant`: soft|outline|solid), `divider`
+  - `stat` (`label`, `value`, `delta`: a number or "+3%" (green up, red down), `caption`, `spark`: numbers for a small line)
+  - `alert` (`text`, `title`, `tone`, `action`, `actionLabel`), `empty` (`title`, `description`, `icon`, `action`, `actionLabel`)
+  - `markdown` (`text`, `size`: body|caption, `maxHeight`), `code` (`text`, `language`, `title`, `copy` (default true), `wrap` (default true), `lineNumbers`, `maxHeight`), `diff` (unified diff `text`, or `before` + `after`; `path`)
+  - `progress` (`value` 0–1, `label`, `style`: bar|ring|steps, `steps`, `tone`, `indeterminate` (no `value` needed), `showValue`), `link` (`label`, `url`: http/https, opened in the browser after the user confirms; `variant`: button|inline)
+  - `kv` (`items`: [{ `key`, `value`, `tone` }], `columns` 1–3, `layout`: inline|stacked, `copy`)
+  - `chart` (`kind`: line|bar|area|pie|candlestick, `series`: [{ `name`, `data`: [[x, y], …] }], `height`, `colors`: tone names, `legend`, `showValues`, `donut`, `yMin` / `yMax`, `grid`, `xLabel` / `yLabel`)
+  - `heatmap` (`rows`, `columns`, `values`, `tone`, `showValues`, `action`: runs with `value` = { row, column }), `calendar` (`month`: 2026-11, `marks`: text or { text, tone }, `value`, `range`: { start, end }, `action`), `image` (`src`: data URI or `data/…`, `alt`, `width`, `height`, `fit`: contain|cover, `radius`: none|medium|full, `caption`)
+  - `steps` (`items`: [{ `title`, `detail` }], `current` (0-based; = length when all done), `orientation`: horizontal|vertical), `timeline` (`items`: [{ `title`, `time`, `detail`, `tone`, `icon` }])
+  - `tree` (`items`: [{ `id`, `label`, `icon`, `detail`, `action`, `payload`, `children` }], `expanded`: ids): expanding is kept by the app; an item with `action` runs it when clicked
+  - `avatar` (`text` (first letter) or `src`, `alt`, `tone`), `tags` (`items`: [{ `text`, `tone`, `icon` }], `value`: the selected one, `action`: runs with the tag text as `value`), `skeleton` (`lines`: a loading placeholder), `status` (`text`, `state`: ok|idle|warn|error|busy)
   - A bare string is a text node. Anything else fails to render.
 - **More places**: `panels: [{ id, label, page }]` shows a page in a collapsible panel above the input box; `status: [{ id, page }]` shows the first text of a page as a status line in the sidebar.
 - **Re-rendering**: after every action the page is rendered again. An input keeps what the user typed unless `render` returns a different `value` for it (e.g. `""` to clear it after adding).
 - **`render` is read-only**, like `prompt`. Actions may use the plugin's capabilities without asking, because the user clicked.
 - **No open workspace** (e.g. a settings tab, or the preview in `plugin_reload`): `host.readFile` / `writeFile` fall back to the plugin's data folder. Keep the plugin's own state in `readData` / `writeData`, so it never depends on which workspace is open.
-- **Icons**: star, heart, bell, book, bot, calendar, chart, cpu, file, folder, globe, inbox, map, mic, moon, sun, network, palette, search, settings, terminal, user, info.
+- **Icons** (entries and the `icon` of nodes): star, heart, bell, book, bot, calendar, chart, cpu, file, folder, globe, inbox, map, mic, moon, sun, network, palette, search, settings, terminal, user, info, check, x, plus, minus, trash, copy, refresh, external, warning, alert, success, error, play, pause, eye, chevron-right, chevron-down, arrow-up, arrow-down.
 - **Checking it**: `plugin_reload` renders every page once, without a workspace, and reports node counts or the exact error. Then use `plugin_page` the way the user would: fill `inputs`, run each action, and read the re-rendered tree. Do this instead of writing self-test tools or editing data files by hand.
 
 ## Bundled extras (no code needed)

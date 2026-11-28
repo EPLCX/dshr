@@ -1,0 +1,69 @@
+name: 缺陷报告
+description: 行为与文档或预期不符、崩溃、界面显示错误
+title: "[范围] 现象"
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        标题格式为“[范围] 现象”，例如“[桌面版] 高对比度下工具卡标题悬停时文字看不清”。
+        附带的日志、截图与配置请先去掉 API 密钥、令牌和个人路径。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: “设置 → 关于”或 `dshr --version` 显示的版本号；从源码构建时附上提交哈希。
+      placeholder: 0.2.0（a1b2c3d）
+    validations:
+      required: true
+  - type: dropdown
+    id: app
+    attributes:
+      label: 使用的程序
+      options:
+        - 桌面版（DSHR Desktop）
+        - 命令行版（dshr）
+        - 两者都有
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: Windows 11 23H2 / macOS 15.1（Apple 芯片）
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: 提供商、模型与权限模式
+      placeholder: deepseek/deepseek-v4-pro，工作区内修改
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从启动开始逐步写出；能用演示模型（DSHR_PROVIDER=demo）复现的请注明。
+      placeholder: |
+        1. ……
+        2. ……
+        3. ……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 命令行版可附 `DSHR_LOG=debug` 的输出。
+      render: text

@@ -3,13 +3,23 @@
 dshr 本身以 MIT 许可发布，见 [LICENSE](LICENSE)。dshr 的桌面版与命令行版包含下列第三方组件，
 它们各自的版权归原作者所有，按各自的许可证使用。可选双许可（如 `MIT OR Apache-2.0`）的组件，本项目按其中任一许可使用。
 
-统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 561 个 crate；
+统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 562 个 crate；
 dev / build 依赖不进最终程序，不列入。
 
 ## 参照项目
 
 - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`，MIT）：dshr 是它的非官方 Rust 重写版，只参照其信息结构、交互流程与会话日志格式，
   目前不包含它的代码或资源。今后复用其资源（文案、提示词、图标等）时，在这里列出并附上原版 LICENSE。“DeepSeek”名称与标识归其所有者，dshr 与其无隶属关系。
+
+## 修改过的第三方组件
+
+下列 crate 是在 crates.io 发布版本基础上打过补丁的副本，源码在本仓库的 `vendor/` 目录，
+修改内容记录在各自的 `PATCHED.md`，被修改的源文件开头带有修改声明。修改部分与原组件按同一许可证发布。
+
+| crate | 版本 | 许可证（SPDX） | 原版 | 修改说明 |
+|---|---|---|---|---|
+| gpui-pre-macos | 0.3.12 | Apache-2.0 | [crates.io](https://crates.io/crates/gpui-pre-macos/0.3.12) | [vendor/gpui-pre-macos/PATCHED.md](vendor/gpui-pre-macos/PATCHED.md) |
+| gpui-pre-windows | 0.3.12 | Apache-2.0 | [crates.io](https://crates.io/crates/gpui-pre-windows/0.3.12) | [vendor/gpui-pre-windows/PATCHED.md](vendor/gpui-pre-windows/PATCHED.md) |
 
 ## 内嵌的非 Rust 组件
 
@@ -321,6 +331,7 @@ dev / build 依赖不进最终程序，不列入。
 | [objc2-encode](https://github.com/madsmtm/objc2) | 4.1.0 | MIT |
 | [objc2-foundation](https://github.com/madsmtm/objc2) | 0.2.2 | MIT |
 | [objc2-foundation](https://github.com/madsmtm/objc2) | 0.3.2 | MIT |
+| [objc2-local-authentication](https://github.com/madsmtm/objc2) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | [objc2-metal](https://github.com/madsmtm/objc2) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | [objc2-quartz-core](https://github.com/madsmtm/objc2) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | [objc2-security](https://github.com/madsmtm/objc2) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
@@ -591,13 +602,72 @@ dev / build 依赖不进最终程序，不列入。
 | [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.4.21 | MIT OR Apache-2.0 OR Zlib |
 | [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
 
+## 使用标准许可证文本的 crate 的版权人
+
+下列 crate 的发布包里没有许可证文件，“许可证全文”一节按其 SPDX 声明收录了 spdx.org 上的标准文本（标注为“标准文本（spdx.org）”）。
+标准文本中的 `<year> <copyright holders>`、`<copyright holders>` 等占位处，对这些 crate 分别指下表中的版权人：
+取自 crate 声明的作者；未声明作者的，取自其源码仓库的许可证文件。
+
+| crate | 版本 | 版权人 |
+|---|---|---|
+| [accesskit](https://github.com/AccessKit/accesskit) | 0.24.1 | The AccessKit contributors |
+| [accesskit_consumer](https://github.com/AccessKit/accesskit) | 0.38.0 | The AccessKit contributors |
+| [accesskit_macos](https://github.com/AccessKit/accesskit) | 0.26.3 | The AccessKit contributors |
+| [accesskit_windows](https://github.com/AccessKit/accesskit) | 0.34.0 | The AccessKit contributors |
+| [block2](https://github.com/madsmtm/objc2) | 0.6.2 | Mads Marquart |
+| [dispatch2](https://github.com/madsmtm/objc2) | 0.3.1 | Mads Marquart、Mary |
+| [eventsource-stream](https://github.com/jpopesculian/eventsource-stream) | 0.2.3 | Julian Popescu |
+| [gpui-kit](https://github.com/longbridge/gpui-kit) | 0.9.1 | Longbridge |
+| [lyon](https://github.com/nical/lyon) | 1.0.19 | Nicolas Silva |
+| [lyon_algorithms](https://github.com/nical/lyon) | 1.0.22 | Nicolas Silva |
+| [lyon_geom](https://github.com/nical/lyon) | 1.0.20 | Nicolas Silva |
+| [lyon_path](https://github.com/nical/lyon) | 1.0.19 | Nicolas Silva |
+| [lyon_tessellation](https://github.com/nical/lyon) | 1.0.23 | Nicolas Silva |
+| [mac](https://github.com/reem/rust-mac.git) | 0.1.1 | Jonathan Reem |
+| [mac-notification-sys](https://github.com/h4llow3En/mac-notification-sys) | 0.6.15 | Felix Döring、Hendrik Sollich |
+| [objc-sys](https://github.com/madsmtm/objc2) | 0.3.5 | Mads Marquart |
+| [objc2](https://github.com/madsmtm/objc2) | 0.5.3 | Steven Sheldon、Mads Marquart |
+| [objc2](https://github.com/madsmtm/objc2) | 0.6.5 | Mads Marquart |
+| [objc2-app-kit](https://github.com/madsmtm/objc2) | 0.2.2 | Mads Marquart |
+| [objc2-app-kit](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-cloud-kit](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-data](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-foundation](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-graphics](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-image](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-services](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-text](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-video](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-encode](https://github.com/madsmtm/objc2) | 4.1.0 | Mads Marquart |
+| [objc2-foundation](https://github.com/madsmtm/objc2) | 0.2.2 | Mads Marquart |
+| [objc2-foundation](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-local-authentication](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-metal](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-quartz-core](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-security](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-uniform-type-identifiers](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-user-notifications](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [pathfinder_geometry](https://github.com/servo/pathfinder) | 0.5.1 | Patrick Walton |
+| [pathfinder_simd](https://github.com/servo/pathfinder) | 0.5.6 | Patrick Walton |
+| [profiling](https://github.com/aclysma/profiling) | 1.0.18 | Philip Degarmo |
+| [profiling-procmacros](https://github.com/aclysma/profiling) | 1.0.18 | Philip Degarmo |
+| [rquickjs-core](https://github.com/DelSkayn/rquickjs.git) | 0.14.0 | Mees Delzenne、K. |
+| [rust-i18n-macro](https://github.com/longbridge/rust-i18n) | 4.2.4 | Longbridge |
+| [rust-i18n-support](https://github.com/longbridge/rust-i18n) | 4.2.4 | Longbridge |
+| [seahash](https://gitlab.redox-os.org/redox-os/seahash) | 4.1.0 | ticki、Tom Almeida |
+| [svg_fmt](https://github.com/nical/rust_debug) | 0.4.5 | Nicolas Silva |
+| [taffy](https://github.com/DioxusLabs/taffy) | 0.15.1 | Alice Cecile、Johnathan Kelley、Nico Burns |
+| [zune-core](https://crates.io/crates/zune-core) | 0.4.12 | zune-image developers |
+| [zune-inflate](https://crates.io/crates/zune-inflate) | 0.2.54 | zune-image developers |
+| [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.4.21 | caleb |
+
 ## 许可证全文
 
 相同的文本只收录一次，标题下列出使用它的 crate 及文件名。
 
-### 1. accesskit 0.24.1 等 48 项
+### 1. accesskit 0.24.1 等 49 项
 
-使用者：accesskit 0.24.1（MIT 标准文本（spdx.org））、accesskit_consumer 0.38.0（MIT 标准文本（spdx.org））、accesskit_macos 0.26.3（MIT 标准文本（spdx.org））、accesskit_windows 0.34.0（MIT 标准文本（spdx.org））、block2 0.6.2（MIT 标准文本（spdx.org））、dispatch2 0.3.1（MIT 标准文本（spdx.org））、eventsource-stream 0.2.3（MIT 标准文本（spdx.org））、lyon 1.0.19（MIT 标准文本（spdx.org））、lyon_algorithms 1.0.22（MIT 标准文本（spdx.org））、lyon_geom 1.0.20（MIT 标准文本（spdx.org））、lyon_path 1.0.19（MIT 标准文本（spdx.org））、lyon_tessellation 1.0.23（MIT 标准文本（spdx.org））、mac 0.1.1（MIT 标准文本（spdx.org））、mac-notification-sys 0.6.15（MIT 标准文本（spdx.org））、objc-sys 0.3.5（MIT 标准文本（spdx.org））、objc2 0.5.3（MIT 标准文本（spdx.org））、objc2 0.6.5（MIT 标准文本（spdx.org））、objc2-app-kit 0.2.2（MIT 标准文本（spdx.org））、objc2-app-kit 0.3.2（MIT 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（MIT 标准文本（spdx.org））、objc2-core-data 0.3.2（MIT 标准文本（spdx.org））、objc2-core-foundation 0.3.2（MIT 标准文本（spdx.org））、objc2-core-graphics 0.3.2（MIT 标准文本（spdx.org））、objc2-core-image 0.3.2（MIT 标准文本（spdx.org））、objc2-core-services 0.3.2（MIT 标准文本（spdx.org））、objc2-core-text 0.3.2（MIT 标准文本（spdx.org））、objc2-core-video 0.3.2（MIT 标准文本（spdx.org））、objc2-encode 4.1.0（MIT 标准文本（spdx.org））、objc2-foundation 0.2.2（MIT 标准文本（spdx.org））、objc2-foundation 0.3.2（MIT 标准文本（spdx.org））、objc2-metal 0.3.2（MIT 标准文本（spdx.org））、objc2-quartz-core 0.3.2（MIT 标准文本（spdx.org））、objc2-security 0.3.2（MIT 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（MIT 标准文本（spdx.org））、objc2-user-notifications 0.3.2（MIT 标准文本（spdx.org））、pathfinder_geometry 0.5.1（MIT 标准文本（spdx.org））、pathfinder_simd 0.5.6（MIT 标准文本（spdx.org））、profiling 1.0.18（MIT 标准文本（spdx.org））、profiling-procmacros 1.0.18（MIT 标准文本（spdx.org））、rquickjs-core 0.14.0（MIT 标准文本（spdx.org））、rust-i18n-macro 4.2.4（MIT 标准文本（spdx.org））、rust-i18n-support 4.2.4（MIT 标准文本（spdx.org））、seahash 4.1.0（MIT 标准文本（spdx.org））、svg_fmt 0.4.5（MIT 标准文本（spdx.org））、taffy 0.15.1（MIT 标准文本（spdx.org））、zune-core 0.4.12（MIT 标准文本（spdx.org））、zune-inflate 0.2.54（MIT 标准文本（spdx.org））、zune-jpeg 0.4.21（MIT 标准文本（spdx.org））
+使用者：accesskit 0.24.1（MIT 标准文本（spdx.org））、accesskit_consumer 0.38.0（MIT 标准文本（spdx.org））、accesskit_macos 0.26.3（MIT 标准文本（spdx.org））、accesskit_windows 0.34.0（MIT 标准文本（spdx.org））、block2 0.6.2（MIT 标准文本（spdx.org））、dispatch2 0.3.1（MIT 标准文本（spdx.org））、eventsource-stream 0.2.3（MIT 标准文本（spdx.org））、lyon 1.0.19（MIT 标准文本（spdx.org））、lyon_algorithms 1.0.22（MIT 标准文本（spdx.org））、lyon_geom 1.0.20（MIT 标准文本（spdx.org））、lyon_path 1.0.19（MIT 标准文本（spdx.org））、lyon_tessellation 1.0.23（MIT 标准文本（spdx.org））、mac 0.1.1（MIT 标准文本（spdx.org））、mac-notification-sys 0.6.15（MIT 标准文本（spdx.org））、objc-sys 0.3.5（MIT 标准文本（spdx.org））、objc2 0.5.3（MIT 标准文本（spdx.org））、objc2 0.6.5（MIT 标准文本（spdx.org））、objc2-app-kit 0.2.2（MIT 标准文本（spdx.org））、objc2-app-kit 0.3.2（MIT 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（MIT 标准文本（spdx.org））、objc2-core-data 0.3.2（MIT 标准文本（spdx.org））、objc2-core-foundation 0.3.2（MIT 标准文本（spdx.org））、objc2-core-graphics 0.3.2（MIT 标准文本（spdx.org））、objc2-core-image 0.3.2（MIT 标准文本（spdx.org））、objc2-core-services 0.3.2（MIT 标准文本（spdx.org））、objc2-core-text 0.3.2（MIT 标准文本（spdx.org））、objc2-core-video 0.3.2（MIT 标准文本（spdx.org））、objc2-encode 4.1.0（MIT 标准文本（spdx.org））、objc2-foundation 0.2.2（MIT 标准文本（spdx.org））、objc2-foundation 0.3.2（MIT 标准文本（spdx.org））、objc2-local-authentication 0.3.2（MIT 标准文本（spdx.org））、objc2-metal 0.3.2（MIT 标准文本（spdx.org））、objc2-quartz-core 0.3.2（MIT 标准文本（spdx.org））、objc2-security 0.3.2（MIT 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（MIT 标准文本（spdx.org））、objc2-user-notifications 0.3.2（MIT 标准文本（spdx.org））、pathfinder_geometry 0.5.1（MIT 标准文本（spdx.org））、pathfinder_simd 0.5.6（MIT 标准文本（spdx.org））、profiling 1.0.18（MIT 标准文本（spdx.org））、profiling-procmacros 1.0.18（MIT 标准文本（spdx.org））、rquickjs-core 0.14.0（MIT 标准文本（spdx.org））、rust-i18n-macro 4.2.4（MIT 标准文本（spdx.org））、rust-i18n-support 4.2.4（MIT 标准文本（spdx.org））、seahash 4.1.0（MIT 标准文本（spdx.org））、svg_fmt 0.4.5（MIT 标准文本（spdx.org））、taffy 0.15.1（MIT 标准文本（spdx.org））、zune-core 0.4.12（MIT 标准文本（spdx.org））、zune-inflate 0.2.54（MIT 标准文本（spdx.org））、zune-jpeg 0.4.21（MIT 标准文本（spdx.org））
 
 ```text
 MIT License
@@ -611,9 +681,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### 2. accesskit 0.24.1 等 218 项
+### 2. accesskit 0.24.1 等 219 项
 
-使用者：accesskit 0.24.1（Apache-2.0 标准文本（spdx.org））、accesskit_consumer 0.38.0（Apache-2.0 标准文本（spdx.org））、accesskit_macos 0.26.3（Apache-2.0 标准文本（spdx.org））、accesskit_windows 0.34.0（Apache-2.0 标准文本（spdx.org））、addr2line 0.27.1（LICENSE-APACHE）、arc-swap 1.9.5（LICENSE-APACHE）、arrayvec 0.7.8（LICENSE-APACHE）、async-channel 2.5.0（LICENSE-APACHE）、async-executor 1.14.1（LICENSE-APACHE）、async-fs 2.2.0（LICENSE-APACHE）、async-io 2.6.0（LICENSE-APACHE）、async-lock 3.5.0（LICENSE-APACHE）、async-net 2.0.0（LICENSE-APACHE）、async-process 2.5.0（LICENSE-APACHE）、async-signal 0.2.14（LICENSE-APACHE）、async-task 4.7.1（LICENSE-APACHE）、atomic-waker 1.1.2（LICENSE-APACHE）、backtrace 0.3.77（LICENSE-APACHE）、base64 0.22.1（LICENSE-APACHE）、base64 0.23.1（LICENSE-APACHE）、bitflags 1.3.2（LICENSE-APACHE）、bitflags 2.13.2（LICENSE-APACHE）、block-buffer 0.10.4（LICENSE-APACHE）、block-buffer 0.12.1（LICENSE-APACHE）、blocking 1.7.0（LICENSE-APACHE）、bstr 1.13.1（LICENSE-APACHE）、bumpalo 3.20.3（LICENSE-APACHE）、bytemuck 1.25.2（LICENSE-APACHE）、cfg-if 1.0.5（LICENSE-APACHE）、concurrent-queue 2.5.0（LICENSE-APACHE）、const-oid 0.10.3（LICENSE-APACHE）、core-foundation 0.10.1（LICENSE-APACHE）、core-foundation 0.9.4（LICENSE-APACHE）、core-foundation-sys 0.8.7（LICENSE-APACHE）、core-graphics 0.24.0（LICENSE-APACHE）、core-graphics-types 0.2.0（LICENSE-APACHE）、core-text 21.0.0（LICENSE-APACHE）、core_detect 1.0.0（LICENSE-APACHE）、cpufeatures 0.2.17（LICENSE-APACHE）、cpufeatures 0.3.1（LICENSE-APACHE）、crossbeam-channel 0.5.17（LICENSE-APACHE）、crossbeam-deque 0.8.8（LICENSE-APACHE）、crossbeam-epoch 0.9.21（LICENSE-APACHE）、crossbeam-utils 0.8.23（LICENSE-APACHE）、crypto-common 0.1.7（LICENSE-APACHE）、crypto-common 0.2.2（LICENSE-APACHE）、curve25519-dalek-derive 0.1.1（LICENSE-APACHE）、data-url 0.3.2（LICENSE-APACHE）、digest 0.10.7（LICENSE-APACHE）、digest 0.11.3（LICENSE-APACHE）、dispatch2 0.3.1（Apache-2.0 标准文本（spdx.org））、displaydoc 0.2.7（LICENSE-APACHE）、either 1.19.0（LICENSE-APACHE）、encoding_rs 0.8.44（LICENSE-APACHE）、encoding_rs_io 0.1.8（LICENSE-APACHE）、equivalent 1.0.3（LICENSE-APACHE）、errno 0.3.15（LICENSE-APACHE）、euclid 0.22.14（LICENSE-APACHE）、event-listener 5.4.2（LICENSE-APACHE）、event-listener-strategy 0.5.4（LICENSE-APACHE）、eventsource-stream 0.2.3（Apache-2.0 标准文本（spdx.org））、fastrand 2.5.0（LICENSE-APACHE）、filetime 0.2.29（LICENSE-APACHE）、flate2 1.1.11（LICENSE-APACHE）、flume 0.12.0（LICENSE-APACHE）、fnv 1.0.7（LICENSE-APACHE）、form_urlencoded 1.2.3（LICENSE-APACHE）、futf 0.1.5（LICENSE-APACHE）、futures-lite 2.6.1（LICENSE-APACHE）、gif 0.13.3（LICENSE-APACHE）、gif 0.14.2（LICENSE-APACHE）、gimli 0.34.0（LICENSE-APACHE）、glob 0.3.4（LICENSE-APACHE）、gpui-kit 0.9.1（Apache-2.0 标准文本（spdx.org））、hash32 0.3.1（LICENSE-APACHE）、hashbrown 0.16.1（LICENSE-APACHE）、hashbrown 0.17.1（LICENSE-APACHE）、heapless 0.9.3（LICENSE-APACHE）、heck 0.5.0（LICENSE-APACHE）、html5ever 0.27.0（LICENSE-APACHE）、httparse 1.10.1（LICENSE-APACHE）、hybrid-array 0.4.15（LICENSE-APACHE）、hyper-rustls 0.27.10（LICENSE-APACHE）、idna 1.1.0（LICENSE-APACHE）、idna_adapter 1.2.2（LICENSE-APACHE）、indexmap 2.14.2（LICENSE-APACHE）、itertools 0.11.0（LICENSE-APACHE）、itertools 0.13.0（LICENSE-APACHE）、itertools 0.14.0（LICENSE-APACHE）、keyboard-types 0.8.3（LICENSE-APACHE）、kurbo 0.11.3（LICENSE-APACHE）、kurbo 0.13.1（LICENSE-APACHE）、lazy_static 1.5.1（LICENSE-APACHE）、lock_api 0.4.14（LICENSE-APACHE）、log 0.4.35（LICENSE-APACHE）、lyon 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_algorithms 1.0.22（Apache-2.0 标准文本（spdx.org））、lyon_geom 1.0.20（Apache-2.0 标准文本（spdx.org））、lyon_path 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_tessellation 1.0.23（Apache-2.0 标准文本（spdx.org））、mac 0.1.1（Apache-2.0 标准文本（spdx.org））、mac-notification-sys 0.6.15（Apache-2.0 标准文本（spdx.org））、markup5ever 0.12.1（LICENSE-APACHE）、markup5ever_rcdom 0.3.0（LICENSE-APACHE）、mime 0.3.18（LICENSE-APACHE）、minimal-lexical 0.2.1（LICENSE-APACHE）、muda 0.21.2（LICENSE-APACHE）、multiversion 0.8.1（LICENSE-APACHE）、multiversion-macros 0.8.1（LICENSE-APACHE）、multiversion_no_op 1.0.0（LICENSE-APACHE）、nohash-hasher 0.2.0（LICENSE-APACHE）、num-traits 0.2.19（LICENSE-APACHE）、num_cpus 1.17.0（LICENSE-APACHE）、objc2-app-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-data 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-foundation 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-graphics 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-image 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-services 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-text 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-video 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-metal 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-quartz-core 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-security 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-user-notifications 0.3.2（Apache-2.0 标准文本（spdx.org））、object 0.40.0（LICENSE-APACHE）、once_cell 1.21.4（LICENSE-APACHE）、parking 2.2.1（LICENSE-APACHE）、parking_lot 0.12.5（LICENSE-APACHE）、parking_lot_core 0.9.12（LICENSE-APACHE）、pathfinder_geometry 0.5.1（Apache-2.0 标准文本（spdx.org））、pathfinder_simd 0.5.6（Apache-2.0 标准文本（spdx.org））、percent-encoding 2.3.2（LICENSE-APACHE）、piper 0.2.5（LICENSE-APACHE）、png 0.17.16（LICENSE-APACHE）、png 0.18.1（LICENSE-APACHE）、polling 3.11.0（LICENSE-APACHE）、pollster 0.4.0（LICENSE-APACHE）、polycool 0.4.0（LICENSE-APACHE）、profiling 1.0.18（Apache-2.0 标准文本（spdx.org））、profiling-procmacros 1.0.18（Apache-2.0 标准文本（spdx.org））、qoi 0.4.1（LICENSE-APACHE）、rayon 1.12.0（LICENSE-APACHE）、rayon-core 1.13.0（LICENSE-APACHE）、regex 1.13.1（LICENSE-APACHE）、regex-automata 0.4.18（LICENSE-APACHE）、regex-syntax 0.8.11（LICENSE-APACHE）、relative-path 2.0.3（LICENSE-APACHE）、roxmltree 0.20.0（LICENSE-APACHE）、roxmltree 0.21.2（LICENSE-APACHE）、rustc-demangle 0.1.28（LICENSE-APACHE）、rustix 1.1.6（LICENSE-APACHE）、rustls 0.23.46（LICENSE-APACHE）、rustls-native-certs 0.8.5（LICENSE-APACHE）、rustls-platform-verifier 0.7.1（LICENSE-APACHE）、scopeguard 1.2.0（LICENSE-APACHE）、security-framework 3.7.0（LICENSE-APACHE）、security-framework-sys 2.17.0（LICENSE-APACHE）、sha1 0.10.7（LICENSE-APACHE）、sha2 0.10.9（LICENSE-APACHE）、sha2 0.11.1（LICENSE-APACHE）、shellexpand 3.1.2（LICENSE-APACHE）、signal-hook-registry 1.4.8（LICENSE-APACHE）、signature 2.2.0（LICENSE-APACHE）、similar 2.7.0（LICENSE）、similar 3.2.1（LICENSE）、simplecss 0.2.2（LICENSE-APACHE）、siphasher 1.0.4（LICENSE-APACHE）、smallvec 1.16.5（LICENSE-APACHE）、smol 2.0.2（LICENSE-APACHE）、smol_str 0.3.7（LICENSE-APACHE）、socket2 0.6.5（LICENSE-APACHE）、stable_deref_trait 1.2.1（LICENSE-APACHE）、static_assertions 1.1.0（LICENSE-APACHE）、string_cache 0.8.9（LICENSE-APACHE）、svg_fmt 0.4.5（Apache-2.0 标准文本（spdx.org））、svgtypes 0.15.3（LICENSE-APACHE）、svgtypes 0.16.2（LICENSE-APACHE）、system-configuration 0.7.0（LICENSE-APACHE）、system-configuration-sys 0.6.0（LICENSE-APACHE）、tar 0.4.46（LICENSE-APACHE）、target-features 0.1.6（LICENSE-APACHE）、tendril 0.4.3（LICENSE-APACHE）、thread_local 1.1.10（LICENSE-APACHE）、tinyvec 1.13.3（LICENSE-APACHE.md）、tray-icon 0.26.1（LICENSE-APACHE）、triomphe 0.1.17（LICENSE-APACHE）、ttf-parser 0.25.1（LICENSE-APACHE）、tungstenite 0.28.0（LICENSE-APACHE）、unicase 2.10.0（LICENSE-APACHE）、unicode-bidi 0.3.18（LICENSE-APACHE）、unicode-bidi-mirroring 0.4.0（LICENSE-APACHE）、unicode-ccc 0.4.0（LICENSE-APACHE）、unicode-id 0.3.7（LICENSE-APACHE）、unicode-linebreak 0.1.5（LICENSE）、unicode-properties 0.1.5（LICENSE-APACHE）、unicode-segmentation 1.13.3（LICENSE-APACHE）、unicode-vo 0.1.0（LICENSE-APACHE）、unicode-width 0.2.3（LICENSE-APACHE）、ureq 3.5.2（LICENSE-APACHE）、ureq-proto 0.7.1（LICENSE-APACHE.txt）、url 2.5.9（LICENSE-APACHE）、utf8_iter 1.1.0（LICENSE-APACHE）、utf_types 1.0.0（LICENSE-APACHE）、uuid 1.29.2（LICENSE-APACHE）、waker-fn 1.2.0（LICENSE-APACHE）、weezl 0.1.12（LICENSE-APACHE）、xml5ever 0.18.1（LICENSE-APACHE）、zed-font-kit 0.14.1-zed（LICENSE-APACHE）、zeroize 1.9.1（LICENSE-APACHE）、zeroize_derive 1.5.0（LICENSE-APACHE）、zune-core 0.4.12（Apache-2.0 标准文本（spdx.org））、zune-core 0.5.3（LICENSE-APACHE）、zune-inflate 0.2.54（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.4.21（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.5.15（LICENSE-APACHE）
+使用者：accesskit 0.24.1（Apache-2.0 标准文本（spdx.org））、accesskit_consumer 0.38.0（Apache-2.0 标准文本（spdx.org））、accesskit_macos 0.26.3（Apache-2.0 标准文本（spdx.org））、accesskit_windows 0.34.0（Apache-2.0 标准文本（spdx.org））、addr2line 0.27.1（LICENSE-APACHE）、arc-swap 1.9.5（LICENSE-APACHE）、arrayvec 0.7.8（LICENSE-APACHE）、async-channel 2.5.0（LICENSE-APACHE）、async-executor 1.14.1（LICENSE-APACHE）、async-fs 2.2.0（LICENSE-APACHE）、async-io 2.6.0（LICENSE-APACHE）、async-lock 3.5.0（LICENSE-APACHE）、async-net 2.0.0（LICENSE-APACHE）、async-process 2.5.0（LICENSE-APACHE）、async-signal 0.2.14（LICENSE-APACHE）、async-task 4.7.1（LICENSE-APACHE）、atomic-waker 1.1.2（LICENSE-APACHE）、backtrace 0.3.77（LICENSE-APACHE）、base64 0.22.1（LICENSE-APACHE）、base64 0.23.1（LICENSE-APACHE）、bitflags 1.3.2（LICENSE-APACHE）、bitflags 2.13.2（LICENSE-APACHE）、block-buffer 0.10.4（LICENSE-APACHE）、block-buffer 0.12.1（LICENSE-APACHE）、blocking 1.7.0（LICENSE-APACHE）、bstr 1.13.1（LICENSE-APACHE）、bumpalo 3.20.3（LICENSE-APACHE）、bytemuck 1.25.2（LICENSE-APACHE）、cfg-if 1.0.5（LICENSE-APACHE）、concurrent-queue 2.5.0（LICENSE-APACHE）、const-oid 0.10.3（LICENSE-APACHE）、core-foundation 0.10.1（LICENSE-APACHE）、core-foundation 0.9.4（LICENSE-APACHE）、core-foundation-sys 0.8.7（LICENSE-APACHE）、core-graphics 0.24.0（LICENSE-APACHE）、core-graphics-types 0.2.0（LICENSE-APACHE）、core-text 21.0.0（LICENSE-APACHE）、core_detect 1.0.0（LICENSE-APACHE）、cpufeatures 0.2.17（LICENSE-APACHE）、cpufeatures 0.3.1（LICENSE-APACHE）、crossbeam-channel 0.5.17（LICENSE-APACHE）、crossbeam-deque 0.8.8（LICENSE-APACHE）、crossbeam-epoch 0.9.21（LICENSE-APACHE）、crossbeam-utils 0.8.23（LICENSE-APACHE）、crypto-common 0.1.7（LICENSE-APACHE）、crypto-common 0.2.2（LICENSE-APACHE）、curve25519-dalek-derive 0.1.1（LICENSE-APACHE）、data-url 0.3.2（LICENSE-APACHE）、digest 0.10.7（LICENSE-APACHE）、digest 0.11.3（LICENSE-APACHE）、dispatch2 0.3.1（Apache-2.0 标准文本（spdx.org））、displaydoc 0.2.7（LICENSE-APACHE）、either 1.19.0（LICENSE-APACHE）、encoding_rs 0.8.44（LICENSE-APACHE）、encoding_rs_io 0.1.8（LICENSE-APACHE）、equivalent 1.0.3（LICENSE-APACHE）、errno 0.3.15（LICENSE-APACHE）、euclid 0.22.14（LICENSE-APACHE）、event-listener 5.4.2（LICENSE-APACHE）、event-listener-strategy 0.5.4（LICENSE-APACHE）、eventsource-stream 0.2.3（Apache-2.0 标准文本（spdx.org））、fastrand 2.5.0（LICENSE-APACHE）、filetime 0.2.29（LICENSE-APACHE）、flate2 1.1.11（LICENSE-APACHE）、flume 0.12.0（LICENSE-APACHE）、fnv 1.0.7（LICENSE-APACHE）、form_urlencoded 1.2.3（LICENSE-APACHE）、futf 0.1.5（LICENSE-APACHE）、futures-lite 2.6.1（LICENSE-APACHE）、gif 0.13.3（LICENSE-APACHE）、gif 0.14.2（LICENSE-APACHE）、gimli 0.34.0（LICENSE-APACHE）、glob 0.3.4（LICENSE-APACHE）、gpui-kit 0.9.1（Apache-2.0 标准文本（spdx.org））、hash32 0.3.1（LICENSE-APACHE）、hashbrown 0.16.1（LICENSE-APACHE）、hashbrown 0.17.1（LICENSE-APACHE）、heapless 0.9.3（LICENSE-APACHE）、heck 0.5.0（LICENSE-APACHE）、html5ever 0.27.0（LICENSE-APACHE）、httparse 1.10.1（LICENSE-APACHE）、hybrid-array 0.4.15（LICENSE-APACHE）、hyper-rustls 0.27.10（LICENSE-APACHE）、idna 1.1.0（LICENSE-APACHE）、idna_adapter 1.2.2（LICENSE-APACHE）、indexmap 2.14.2（LICENSE-APACHE）、itertools 0.11.0（LICENSE-APACHE）、itertools 0.13.0（LICENSE-APACHE）、itertools 0.14.0（LICENSE-APACHE）、keyboard-types 0.8.3（LICENSE-APACHE）、kurbo 0.11.3（LICENSE-APACHE）、kurbo 0.13.1（LICENSE-APACHE）、lazy_static 1.5.1（LICENSE-APACHE）、lock_api 0.4.14（LICENSE-APACHE）、log 0.4.35（LICENSE-APACHE）、lyon 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_algorithms 1.0.22（Apache-2.0 标准文本（spdx.org））、lyon_geom 1.0.20（Apache-2.0 标准文本（spdx.org））、lyon_path 1.0.19（Apache-2.0 标准文本（spdx.org））、lyon_tessellation 1.0.23（Apache-2.0 标准文本（spdx.org））、mac 0.1.1（Apache-2.0 标准文本（spdx.org））、mac-notification-sys 0.6.15（Apache-2.0 标准文本（spdx.org））、markup5ever 0.12.1（LICENSE-APACHE）、markup5ever_rcdom 0.3.0（LICENSE-APACHE）、mime 0.3.18（LICENSE-APACHE）、minimal-lexical 0.2.1（LICENSE-APACHE）、muda 0.21.2（LICENSE-APACHE）、multiversion 0.8.1（LICENSE-APACHE）、multiversion-macros 0.8.1（LICENSE-APACHE）、multiversion_no_op 1.0.0（LICENSE-APACHE）、nohash-hasher 0.2.0（LICENSE-APACHE）、num-traits 0.2.19（LICENSE-APACHE）、num_cpus 1.17.0（LICENSE-APACHE）、objc2-app-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-data 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-foundation 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-graphics 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-image 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-services 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-text 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-core-video 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-local-authentication 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-metal 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-quartz-core 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-security 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（Apache-2.0 标准文本（spdx.org））、objc2-user-notifications 0.3.2（Apache-2.0 标准文本（spdx.org））、object 0.40.0（LICENSE-APACHE）、once_cell 1.21.4（LICENSE-APACHE）、parking 2.2.1（LICENSE-APACHE）、parking_lot 0.12.5（LICENSE-APACHE）、parking_lot_core 0.9.12（LICENSE-APACHE）、pathfinder_geometry 0.5.1（Apache-2.0 标准文本（spdx.org））、pathfinder_simd 0.5.6（Apache-2.0 标准文本（spdx.org））、percent-encoding 2.3.2（LICENSE-APACHE）、piper 0.2.5（LICENSE-APACHE）、png 0.17.16（LICENSE-APACHE）、png 0.18.1（LICENSE-APACHE）、polling 3.11.0（LICENSE-APACHE）、pollster 0.4.0（LICENSE-APACHE）、polycool 0.4.0（LICENSE-APACHE）、profiling 1.0.18（Apache-2.0 标准文本（spdx.org））、profiling-procmacros 1.0.18（Apache-2.0 标准文本（spdx.org））、qoi 0.4.1（LICENSE-APACHE）、rayon 1.12.0（LICENSE-APACHE）、rayon-core 1.13.0（LICENSE-APACHE）、regex 1.13.1（LICENSE-APACHE）、regex-automata 0.4.18（LICENSE-APACHE）、regex-syntax 0.8.11（LICENSE-APACHE）、relative-path 2.0.3（LICENSE-APACHE）、roxmltree 0.20.0（LICENSE-APACHE）、roxmltree 0.21.2（LICENSE-APACHE）、rustc-demangle 0.1.28（LICENSE-APACHE）、rustix 1.1.6（LICENSE-APACHE）、rustls 0.23.46（LICENSE-APACHE）、rustls-native-certs 0.8.5（LICENSE-APACHE）、rustls-platform-verifier 0.7.1（LICENSE-APACHE）、scopeguard 1.2.0（LICENSE-APACHE）、security-framework 3.7.0（LICENSE-APACHE）、security-framework-sys 2.17.0（LICENSE-APACHE）、sha1 0.10.7（LICENSE-APACHE）、sha2 0.10.9（LICENSE-APACHE）、sha2 0.11.1（LICENSE-APACHE）、shellexpand 3.1.2（LICENSE-APACHE）、signal-hook-registry 1.4.8（LICENSE-APACHE）、signature 2.2.0（LICENSE-APACHE）、similar 2.7.0（LICENSE）、similar 3.2.1（LICENSE）、simplecss 0.2.2（LICENSE-APACHE）、siphasher 1.0.4（LICENSE-APACHE）、smallvec 1.16.5（LICENSE-APACHE）、smol 2.0.2（LICENSE-APACHE）、smol_str 0.3.7（LICENSE-APACHE）、socket2 0.6.5（LICENSE-APACHE）、stable_deref_trait 1.2.1（LICENSE-APACHE）、static_assertions 1.1.0（LICENSE-APACHE）、string_cache 0.8.9（LICENSE-APACHE）、svg_fmt 0.4.5（Apache-2.0 标准文本（spdx.org））、svgtypes 0.15.3（LICENSE-APACHE）、svgtypes 0.16.2（LICENSE-APACHE）、system-configuration 0.7.0（LICENSE-APACHE）、system-configuration-sys 0.6.0（LICENSE-APACHE）、tar 0.4.46（LICENSE-APACHE）、target-features 0.1.6（LICENSE-APACHE）、tendril 0.4.3（LICENSE-APACHE）、thread_local 1.1.10（LICENSE-APACHE）、tinyvec 1.13.3（LICENSE-APACHE.md）、tray-icon 0.26.1（LICENSE-APACHE）、triomphe 0.1.17（LICENSE-APACHE）、ttf-parser 0.25.1（LICENSE-APACHE）、tungstenite 0.28.0（LICENSE-APACHE）、unicase 2.10.0（LICENSE-APACHE）、unicode-bidi 0.3.18（LICENSE-APACHE）、unicode-bidi-mirroring 0.4.0（LICENSE-APACHE）、unicode-ccc 0.4.0（LICENSE-APACHE）、unicode-id 0.3.7（LICENSE-APACHE）、unicode-linebreak 0.1.5（LICENSE）、unicode-properties 0.1.5（LICENSE-APACHE）、unicode-segmentation 1.13.3（LICENSE-APACHE）、unicode-vo 0.1.0（LICENSE-APACHE）、unicode-width 0.2.3（LICENSE-APACHE）、ureq 3.5.2（LICENSE-APACHE）、ureq-proto 0.7.1（LICENSE-APACHE.txt）、url 2.5.9（LICENSE-APACHE）、utf8_iter 1.1.0（LICENSE-APACHE）、utf_types 1.0.0（LICENSE-APACHE）、uuid 1.29.2（LICENSE-APACHE）、waker-fn 1.2.0（LICENSE-APACHE）、weezl 0.1.12（LICENSE-APACHE）、xml5ever 0.18.1（LICENSE-APACHE）、zed-font-kit 0.14.1-zed（LICENSE-APACHE）、zeroize 1.9.1（LICENSE-APACHE）、zeroize_derive 1.5.0（LICENSE-APACHE）、zune-core 0.4.12（Apache-2.0 标准文本（spdx.org））、zune-core 0.5.3（LICENSE-APACHE）、zune-inflate 0.2.54（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.4.21（Apache-2.0 标准文本（spdx.org））、zune-jpeg 0.5.15（LICENSE-APACHE）
 
 ```text
 Apache License
@@ -5014,9 +5084,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 63. dispatch2 0.3.1 等 18 项
+### 63. dispatch2 0.3.1 等 19 项
 
-使用者：dispatch2 0.3.1（Zlib 标准文本（spdx.org））、objc2-app-kit 0.3.2（Zlib 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-data 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-foundation 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-graphics 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-image 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-services 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-text 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-video 0.3.2（Zlib 标准文本（spdx.org））、objc2-metal 0.3.2（Zlib 标准文本（spdx.org））、objc2-quartz-core 0.3.2（Zlib 标准文本（spdx.org））、objc2-security 0.3.2（Zlib 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（Zlib 标准文本（spdx.org））、objc2-user-notifications 0.3.2（Zlib 标准文本（spdx.org））、zune-core 0.4.12（Zlib 标准文本（spdx.org））、zune-inflate 0.2.54（Zlib 标准文本（spdx.org））、zune-jpeg 0.4.21（Zlib 标准文本（spdx.org））
+使用者：dispatch2 0.3.1（Zlib 标准文本（spdx.org））、objc2-app-kit 0.3.2（Zlib 标准文本（spdx.org））、objc2-cloud-kit 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-data 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-foundation 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-graphics 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-image 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-services 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-text 0.3.2（Zlib 标准文本（spdx.org））、objc2-core-video 0.3.2（Zlib 标准文本（spdx.org））、objc2-local-authentication 0.3.2（Zlib 标准文本（spdx.org））、objc2-metal 0.3.2（Zlib 标准文本（spdx.org））、objc2-quartz-core 0.3.2（Zlib 标准文本（spdx.org））、objc2-security 0.3.2（Zlib 标准文本（spdx.org））、objc2-uniform-type-identifiers 0.3.2（Zlib 标准文本（spdx.org））、objc2-user-notifications 0.3.2（Zlib 标准文本（spdx.org））、zune-core 0.4.12（Zlib 标准文本（spdx.org））、zune-inflate 0.2.54（Zlib 标准文本（spdx.org））、zune-jpeg 0.4.21（Zlib 标准文本（spdx.org））
 
 ```text
 zlib License
@@ -14324,6 +14394,32 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### 238. tauri-winrt-notification 0.8.1
 
+使用者：tauri-winrt-notification 0.8.1（LICENSE.spdx）
+
+```text
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: winrt-notification
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2022-2022, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>An incomplete wrapper over the WinRT toast api.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2019-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/winrt-notification
+PackageDownloadLocation: git+https://github.com/tauri-apps/winrt-notification.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/winrt-notification.git
+Creator: Person: Daniel Thompson-Yvetot
+```
+
+### 239. tauri-winrt-notification 0.8.1
+
 使用者：tauri-winrt-notification 0.8.1（LICENSE_MIT）
 
 ```text
@@ -14348,32 +14444,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-### 239. tauri-winrt-notification 0.8.1
-
-使用者：tauri-winrt-notification 0.8.1（LICENSE.spdx）
-
-```text
-SPDXVersion: SPDX-2.1
-DataLicense: CC0-1.0
-PackageName: winrt-notification
-DataFormat: SPDXRef-1
-PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
-PackageHomePage: https://tauri.app
-PackageLicenseDeclared: Apache-2.0
-PackageLicenseDeclared: MIT
-PackageCopyrightText: 2022-2022, The Tauri Programme in the Commons Conservancy
-PackageSummary: <text>An incomplete wrapper over the WinRT toast api.
-                </text>
-PackageComment: <text>The package includes the following libraries; see
-Relationship information.
-                </text>
-Created: 2019-05-20T09:00:00Z
-PackageDownloadLocation: git://github.com/tauri-apps/winrt-notification
-PackageDownloadLocation: git+https://github.com/tauri-apps/winrt-notification.git
-PackageDownloadLocation: git+ssh://github.com/tauri-apps/winrt-notification.git
-Creator: Person: Daniel Thompson-Yvetot
 ```
 
 ### 240. tiff 0.11.3

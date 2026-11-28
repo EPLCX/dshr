@@ -33,9 +33,8 @@ allow = [
     "Unicode-3.0",
     # webpki-roots / webpki-root-certs：Mozilla 根证书列表。
     "CDLA-Permissive-2.0",
-    # libfuzzer-sys（LLVM 的一部分）。
-    "NCSA",
-    # 文件级的弱 copyleft：cbindgen（构建工具）、dwrote（Windows 字体）、option-ext。不改它们的源码就没有额外义务。
+    # 文件级的弱 copyleft：cbindgen（构建工具）、dwrote（Windows 字体）、option-ext。不改它们的源码就没有额外义务；
+    # 分发程序时须告知其源码的获取方式（MPL-2.0 第 3.2 条），THIRD_PARTY_NOTICES.md 的依赖清单已链接到各自的源码仓库。
     "MPL-2.0",
 ]
 

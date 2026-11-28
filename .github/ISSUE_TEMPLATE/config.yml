@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/EPLCX/dshr/security/advisories/new
+    about: 安全问题请通过私密漏洞报告提交，不要公开发布。
+  - name: 协作规范
+    url: https://github.com/EPLCX/dshr/blob/main/docs/contributing.md
+    about: 提交 Issue 与 PR 之前，请先阅读协作规范。

@@ -1,0 +1,18 @@
+# “Generate release notes”按此列出合入的 PR，作为撰写 Release 说明的素材。
+# 正式的说明按 docs/contributing.md §5.2 的结构改写，不直接发布自动生成的列表。
+changelog:
+  exclude:
+    labels: [chore, duplicate, wontfix]
+  categories:
+    - title: 破坏性更改
+      labels: [breaking]
+    - title: 功能更新
+      labels: [enhancement, performance, refactor]
+    - title: 问题修复
+      labels: [bug]
+    - title: 行为变更
+      labels: [behavior-change]
+    - title: 文档
+      labels: [documentation]
+    - title: 其他
+      labels: ["*"]

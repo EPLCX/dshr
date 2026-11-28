@@ -1,3 +1,7 @@
+// This file was modified by the dshr project from gpui-pre-macos 0.3.12 as published on crates.io.
+// The changes are described in vendor/gpui-pre-macos/PATCHED.md.
+// Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE in this crate).
+
 use crate::{
     BoolExt, MacDisplay, MetalFrames, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
