@@ -197,4 +197,4 @@ cargo build --release -p dshr-desktop
 - [ ] 改了依赖：重新生成 `THIRD_PARTY_NOTICES.md`；
 - [ ] 改了界面：按设计规范的检查清单过一遍，新文案有十种语言；
 - [ ] 改了行为、配置项、命令或插件 API：同步更新 `docs/` 下对应的文档；
-- [ ] 有不兼容变更：按 [协作规范 §4](contributing.md#4-版本号) 判断版本号，PR 加 `breaking` 标签。
+- [ ] 有破坏性更改：按 [协作规范 §4](contributing.md#4-版本号) 判断版本号，PR 加 `breaking` 标签。
