@@ -139,11 +139,16 @@ settings:
 
 ```bash
 pwsh scripts/third-party-notices.ps1          # 依赖变化（Cargo.lock 改动）后重新生成并提交
-pwsh scripts/third-party-notices.ps1 -Check   # 只检查是否最新，过期时退出码为 1（适合放进 CI）
+pwsh scripts/third-party-notices.ps1 -Check   # 只检查是否最新，过期时退出码为 1（CI 的 notices 任务运行这一步）
 ```
 
 - 范围：工作区全部成员在 Windows x64、macOS（Apple 芯片与 Intel）上的普通依赖；dev / build 依赖不进最终程序，不列入。
+  `vendor/` 下打过补丁的 crate 也列入，并单列在“修改过的第三方组件”一节。
 - 许可证全文取自各 crate 发布包里自带的 LICENSE / COPYING / NOTICE 文件，相同文本只保留一份。
+- 发布包没有许可证文件的 crate，按其 SPDX 声明收录标准文本，并在“使用标准许可证文本的 crate 的版权人”一节写明版权人
+  （取 crate 声明的作者；未声明作者的，在脚本的 `$holdersOverride` 里按上游仓库的许可证文件补上，否则该行显示“未声明”，需要补充）。
+- 标准文本缓存在 `scripts/license-texts/`。出现新的许可证 id 时脚本会从 spdx.org 下载，下载的文件要一并提交。
+- 修改 `vendor/` 下的源文件时，在文件开头保留或加上修改声明（Apache-2.0 第 4(b) 条），并在对应的 `PATCHED.md` 里记录改动。
 - 带 C 源码或数据的组件单独说明：QuickJS-ng、Zstandard（按 BSD 使用）、AWS-LC、Lucide 图标、Unicode 字符数据。
   新引入这类依赖时，在脚本的 `$bundled` 和 `$extraLicenseFiles` 里登记。
 

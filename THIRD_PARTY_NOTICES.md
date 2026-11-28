@@ -3,13 +3,23 @@
 dshr 本身以 MIT 许可发布，见 [LICENSE](LICENSE)。dshr 的桌面版与命令行版包含下列第三方组件，
 它们各自的版权归原作者所有，按各自的许可证使用。可选双许可（如 `MIT OR Apache-2.0`）的组件，本项目按其中任一许可使用。
 
-统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 559 个 crate；
+统计范围：工作区全部成员在 `x86_64-pc-windows-msvc`、`aarch64-apple-darwin`、`x86_64-apple-darwin` 上的普通依赖，共 561 个 crate；
 dev / build 依赖不进最终程序，不列入。
 
 ## 参照项目
 
 - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`，MIT）：dshr 是它的非官方 Rust 重写版，只参照其信息结构、交互流程与会话日志格式，
   目前不包含它的代码或资源。今后复用其资源（文案、提示词、图标等）时，在这里列出并附上原版 LICENSE。“DeepSeek”名称与标识归其所有者，dshr 与其无隶属关系。
+
+## 修改过的第三方组件
+
+下列 crate 是在 crates.io 发布版本基础上打过补丁的副本，源码在本仓库的 `vendor/` 目录，
+修改内容记录在各自的 `PATCHED.md`，被修改的源文件开头带有修改声明。修改部分与原组件按同一许可证发布。
+
+| crate | 版本 | 许可证（SPDX） | 原版 | 修改说明 |
+|---|---|---|---|---|
+| gpui-pre-macos | 0.3.12 | Apache-2.0 | [crates.io](https://crates.io/crates/gpui-pre-macos/0.3.12) | [vendor/gpui-pre-macos/PATCHED.md](vendor/gpui-pre-macos/PATCHED.md) |
+| gpui-pre-windows | 0.3.12 | Apache-2.0 | [crates.io](https://crates.io/crates/gpui-pre-windows/0.3.12) | [vendor/gpui-pre-windows/PATCHED.md](vendor/gpui-pre-windows/PATCHED.md) |
 
 ## 内嵌的非 Rust 组件
 
@@ -193,6 +203,7 @@ dev / build 依赖不进最终程序，不列入。
 | [gpui-pre-collections](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-derive-refineable](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-http-client](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
+| [gpui-pre-macos](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-macros](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-platform](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-refineable](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
@@ -200,6 +211,7 @@ dev / build 依赖不进最终程序，不列入。
 | [gpui-pre-shared-string](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-sum-tree](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-util](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
+| [gpui-pre-windows](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-ztracing](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [gpui-pre-ztracing-macro](https://github.com/zed-industries/zed) | 0.3.12 | Apache-2.0 |
 | [granit-parser](https://github.com/bourumir-wyngs/granit-parser) | 1.3.0 | MIT OR Apache-2.0 |
@@ -588,6 +600,64 @@ dev / build 依赖不进最终程序，不列入。
 | [zune-inflate](https://crates.io/crates/zune-inflate) | 0.2.54 | MIT OR Apache-2.0 OR Zlib |
 | [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.4.21 | MIT OR Apache-2.0 OR Zlib |
 | [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
+
+## 使用标准许可证文本的 crate 的版权人
+
+下列 crate 的发布包里没有许可证文件，“许可证全文”一节按其 SPDX 声明收录了 spdx.org 上的标准文本（标注为“标准文本（spdx.org）”）。
+标准文本中的 `<year> <copyright holders>`、`<copyright holders>` 等占位处，对这些 crate 分别指下表中的版权人：
+取自 crate 声明的作者；未声明作者的，取自其源码仓库的许可证文件。
+
+| crate | 版本 | 版权人 |
+|---|---|---|
+| [accesskit](https://github.com/AccessKit/accesskit) | 0.24.1 | The AccessKit contributors |
+| [accesskit_consumer](https://github.com/AccessKit/accesskit) | 0.38.0 | The AccessKit contributors |
+| [accesskit_macos](https://github.com/AccessKit/accesskit) | 0.26.3 | The AccessKit contributors |
+| [accesskit_windows](https://github.com/AccessKit/accesskit) | 0.34.0 | The AccessKit contributors |
+| [block2](https://github.com/madsmtm/objc2) | 0.6.2 | Mads Marquart |
+| [dispatch2](https://github.com/madsmtm/objc2) | 0.3.1 | Mads Marquart、Mary |
+| [eventsource-stream](https://github.com/jpopesculian/eventsource-stream) | 0.2.3 | Julian Popescu |
+| [gpui-kit](https://github.com/longbridge/gpui-kit) | 0.9.1 | Longbridge |
+| [lyon](https://github.com/nical/lyon) | 1.0.19 | Nicolas Silva |
+| [lyon_algorithms](https://github.com/nical/lyon) | 1.0.22 | Nicolas Silva |
+| [lyon_geom](https://github.com/nical/lyon) | 1.0.20 | Nicolas Silva |
+| [lyon_path](https://github.com/nical/lyon) | 1.0.19 | Nicolas Silva |
+| [lyon_tessellation](https://github.com/nical/lyon) | 1.0.23 | Nicolas Silva |
+| [mac](https://github.com/reem/rust-mac.git) | 0.1.1 | Jonathan Reem |
+| [mac-notification-sys](https://github.com/h4llow3En/mac-notification-sys) | 0.6.15 | Felix Döring、Hendrik Sollich |
+| [objc-sys](https://github.com/madsmtm/objc2) | 0.3.5 | Mads Marquart |
+| [objc2](https://github.com/madsmtm/objc2) | 0.5.3 | Steven Sheldon、Mads Marquart |
+| [objc2](https://github.com/madsmtm/objc2) | 0.6.5 | Mads Marquart |
+| [objc2-app-kit](https://github.com/madsmtm/objc2) | 0.2.2 | Mads Marquart |
+| [objc2-app-kit](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-cloud-kit](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-data](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-foundation](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-graphics](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-image](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-services](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-text](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-core-video](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-encode](https://github.com/madsmtm/objc2) | 4.1.0 | Mads Marquart |
+| [objc2-foundation](https://github.com/madsmtm/objc2) | 0.2.2 | Mads Marquart |
+| [objc2-foundation](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-metal](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-quartz-core](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-security](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-uniform-type-identifiers](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [objc2-user-notifications](https://github.com/madsmtm/objc2) | 0.3.2 | Mads Marquart |
+| [pathfinder_geometry](https://github.com/servo/pathfinder) | 0.5.1 | Patrick Walton |
+| [pathfinder_simd](https://github.com/servo/pathfinder) | 0.5.6 | Patrick Walton |
+| [profiling](https://github.com/aclysma/profiling) | 1.0.18 | Philip Degarmo |
+| [profiling-procmacros](https://github.com/aclysma/profiling) | 1.0.18 | Philip Degarmo |
+| [rquickjs-core](https://github.com/DelSkayn/rquickjs.git) | 0.14.0 | Mees Delzenne、K. |
+| [rust-i18n-macro](https://github.com/longbridge/rust-i18n) | 4.2.4 | Longbridge |
+| [rust-i18n-support](https://github.com/longbridge/rust-i18n) | 4.2.4 | Longbridge |
+| [seahash](https://gitlab.redox-os.org/redox-os/seahash) | 4.1.0 | ticki、Tom Almeida |
+| [svg_fmt](https://github.com/nical/rust_debug) | 0.4.5 | Nicolas Silva |
+| [taffy](https://github.com/DioxusLabs/taffy) | 0.15.1 | Alice Cecile、Johnathan Kelley、Nico Burns |
+| [zune-core](https://crates.io/crates/zune-core) | 0.4.12 | zune-image developers |
+| [zune-inflate](https://crates.io/crates/zune-inflate) | 0.2.54 | zune-image developers |
+| [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.4.21 | caleb |
 
 ## 许可证全文
 
@@ -6965,9 +7035,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 105. gpui-pre 0.3.12 等 14 项
+### 105. gpui-pre 0.3.12 等 16 项
 
-使用者：gpui-pre 0.3.12（LICENSE-APACHE）、gpui-pre-apple 0.3.12（LICENSE-APACHE）、gpui-pre-collections 0.3.12（LICENSE-APACHE）、gpui-pre-derive-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-http-client 0.3.12（LICENSE-APACHE）、gpui-pre-macros 0.3.12（LICENSE-APACHE）、gpui-pre-platform 0.3.12（LICENSE-APACHE）、gpui-pre-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-scheduler 0.3.12（LICENSE-APACHE）、gpui-pre-shared-string 0.3.12（LICENSE-APACHE）、gpui-pre-sum-tree 0.3.12（LICENSE-APACHE）、gpui-pre-util 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing-macro 0.3.12（LICENSE-APACHE）
+使用者：gpui-pre 0.3.12（LICENSE-APACHE）、gpui-pre-apple 0.3.12（LICENSE-APACHE）、gpui-pre-collections 0.3.12（LICENSE-APACHE）、gpui-pre-derive-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-http-client 0.3.12（LICENSE-APACHE）、gpui-pre-macos 0.3.12（LICENSE-APACHE）、gpui-pre-macros 0.3.12（LICENSE-APACHE）、gpui-pre-platform 0.3.12（LICENSE-APACHE）、gpui-pre-refineable 0.3.12（LICENSE-APACHE）、gpui-pre-scheduler 0.3.12（LICENSE-APACHE）、gpui-pre-shared-string 0.3.12（LICENSE-APACHE）、gpui-pre-sum-tree 0.3.12（LICENSE-APACHE）、gpui-pre-util 0.3.12（LICENSE-APACHE）、gpui-pre-windows 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing 0.3.12（LICENSE-APACHE）、gpui-pre-ztracing-macro 0.3.12（LICENSE-APACHE）
 
 ```text
 Copyright 2022 - 2025 Zed Industries, Inc.
@@ -14322,6 +14392,32 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### 238. tauri-winrt-notification 0.8.1
 
+使用者：tauri-winrt-notification 0.8.1（LICENSE.spdx）
+
+```text
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: winrt-notification
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2022-2022, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>An incomplete wrapper over the WinRT toast api.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2019-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/winrt-notification
+PackageDownloadLocation: git+https://github.com/tauri-apps/winrt-notification.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/winrt-notification.git
+Creator: Person: Daniel Thompson-Yvetot
+```
+
+### 239. tauri-winrt-notification 0.8.1
+
 使用者：tauri-winrt-notification 0.8.1（LICENSE_MIT）
 
 ```text
@@ -14346,32 +14442,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-### 239. tauri-winrt-notification 0.8.1
-
-使用者：tauri-winrt-notification 0.8.1（LICENSE.spdx）
-
-```text
-SPDXVersion: SPDX-2.1
-DataLicense: CC0-1.0
-PackageName: winrt-notification
-DataFormat: SPDXRef-1
-PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
-PackageHomePage: https://tauri.app
-PackageLicenseDeclared: Apache-2.0
-PackageLicenseDeclared: MIT
-PackageCopyrightText: 2022-2022, The Tauri Programme in the Commons Conservancy
-PackageSummary: <text>An incomplete wrapper over the WinRT toast api.
-                </text>
-PackageComment: <text>The package includes the following libraries; see
-Relationship information.
-                </text>
-Created: 2019-05-20T09:00:00Z
-PackageDownloadLocation: git://github.com/tauri-apps/winrt-notification
-PackageDownloadLocation: git+https://github.com/tauri-apps/winrt-notification.git
-PackageDownloadLocation: git+ssh://github.com/tauri-apps/winrt-notification.git
-Creator: Person: Daniel Thompson-Yvetot
 ```
 
 ### 240. tiff 0.11.3

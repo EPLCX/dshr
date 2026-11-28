@@ -3,6 +3,9 @@
 来源：crates.io 上的 `gpui-pre-windows 0.3.12`，下文记录了本地补丁。通过根 `Cargo.toml` 的
 `[patch.crates-io]` 使用。
 
+许可证：Apache-2.0（见同目录 `LICENSE-APACHE`），修改部分按同一许可证发布。按其第 4(b) 条，被修改的源文件开头都带有修改声明；新改动其他文件时，也在该文件开头加上同样的声明。
+本组件已列入根目录的 `THIRD_PARTY_NOTICES.md`（“修改过的第三方组件”一节）。
+
 ## 改动
 
 `src/directx_renderer.rs` 的 `DirectXRenderer::resize`：
@@ -35,4 +38,4 @@ resize 里没有用 `ClearState()`：它会清掉初始化时只设置一次的�
 ## 升级 gpui-pre 时
 
 先看上游 `DirectXRenderer::resize` 是否已经解绑并 Flush；已经修复就删掉 `vendor/gpui-pre-windows`
-和根 `Cargo.toml` 里的 `[patch.crates-io]`。没有修复就用新版本重新复制，再把上面的改动打上去。
+和根 `Cargo.toml` 里的 `[patch.crates-io]`。没有修复就用新版本重新复制，再把上面的改动和文件开头的修改声明打上去，并重新生成 `THIRD_PARTY_NOTICES.md`。
