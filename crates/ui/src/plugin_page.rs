@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Disableable as _, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -23,6 +24,7 @@ use crate::design::{
     ControlSize as _, HoverFill as _, Palette, RowColor as _, Tone, Typography as _, badge, card, divider, hint, mono_font, palette, panel,
     pressable, radius, readable_with_id, space,
 };
+use crate::dropdown::{DropdownChanged, DropdownState};
 use crate::reveal::reveal_in;
 
 pub struct PluginPageView {
@@ -47,6 +49,12 @@ pub struct PluginPageView {
     pending_link: Option<String>,
     /// 带 `confirm` 的按钮点过一次、等第二次确认：按钮的元素 id。
     pending_confirm: Option<String>,
+    /// 控件自己的事件触发的动作：输入框的 `submit`，滑块、下拉框、标签输入的 `action`。控件 id → 动作名。
+    events: HashMap<String, String>,
+    /// 标签输入最多几个标签：控件 id → `max`。
+    tag_limits: HashMap<String, usize>,
+    /// 日期选择展开时显示的月份：控件 id → `2026-11`。
+    months: HashMap<String, String>,
     /// 上次看到的 `host.ui.refresh` 次数。
     refresh_generation: u64,
     /// 页面正文的滚动（滚动容器在弹窗里，见 `WorkspaceView`）：键盘焦点移到看不见的控件时滚过去。
@@ -82,6 +90,9 @@ impl PluginPageView {
             open: HashMap::new(),
             pending_link: None,
             pending_confirm: None,
+            events: HashMap::new(),
+            tag_limits: HashMap::new(),
+            months: HashMap::new(),
             scroll: ScrollHandle::new(),
             refresh_generation,
         };
@@ -184,17 +195,30 @@ impl PluginPageView {
     /// 树里每个表单控件都要有一个状态；插件换了 `value` 时写进去（如提交后清空）。树里没有了的丢掉。
     fn sync_inputs(&mut self, tree: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let mut found = Vec::new();
+        let mut events = HashMap::new();
+        let mut tag_limits = HashMap::new();
         visit_nodes(tree, &mut |node| {
-            if let Some(id) = node.get("id").and_then(Value::as_str)
-                && let Some(seed) = Seed::of(node)
+            let Some(id) = node.get("id").and_then(Value::as_str) else { return };
+            if let Some(limit) =
+                node.get("max").and_then(Value::as_u64).filter(|_| node.get("type").and_then(Value::as_str) == Some("tags-input"))
             {
+                tag_limits.insert(id.to_owned(), limit as usize);
+            }
+            if let Some(seed) = Seed::of(node) {
                 found.push((id.to_owned(), seed));
             }
+            // 由控件自己的事件（Enter、松开滑块、选下拉项、加删标签）触发的动作。
+            let key = if node.get("type").and_then(Value::as_str) == Some("input") { "submit" } else { "action" };
+            if let Some(action) = node.get(key).and_then(Value::as_str) {
+                events.insert(id.to_owned(), action.to_owned());
+            }
         });
+        self.events = events;
+        self.tag_limits = tag_limits;
         self.controls.retain(|id, control| found.iter().any(|(other, seed)| other == id && control.matches(seed)));
         for (id, seed) in found {
             match (self.controls.get_mut(&id), seed) {
-                (Some(Control::Input { state, last, number: limits }), Seed::Input { value, number, .. }) => {
+                (Some(Control::Input { state, last, number: limits, .. }), Seed::Input { value, number, .. }) => {
                     if *last != value {
                         state.update(cx, |state, cx| state.set_value(value.clone(), window, cx));
                         *last = value;
@@ -213,20 +237,162 @@ impl PluginPageView {
                         *last = value;
                     }
                 }
-                (_, Seed::Input { value, placeholder, number }) => {
-                    let state = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(value.clone()));
-                    self.controls.insert(id, Control::Input { state, last: value, number });
+                (Some(Control::Slider { state, last, .. }), Seed::Slider { value, .. }) => {
+                    if *last != value {
+                        state.update(cx, |state, cx| state.set_value(value as f32, window, cx));
+                        *last = value;
+                    }
                 }
-                (_, Seed::Textarea { value, placeholder }) => {
-                    let state =
-                        cx.new(|cx| TextareaState::new(window, cx).placeholder(placeholder).default_value(value.clone()).auto_grow(3, 12));
-                    self.controls.insert(id, Control::Textarea { state, last: value });
+                (Some(Control::Tags { tags, last, .. }), Seed::Tags { value, .. }) => {
+                    if *last != value {
+                        *tags = value.clone();
+                        *last = value;
+                    }
                 }
-                (_, Seed::Choice(value)) => {
-                    self.controls.insert(id, Control::Choice { current: value.clone(), last: value });
+                (
+                    Some(Control::Dropdown { state, filter, options: current_options, shown, current, last, .. }),
+                    Seed::Dropdown { options, value, .. },
+                ) => {
+                    if *last != value {
+                        *current = value.clone();
+                        *last = value;
+                    }
+                    *current_options = options;
+                    let text = filter.as_ref().map(|filter| filter.read(cx).value().to_string()).unwrap_or_default();
+                    *shown = filter_options(current_options, &text, current);
+                    let (labels, selected) = dropdown_items(current_options, shown, current);
+                    state.update(cx, |state, cx| state.set_items(labels, selected, cx));
+                }
+                (_, seed) => {
+                    let control = self.new_control(&id, seed, window, cx);
+                    self.controls.insert(id, control);
                 }
             }
         }
+    }
+
+    /// 第一次见到一个控件（或者它的类型、建的时候定下的设置变了）时建它的状态，订阅它自己的事件。
+    fn new_control(&mut self, id: &str, seed: Seed, window: &mut Window, cx: &mut Context<Self>) -> Control {
+        let id = id.to_owned();
+        match seed {
+            Seed::Input { value, placeholder, number, masked, max_length } => {
+                let state = cx.new(|cx| {
+                    let state = InputState::new(window, cx).placeholder(placeholder).default_value(value.clone()).masked(masked);
+                    match max_length {
+                        Some(limit) => state.validate(move |text, _| text.chars().count() <= limit),
+                        None => state,
+                    }
+                });
+                let _events = cx.subscribe_in(&state, window, move |this, _, event: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = event
+                        && let Some(action) = this.events.get(&id).cloned()
+                    {
+                        this.act(action, Value::Null, None, window, cx);
+                    }
+                });
+                Control::Input { state, last: value, number, masked, max_length, _events }
+            }
+            Seed::Textarea { value, placeholder } => {
+                let state =
+                    cx.new(|cx| TextareaState::new(window, cx).placeholder(placeholder).default_value(value.clone()).auto_grow(3, 12));
+                Control::Textarea { state, last: value }
+            }
+            Seed::Choice(value) => Control::Choice { current: value.clone(), last: value },
+            Seed::Slider { value, min, max, step } => {
+                let state = cx.new(|_| SliderState::new().min(min as f32).max(max as f32).step(step as f32).default_value(value as f32));
+                let _events = cx.subscribe_in(&state, window, move |this, _, event: &SliderEvent, window, cx| match event {
+                    // 拖动时只重画（旁边显示的数值跟着变），松手时才交给插件。
+                    SliderEvent::Change(_) => cx.notify(),
+                    SliderEvent::Release(value) => match this.events.get(&id).cloned() {
+                        Some(action) => this.act(action, json!(slider_value(*value)), None, window, cx),
+                        None => cx.notify(),
+                    },
+                });
+                Control::Slider { state, last: value, range: (min, max, step), _events }
+            }
+            Seed::Tags { value, placeholder } => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+                let _events = cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = event {
+                        let text = input.read(cx).value().trim().to_owned();
+                        input.update(cx, |input, cx| input.set_value("", window, cx));
+                        this.add_tag(&id, text, window, cx);
+                    }
+                });
+                Control::Tags { input, tags: value.clone(), last: value, _events }
+            }
+            Seed::Dropdown { options, value, searchable } => {
+                let shown: Vec<usize> = (0..options.len()).collect();
+                let (labels, selected) = dropdown_items(&options, &shown, &value);
+                let state = cx.new(|cx| DropdownState::new(labels, selected, cx).width(240.));
+                let mut events = vec![{
+                    let id = id.clone();
+                    cx.subscribe_in(&state, window, move |this, _, event: &DropdownChanged, window, cx| {
+                        this.pick_dropdown(&id, event.0, window, cx)
+                    })
+                }];
+                let filter = searchable.then(|| {
+                    let filter = cx.new(|cx| InputState::new(window, cx).placeholder(t!("plugin_page.filter").to_string()));
+                    let id = id.clone();
+                    events.push(cx.subscribe_in(&filter, window, move |this, filter, event: &InputEvent, _, cx| {
+                        if let InputEvent::Change = event {
+                            let text = filter.read(cx).value().to_string();
+                            this.filter_dropdown(&id, &text, cx);
+                        }
+                    }));
+                    filter
+                });
+                Control::Dropdown { state, filter, options, shown, current: value.clone(), last: value, _events: events }
+            }
+        }
+    }
+
+    /// 标签输入框里按了 Enter：加一个标签（去掉空白；空的、重复的、超过 `max` 的不加）。
+    fn add_tag(&mut self, id: &str, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        let limit = self.tag_limits.get(id).copied().unwrap_or(dshr_agent::MAX_TAGS);
+        let Some(Control::Tags { tags, .. }) = self.controls.get_mut(id) else { return };
+        if text.is_empty() || tags.contains(&text) || tags.len() >= limit {
+            return cx.notify();
+        }
+        tags.push(text);
+        self.tags_changed(id, window, cx);
+    }
+
+    fn remove_tag(&mut self, id: &str, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Control::Tags { tags, .. }) = self.controls.get_mut(id) else { return };
+        if index < tags.len() {
+            tags.remove(index);
+        }
+        self.tags_changed(id, window, cx);
+    }
+
+    /// 标签变了：有 `action` 时交给插件（`value` 是现在的标签），没有时只重画。
+    fn tags_changed(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.controls.get(id).map(|control| control.value(cx)).unwrap_or(Value::Null);
+        match self.events.get(id).cloned() {
+            Some(action) => self.act(action, value, None, window, cx),
+            None => cx.notify(),
+        }
+    }
+
+    /// 在下拉框里选了第几项（筛选后的列表里）。
+    fn pick_dropdown(&mut self, id: &str, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Control::Dropdown { options, shown, current, .. }) = self.controls.get_mut(id) else { return };
+        let Some(value) = shown.get(index).and_then(|index| options.get(*index)).map(|(value, _)| value.clone()) else { return };
+        *current = value.clone();
+        match self.events.get(id).cloned() {
+            Some(action) => self.act(action, Value::String(value), None, window, cx),
+            None => cx.notify(),
+        }
+    }
+
+    /// 下拉框的筛选框改了：只留下包含这些字的选项。
+    fn filter_dropdown(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
+        let Some(Control::Dropdown { state, options, shown, current, .. }) = self.controls.get_mut(id) else { return };
+        *shown = filter_options(options, text, current);
+        let (labels, selected) = dropdown_items(options, shown, current);
+        state.update(cx, |state, cx| state.set_items(labels, selected, cx));
+        cx.notify();
     }
 
     /// 选择类控件（`select`、`radio`、`checkbox`）现在的值。
@@ -261,7 +427,7 @@ impl PluginPageView {
         let element = match node.get("type").and_then(Value::as_str) {
             Some(
                 "button" | "input" | "switch" | "textarea" | "select" | "link" | "calendar" | "checkbox" | "radio" | "number" | "tabs"
-                | "collapsible",
+                | "collapsible" | "checkboxes" | "slider" | "date" | "tags-input",
             ) => reveal_in(&self.scroll, SharedString::from(format!("{}-{path}-reveal", self.plugin)), element).into_any_element(),
             _ => element,
         };
@@ -312,6 +478,13 @@ impl PluginPageView {
                     .into_any_element()
             }
             "spacer" => spacer(node).into_any_element(),
+            "section" => v_flex()
+                .w_full()
+                .gap(px(gap(space::M)))
+                .child(section_heading(node, &id("-title"), &p))
+                .children(children(self, "children", size, cx))
+                .into_any_element(),
+            "split" => split(node, children(self, "left", size, cx), children(self, "right", size, cx)).into_any_element(),
             "card" | "collapsible" => {
                 let key = Self::local_key(node, path);
                 let collapsible = kind == "collapsible" || node.get("collapsible").and_then(Value::as_bool) == Some(true);
@@ -500,7 +673,8 @@ impl PluginPageView {
                         this.act(action.clone(), value.clone(), None, window, cx)
                     }
                 }));
-                div().when(full, |wrapper| wrapper.w_full()).child(crate::design::framed(id(""), button).inert(off)).into_any_element()
+                // 外面是一个横向的 flex：在 `column` 里按钮按文字宽度，不被拉满（`full` 时才占满）。
+                h_flex().when(full, |wrapper| wrapper.w_full()).child(crate::design::framed(id(""), button).inert(off)).into_any_element()
             }
             "input" | "number" => {
                 let control_id = string("id");
@@ -508,10 +682,25 @@ impl PluginPageView {
                 let Some(Control::Input { state, number, .. }) = self.controls.get(&control_id) else { return div().into_any_element() };
                 let control_size = NodeSize::of(node, size, NodeSize::Medium);
                 let name = label.clone().unwrap_or_else(|| string("placeholder"));
-                let input = crate::design::framed_handle(
-                    gpui_kit::Focusable::focus_handle(state.read(cx), cx),
-                    control_size.apply(Input::new(state)).disabled(off).aria_label(name.clone()),
-                );
+                let mut field = control_size.apply(Input::new(state)).disabled(off).aria_label(name.clone());
+                // 密码框带“显示 / 隐藏”按钮；搜索框前面是放大镜；`prefix` / `suffix` 是框里两头的固定文字（如 https://、.com）。
+                match node.get("kind").and_then(Value::as_str) {
+                    Some("password") => field = field.mask_toggle(),
+                    Some("search") => {
+                        field =
+                            field.prefix(Icon::new(IconName::Search).size(px(crate::design::size::ICON_SM)).text_color(p.text_secondary))
+                    }
+                    _ => {}
+                }
+                if node.get("kind").and_then(Value::as_str) != Some("search")
+                    && let Some(prefix) = optional("prefix")
+                {
+                    field = field.prefix(div().text_color(p.text_secondary).child(prefix));
+                }
+                if let Some(suffix) = optional("suffix") {
+                    field = field.suffix(div().text_color(p.text_secondary).child(suffix));
+                }
+                let input = crate::design::framed_handle(gpui_kit::Focusable::focus_handle(state.read(cx), cx), field);
                 let control: AnyElement = match number {
                     None => input.into_any_element(),
                     Some(_) => {
@@ -561,64 +750,246 @@ impl PluginPageView {
                     .when_some(description.clone(), |switch, description| switch.aria_description(description))
                     .disabled(off)
                     .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), value.clone(), Some(!checked), window, cx)));
-                h_flex()
-                    .gap(px(space::S))
-                    .items_center()
-                    .child(switch)
-                    .child(
-                        v_flex()
-                            .when(off, |text| text.opacity(0.5))
-                            .child(text_size.text(div()).child(label))
-                            .children(description.map(|description| div().text_caption().text_color(p.text_secondary).child(description))),
-                    )
-                    .into_any_element()
+                let text = v_flex()
+                    .when(off, |text| text.opacity(0.5))
+                    .child(text_size.text(div()).child(label))
+                    .children(description.map(|description| div().text_caption().text_color(p.text_secondary).child(description)));
+                match node.get("layout").and_then(Value::as_str) {
+                    // 设置行的样子：文字在左、开关在右，占满一行。
+                    Some("row") => h_flex()
+                        .w_full()
+                        .gap(px(space::L))
+                        .items_center()
+                        .child(text.flex_1().min_w(px(0.)))
+                        .child(switch)
+                        .into_any_element(),
+                    _ => h_flex().gap(px(space::S)).items_center().child(switch).child(text).into_any_element(),
+                }
             }
             "checkbox" => {
                 let control_id = string("id");
                 let checked = self.choice(&control_id).and_then(Value::as_bool).unwrap_or(false);
-                let control_size = NodeSize::of(node, size, NodeSize::Medium);
-                let label = string("label");
-                let description = optional("description");
                 let action = optional("action");
-                let indicator = control_size.indicator();
-                let mark = div()
-                    .size(px(indicator))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(4.))
-                    .border_1()
-                    .when(checked, |mark| {
-                        mark.bg(p.accent)
-                            .border_color(p.accent)
-                            .child(Icon::new(IconName::Check).size(px(indicator - 4.)).text_color(p.on_accent))
-                    })
-                    .when(!checked, |mark| mark.border_color(p.text_secondary));
-                pressable(id(""), &p)
-                    .role(Role::CheckBox)
-                    .aria_toggled(if checked { Toggled::True } else { Toggled::False })
-                    .accessibility_label(label.clone())
-                    .when_some(description.clone(), |row, description| row.aria_description(description))
-                    .disabled(off)
-                    .self_start()
-                    .rounded(px(radius::SM))
-                    .cursor_pointer()
-                    .when(off, |row| row.opacity(0.5))
-                    .child(
-                        h_flex()
-                            .gap(px(space::S))
-                            .items_start()
-                            .child(div().h(px(indicator + 4.)).flex().items_center().child(mark))
-                            .child(
-                                v_flex()
-                                    .child(control_size.text(div()).child(label))
-                                    .children(description.map(|text| div().text_caption().text_color(p.text_secondary).child(text))),
-                            ),
-                    )
+                let control_size = NodeSize::of(node, size, NodeSize::Medium);
+                check_item(id(""), checked, string("label"), optional("description"), control_size, off, &p)
                     .on_click(
                         cx.listener(move |this, _, window, cx| this.choose(&control_id, Value::Bool(!checked), action.clone(), window, cx)),
                     )
+                    .into_any_element()
+            }
+            "checkboxes" => {
+                let control_id = string("id");
+                let current: Vec<String> = self
+                    .choice(&control_id)
+                    .and_then(Value::as_array)
+                    .map(|values| values.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+                    .unwrap_or_default();
+                let action = optional("action");
+                let label = optional("label");
+                let control_size = NodeSize::of(node, size, NodeSize::Medium);
+                let options = options_of(node);
+                let items: Vec<AnyElement> = options
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (value, text))| {
+                        let checked = current.contains(value);
+                        // 勾选后的值按选项的顺序排，不按点的先后。
+                        let next: Vec<String> = options
+                            .iter()
+                            .filter(|(other, _)| if other == value { !checked } else { current.contains(other) })
+                            .map(|(other, _)| other.clone())
+                            .collect();
+                        let (control_id, action) = (control_id.clone(), action.clone());
+                        check_item(id(&format!("-option-{index}")), checked, text.clone(), None, control_size, off, &p)
+                            .on_click(
+                                cx.listener(move |this, _, window, cx| this.choose(&control_id, json!(next), action.clone(), window, cx)),
+                            )
+                            .into_any_element()
+                    })
+                    .collect();
+                let group = match node.get("layout").and_then(Value::as_str) {
+                    Some("horizontal") => h_flex().flex_wrap().gap(px(space::M)),
+                    _ => v_flex().gap(px(space::XS)),
+                };
+                v_flex()
+                    .gap(px(space::XS))
+                    .children(label.clone().map(|label| control_size.text(div()).child(readable_with_id(id("-label"), label))))
+                    .child(
+                        group.id(id("-group")).role(Role::Group).when_some(label, |group, label| group.aria_label(label)).children(items),
+                    )
+                    .into_any_element()
+            }
+            "slider" => {
+                let label = optional("label");
+                let Some(Control::Slider { state, .. }) = self.controls.get(&string("id")) else { return div().into_any_element() };
+                let value = slider_value(state.read(cx).value());
+                let shown = match optional("unit") {
+                    Some(unit) => format!("{} {unit}", format_number(value)),
+                    None => format_number(value),
+                };
+                let show_value = node.get("showValue").and_then(Value::as_bool) != Some(false);
+                v_flex()
+                    .gap(px(space::XS))
+                    .w_full()
+                    .min_w(px(200.))
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .children(label.clone().map(|label| div().text_body().child(readable_with_id(id("-label"), label))))
+                            .when(show_value, |row| row.child(div().text_caption().text_color(p.text_secondary).child(shown))),
+                    )
+                    .child(Slider::new(state).disabled(off).accessibility_label(label.unwrap_or_default()))
+                    .into_any_element()
+            }
+            "date" => {
+                let control_id = string("id");
+                let value = self.choice(&control_id).and_then(Value::as_str).unwrap_or_default().to_owned();
+                let label = optional("label");
+                let action = optional("action");
+                let control_size = NodeSize::of(node, size, NodeSize::Medium);
+                let open_key = format!("date:{control_id}");
+                let open = self.open.get(&open_key).copied().unwrap_or(false);
+                let shown = if value.is_empty() {
+                    optional("placeholder").unwrap_or_else(|| t!("plugin_page.pick_date").to_string())
+                } else {
+                    value.clone()
+                };
+                let spoken = [label.clone().unwrap_or_default(), shown.clone()]
+                    .into_iter()
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("，");
+                let toggle_key = open_key.clone();
+                let trigger = crate::design::framed(
+                    id("-trigger"),
+                    control_size
+                        .apply(Button::new(id("-trigger")))
+                        .icon(IconName::Calendar)
+                        .label(shown)
+                        .accessibility_label(spoken)
+                        .disabled(off)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open.insert(toggle_key.clone(), !open);
+                            cx.notify();
+                        })),
+                )
+                .inert(off);
+                let picker = open.then(|| {
+                    let month = self.months.get(&control_id).cloned().unwrap_or_else(|| {
+                        if value.len() >= 7 { value[..7].to_owned() } else { chrono::Local::now().format("%Y-%m").to_string() }
+                    });
+                    let nav = |suffix: &str, icon: IconName, delta: i32, spoken: String| {
+                        let (control_id, month) = (control_id.clone(), month.clone());
+                        crate::design::framed(
+                            id(suffix),
+                            Button::new(id(suffix)).control_sm().subtle(cx).icon(icon).accessibility_label(spoken).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.months.insert(control_id.clone(), shift_month(&month, delta));
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                    };
+                    let view = cx.entity().downgrade();
+                    let (pick_id, pick_key) = (control_id.clone(), open_key.clone());
+                    let pick: PickDate = std::rc::Rc::new(move |date, window, cx| {
+                        let (control_id, action, key) = (pick_id.clone(), action.clone(), pick_key.clone());
+                        view.update(cx, |this, cx| {
+                            this.open.insert(key, false);
+                            this.choose(&control_id, Value::String(date), action, window, cx)
+                        })
+                        .ok();
+                    });
+                    let calendar_node = json!({ "month": month, "marks": { value.clone(): "" } });
+                    v_flex().w(px(320.)).gap(px(space::XS)).p(px(space::S)).child(
+                        card(&p).p(px(space::S)).child(
+                            v_flex()
+                                .gap(px(space::XS))
+                                .child(
+                                    h_flex()
+                                        .justify_end()
+                                        .gap(px(space::XS))
+                                        .child(nav("-previous", IconName::ChevronLeft, -1, t!("plugin_page.previous_month").to_string()))
+                                        .child(nav("-next", IconName::ChevronRight, 1, t!("plugin_page.next_month").to_string())),
+                                )
+                                .child(calendar(&calendar_node, &id("-calendar"), Some(pick), cx)),
+                        ),
+                    )
+                });
+                v_flex()
+                    .gap(px(space::XS))
+                    .items_start()
+                    .children(label.map(|label| control_size.text(div()).child(readable_with_id(id("-label"), label))))
+                    .child(trigger)
+                    .children(picker)
+                    .into_any_element()
+            }
+            "tags-input" => {
+                let control_id = string("id");
+                let label = optional("label");
+                let Some(Control::Tags { input, tags, .. }) = self.controls.get(&control_id) else { return div().into_any_element() };
+                let control_size = NodeSize::of(node, size, NodeSize::Medium);
+                let chips: Vec<AnyElement> = tags
+                    .iter()
+                    .enumerate()
+                    .map(|(index, tag)| {
+                        let control_id = control_id.clone();
+                        let remove = id(&format!("-remove-{index}"));
+                        h_flex()
+                            .gap(px(2.))
+                            .items_center()
+                            .pl(px(space::S))
+                            .rounded_full()
+                            .bg(p.accent_soft)
+                            .text_color(p.accent)
+                            .child(control_size.text(div()).child(readable_with_id(id(&format!("-tag-{index}")), tag.clone())))
+                            .child(
+                                crate::design::framed(
+                                    remove.clone(),
+                                    Button::new(remove)
+                                        .control_xs()
+                                        .subtle(cx)
+                                        .icon(IconName::Close)
+                                        .accessibility_label(t!("plugin_page.remove_tag", tag = tag).to_string())
+                                        .disabled(off)
+                                        .on_click(cx.listener(move |this, _, window, cx| this.remove_tag(&control_id, index, window, cx))),
+                                )
+                                .inert(off),
+                            )
+                            .into_any_element()
+                    })
+                    .collect();
+                let name = label.clone().unwrap_or_else(|| string("placeholder"));
+                v_flex()
+                    .gap(px(space::XS))
+                    .min_w(px(200.))
+                    .children(label.map(|label| control_size.text(div()).child(readable_with_id(id("-label"), label))))
+                    .when(!chips.is_empty(), |field| field.child(h_flex().flex_wrap().gap(px(space::XS)).children(chips)))
+                    .child(crate::design::framed_handle(
+                        gpui_kit::Focusable::focus_handle(input.read(cx), cx),
+                        control_size.apply(Input::new(input)).disabled(off).aria_label(name),
+                    ))
+                    .into_any_element()
+            }
+            "select" if node.get("style").and_then(Value::as_str) == Some("dropdown") => {
+                let label = optional("label");
+                let Some(Control::Dropdown { state, filter, .. }) = self.controls.get(&string("id")) else {
+                    return div().into_any_element();
+                };
+                let (state, filter) = (state.clone(), filter.clone());
+                let name = label.clone().unwrap_or_else(|| string("placeholder"));
+                state.update(cx, |state, cx| state.set_label(name.clone(), cx));
+                v_flex()
+                    .gap(px(space::XS))
+                    .items_start()
+                    .children(label.map(|label| div().text_body().child(readable_with_id(id("-label"), label))))
+                    .children(filter.map(|filter| {
+                        div().w(px(240.)).child(crate::design::framed_handle(
+                            gpui_kit::Focusable::focus_handle(filter.read(cx), cx),
+                            Input::new(&filter).small().aria_label(t!("plugin_page.filter_named", name = name).to_string()),
+                        ))
+                    }))
+                    .child(state)
                     .into_any_element()
             }
             "radio" | "select" => {
@@ -627,8 +998,13 @@ impl PluginPageView {
                 let action = optional("action");
                 let label = optional("label");
                 let options = options_of(node);
-                let control_size = NodeSize::of(node, size, if kind == "select" { NodeSize::Small } else { NodeSize::Medium });
-                let style = node.get("style").and_then(Value::as_str).unwrap_or(if kind == "select" { "buttons" } else { "list" });
+                // `select` 的 `style: "radio"` 和单选的默认样式一样，是一列圆点。
+                let style = match node.get("style").and_then(Value::as_str).unwrap_or(if kind == "select" { "buttons" } else { "list" }) {
+                    "radio" => "list",
+                    style => style,
+                };
+                // 一排按钮默认是小尺寸（和原来一样），分段控件和圆点默认是中等。
+                let control_size = NodeSize::of(node, size, if style == "buttons" { NodeSize::Small } else { NodeSize::Medium });
                 let items: Vec<AnyElement> = options
                     .into_iter()
                     .enumerate()
@@ -844,6 +1220,68 @@ impl PluginPageView {
         let next = (next * 1e9).round() / 1e9;
         state.update(cx, |state, cx| state.set_value(format_number(next), window, cx));
     }
+}
+
+/// 一个复选框：方框 + 文字（+ 说明）。`checkbox` 和 `checkboxes` 的每一项都用它；调用方再加 `on_click`。
+fn check_item(
+    item_id: SharedString,
+    checked: bool,
+    label: String,
+    description: Option<String>,
+    size: NodeSize,
+    off: bool,
+    p: &Palette,
+) -> crate::design::Pressable {
+    let indicator = size.indicator();
+    let mark = div()
+        .size(px(indicator))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .border_1()
+        .when(checked, |mark| {
+            mark.bg(p.accent).border_color(p.accent).child(Icon::new(IconName::Check).size(px(indicator - 4.)).text_color(p.on_accent))
+        })
+        .when(!checked, |mark| mark.border_color(p.text_secondary));
+    pressable(item_id, p)
+        .role(Role::CheckBox)
+        .aria_toggled(if checked { Toggled::True } else { Toggled::False })
+        .accessibility_label(label.clone())
+        .when_some(description.clone(), |row, description| row.aria_description(description))
+        .disabled(off)
+        .self_start()
+        .rounded(px(radius::SM))
+        .cursor_pointer()
+        .when(off, |row| row.opacity(0.5))
+        .child(
+            h_flex().gap(px(space::S)).items_start().child(div().h(px(indicator + 4.)).flex().items_center().child(mark)).child(
+                v_flex()
+                    .child(size.text(div()).child(label))
+                    .children(description.map(|text| div().text_caption().text_color(p.text_secondary).child(text))),
+            ),
+        )
+}
+
+/// 两栏：左栏占 `ratio`（默认一半）。每栏至少 240 宽，放不下时右栏换到下面。
+fn split(node: &Value, left: Vec<AnyElement>, right: Vec<AnyElement>) -> Div {
+    let ratio = node.get("ratio").and_then(Value::as_f64).unwrap_or(0.5).clamp(0.2, 0.8) as f32;
+    let column = |share: f32| v_flex().flex_basis(relative(share)).flex_grow(share).min_w(px(240.)).gap(px(gap_of(node, space::M)));
+    h_flex()
+        .w_full()
+        .flex_wrap()
+        .items_start()
+        .child(column(ratio).pr(px(space::L)).children(left))
+        .child(column(1. - ratio).children(right))
+}
+
+/// `2026-11` 往前（负数）或往后数几个月。
+fn shift_month(month: &str, delta: i32) -> String {
+    let year = month.get(..4).and_then(|year| year.parse::<i32>().ok()).unwrap_or(2026);
+    let number = month.get(5..7).and_then(|number| number.parse::<i32>().ok()).unwrap_or(1);
+    let total = year * 12 + (number - 1) + delta;
+    format!("{:04}-{:02}", total.div_euclid(12), total.rem_euclid(12) + 1)
 }
 
 /// 节点有 `tooltip` 时包一层：鼠标停上去显示这句话。
@@ -1599,7 +2037,8 @@ pub(crate) fn calendar(node: &Value, id: &SharedString, on_pick: Option<PickDate
             .rounded(px(radius::SM))
             .when(mark.is_some(), |cell| cell.bg(p.accent_soft))
             .child(div().text_caption().child(day.to_string()))
-            .children(mark.map(|mark| div().text_caption().truncate().row_color(p.accent, &p).child(mark)));
+            // 空的标记只用底色表示（日期选择里选中的那天），不占一行。
+            .children(mark.filter(|mark| !mark.is_empty()).map(|mark| div().text_caption().truncate().row_color(p.accent, &p).child(mark)));
         let cell = match &on_pick {
             Some(pick) => {
                 let (pick, date) = (pick.clone(), date.clone());
@@ -1778,10 +2217,28 @@ pub fn static_tree(node: &Value, prefix: &str, cx: &App) -> AnyElement {
                 .into_any_element(),
             // 能操作的节点：只读的地方只显示文字。
             "button" | "switch" | "link" | "checkbox" => hint(string("label"), Tone::Neutral, &p).into_any_element(),
-            "input" | "textarea" | "select" | "radio" | "number" => {
+            "input" | "textarea" | "select" | "radio" | "number" | "slider" | "date" => {
                 let text = [string("label"), string("value")].into_iter().filter(|text| !text.is_empty()).collect::<Vec<_>>().join("：");
                 hint(text, Tone::Neutral, &p).into_any_element()
             }
+            "checkboxes" | "tags-input" => {
+                let values = node
+                    .get("value")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("、");
+                let text = [string("label"), values].into_iter().filter(|text| !text.is_empty()).collect::<Vec<_>>().join("：");
+                hint(text, Tone::Neutral, &p).into_any_element()
+            }
+            "section" => v_flex()
+                .gap(px(space::S))
+                .child(section_heading(node, &SharedString::from(format!("{path}-title")), &p))
+                .children(children())
+                .into_any_element(),
+            "split" => split(node, nodes(node.get("left"), "left"), nodes(node.get("right"), "right")).into_any_element(),
             kind => display_node(node, &id, cx)
                 .unwrap_or_else(|| hint(t!("plugin_page.unknown_node", kind = kind).to_string(), Tone::Danger, &p).into_any_element()),
         };
@@ -1792,25 +2249,55 @@ pub fn static_tree(node: &Value, prefix: &str, cx: &App) -> AnyElement {
 
 /// 一个表单控件的状态。
 enum Control {
-    /// 单行输入框；`number` 节点也用它，`number` 是 (最小值, 最大值)。
+    /// 单行输入框；`number` 节点也用它，`number` 是 (最小值, 最大值)。按 Enter 时执行节点的 `submit`。
     Input {
         state: Entity<InputState>,
         last: String,
         number: Option<(Option<f64>, Option<f64>)>,
+        /// 密码框（`kind: "password"`）和字数上限建的时候定下，变了要重建。
+        masked: bool,
+        max_length: Option<usize>,
+        _events: Subscription,
     },
     Textarea {
         state: Entity<TextareaState>,
         last: String,
     },
-    /// 选择框、单选（字符串）和复选框（布尔）：现在的值、上次从节点里写进去的值。
+    /// 选择框、单选、日期（字符串）、复选框（布尔）和多选（字符串数组）：现在的值、上次从节点里写进去的值。
     Choice {
         current: Value,
         last: Value,
     },
+    /// 滑块：松手时执行节点的 `action`。
+    Slider {
+        state: Entity<SliderState>,
+        last: f64,
+        /// (最小值, 最大值, 步长)：建的时候定下，变了要重建。
+        range: (f64, f64, f64),
+        _events: Subscription,
+    },
+    /// 标签输入：已有的标签，输入框里按 Enter 加一个。
+    Tags {
+        input: Entity<InputState>,
+        tags: Vec<String>,
+        last: Vec<String>,
+        _events: Subscription,
+    },
+    /// 下拉框（`select` 的 `style: "dropdown"`），可带筛选框。`shown` 是筛选后列表里每一项对应 `options` 的第几项。
+    Dropdown {
+        state: Entity<DropdownState>,
+        filter: Option<Entity<InputState>>,
+        options: Vec<(String, String)>,
+        shown: Vec<usize>,
+        current: String,
+        last: String,
+        _events: Vec<Subscription>,
+    },
 }
 
 impl Control {
-    /// 交给插件的值：输入框是文字，数字框是数字（空的或不是数字时是 `null`，超出范围时取边界），选择类按原样。
+    /// 交给插件的值：输入框是文字，数字框、滑块是数字（数字框空的或不是数字时是 `null`，超出范围时取边界），
+    /// 标签输入是字符串数组，选择类按原样。
     fn value(&self, cx: &App) -> Value {
         match self {
             Control::Input { state, number: None, .. } => Value::String(state.read(cx).value().to_string()),
@@ -1822,44 +2309,110 @@ impl Control {
             }
             Control::Textarea { state, .. } => Value::String(state.read(cx).value().to_string()),
             Control::Choice { current, .. } => current.clone(),
+            Control::Slider { state, .. } => json!(slider_value(state.read(cx).value())),
+            Control::Tags { tags, .. } => json!(tags),
+            Control::Dropdown { current, .. } => Value::String(current.clone()),
         }
     }
 
-    /// 节点换了类型（同一个 id 从输入框变成选择框等）时状态要重建。
+    /// 节点换了类型（同一个 id 从输入框变成选择框等），或者换了建的时候定下的设置时，状态要重建。
     fn matches(&self, seed: &Seed) -> bool {
-        matches!(
-            (self, seed),
-            (Control::Input { .. }, Seed::Input { .. })
-                | (Control::Textarea { .. }, Seed::Textarea { .. })
-                | (Control::Choice { .. }, Seed::Choice(_))
-        )
+        match (self, seed) {
+            (Control::Input { masked, max_length, .. }, Seed::Input { masked: wanted, max_length: wanted_length, .. }) => {
+                masked == wanted && max_length == wanted_length
+            }
+            (Control::Dropdown { filter, .. }, Seed::Dropdown { searchable, .. }) => filter.is_some() == *searchable,
+            (Control::Slider { range, .. }, Seed::Slider { min, max, step, .. }) => *range == (*min, *max, *step),
+            (Control::Textarea { .. }, Seed::Textarea { .. })
+            | (Control::Choice { .. }, Seed::Choice(_))
+            | (Control::Tags { .. }, Seed::Tags { .. }) => true,
+            _ => false,
+        }
     }
 }
 
 /// 从节点里读出的控件初值。
 enum Seed {
-    Input { value: String, placeholder: String, number: Option<(Option<f64>, Option<f64>)> },
+    Input { value: String, placeholder: String, number: Option<(Option<f64>, Option<f64>)>, masked: bool, max_length: Option<usize> },
     Textarea { value: String, placeholder: String },
     Choice(Value),
+    Slider { value: f64, min: f64, max: f64, step: f64 },
+    Tags { value: Vec<String>, placeholder: String },
+    Dropdown { options: Vec<(String, String)>, value: String, searchable: bool },
 }
 
 impl Seed {
     fn of(node: &Value) -> Option<Self> {
         let text = |key: &str| node.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
         let number = |key: &str| node.get(key).and_then(Value::as_f64);
+        let strings = |key: &str| -> Vec<String> {
+            node.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
+        };
         Some(match node.get("type").and_then(Value::as_str)? {
-            "input" => Seed::Input { value: text("value"), placeholder: text("placeholder"), number: None },
+            "input" => Seed::Input {
+                value: text("value"),
+                placeholder: text("placeholder"),
+                number: None,
+                masked: node.get("kind").and_then(Value::as_str) == Some("password"),
+                max_length: node.get("maxLength").and_then(Value::as_u64).map(|length| length as usize),
+            },
             "number" => Seed::Input {
                 value: number("value").map(format_number).unwrap_or_default(),
                 placeholder: text("placeholder"),
                 number: Some((number("min"), number("max"))),
+                masked: false,
+                max_length: None,
             },
             "textarea" => Seed::Textarea { value: text("value"), placeholder: text("placeholder") },
-            "select" | "radio" => Seed::Choice(Value::String(text("value"))),
+            "select" if node.get("style").and_then(Value::as_str) == Some("dropdown") => Seed::Dropdown {
+                options: options_of(node),
+                value: text("value"),
+                searchable: node.get("searchable").and_then(Value::as_bool) == Some(true),
+            },
+            "select" | "radio" | "date" => Seed::Choice(Value::String(text("value"))),
             "checkbox" => Seed::Choice(Value::Bool(node.get("checked").and_then(Value::as_bool).unwrap_or(false))),
+            "checkboxes" => Seed::Choice(json!(strings("value"))),
+            "slider" => {
+                let (min, max) = (number("min").unwrap_or(0.), number("max").unwrap_or(100.));
+                Seed::Slider {
+                    value: clamp(number("value").unwrap_or(min), Some(min), Some(max)),
+                    min,
+                    max,
+                    step: number("step").filter(|step| *step > 0.).unwrap_or(1.),
+                }
+            }
+            "tags-input" => Seed::Tags { value: strings("value"), placeholder: text("placeholder") },
             _ => return None,
         })
     }
+}
+
+/// 滑块的值（去掉浮点误差）。
+fn slider_value(value: SliderValue) -> f64 {
+    let value = match value {
+        SliderValue::Single(value) => value,
+        SliderValue::Range(_, end) => end,
+    } as f64;
+    (value * 1e6).round() / 1e6
+}
+
+/// 下拉框显示的文字，和当前值在其中是第几项（筛掉了就是 `None`）。
+fn dropdown_items(options: &[(String, String)], shown: &[usize], current: &str) -> (Vec<SharedString>, Option<usize>) {
+    let labels = shown.iter().map(|index| SharedString::from(options[*index].1.clone())).collect();
+    let selected = shown.iter().position(|index| options[*index].0 == current);
+    (labels, selected)
+}
+
+/// 下拉框筛选后还剩哪些选项（`options` 里的第几项）：显示的文字里包含筛选的字（不分大小写）。
+/// 当前选中的那项总是留着，否则下拉框看起来像是没选。
+fn filter_options(options: &[(String, String)], filter: &str, current: &str) -> Vec<usize> {
+    let filter = filter.trim().to_lowercase();
+    (0..options.len())
+        .filter(|index| {
+            let (value, label) = &options[*index];
+            filter.is_empty() || value == current || label.to_lowercase().contains(&filter)
+        })
+        .collect()
 }
 
 fn clamp(value: f64, min: Option<f64>, max: Option<f64>) -> f64 {
@@ -1875,7 +2428,7 @@ fn format_number(value: f64) -> String {
 /// 依次访问树里的每个节点：`children`、卡片的 `actions`、标签页各页的 `children`。
 fn visit_nodes(node: &Value, visit: &mut impl FnMut(&Value)) {
     visit(node);
-    let lists = ["children", "actions"].into_iter().filter_map(|key| node.get(key).and_then(Value::as_array));
+    let lists = ["children", "actions", "left", "right"].into_iter().filter_map(|key| node.get(key).and_then(Value::as_array));
     let tabs =
         node.get("tabs").and_then(Value::as_array).into_iter().flatten().filter_map(|tab| tab.get("children").and_then(Value::as_array));
     for child in lists.chain(tabs).flatten() {
@@ -2046,7 +2599,9 @@ impl Render for PluginPageView {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeSize, Seed, clamp, entry_icon, format_number, node_icon, options_of, visit_nodes};
+    use super::{
+        NodeSize, Seed, clamp, dropdown_items, entry_icon, filter_options, format_number, node_icon, options_of, shift_month, visit_nodes,
+    };
     use gpui_kit::component::IconName;
     use serde_json::{Value, json};
 
@@ -2127,5 +2682,61 @@ mod tests {
             options_of(&node),
             [("a".to_owned(), "a".to_owned()), ("b".to_owned(), "Bee".to_owned()), ("c".to_owned(), "c".to_owned())]
         );
+    }
+
+    #[test]
+    fn second_round_controls_are_seeded() {
+        assert!(
+            matches!(Seed::of(&json!({ "type": "checkboxes", "id": "c", "value": ["a", "b"] })), Some(Seed::Choice(Value::Array(values))) if values.len() == 2)
+        );
+        assert!(matches!(Seed::of(&json!({ "type": "date", "id": "d" })), Some(Seed::Choice(Value::String(value))) if value.is_empty()));
+        match Seed::of(&json!({ "type": "slider", "id": "s", "min": 0, "max": 10, "value": 20 })) {
+            Some(Seed::Slider { value, min, max, step }) => assert_eq!((value, min, max, step), (10., 0., 10., 1.)),
+            _ => panic!("a slider"),
+        }
+        assert!(
+            matches!(Seed::of(&json!({ "type": "tags-input", "id": "t", "value": ["x"] })), Some(Seed::Tags { value, .. }) if value == ["x"])
+        );
+        assert!(matches!(
+            Seed::of(&json!({ "type": "input", "id": "i", "kind": "password", "maxLength": 8 })),
+            Some(Seed::Input { masked: true, max_length: Some(8), .. })
+        ));
+        assert!(matches!(
+            Seed::of(&json!({ "type": "select", "id": "s", "options": ["a"], "style": "dropdown", "searchable": true })),
+            Some(Seed::Dropdown { searchable: true, .. })
+        ));
+        assert!(matches!(Seed::of(&json!({ "type": "select", "id": "s", "options": ["a"] })), Some(Seed::Choice(_))));
+    }
+
+    #[test]
+    fn dropdown_filters_keep_the_current_value() {
+        let options =
+            vec![("cn".to_owned(), "China".to_owned()), ("ch".to_owned(), "Switzerland".to_owned()), ("cl".to_owned(), "Chile".to_owned())];
+        assert_eq!(filter_options(&options, "", "cn"), [0, 1, 2]);
+        assert_eq!(filter_options(&options, " ch ", "cn"), [0, 2]);
+        // 选中的那项筛不掉。
+        assert_eq!(filter_options(&options, "ch", "ch"), [0, 1, 2]);
+        assert_eq!(filter_options(&options, "zzz", "cl"), [2]);
+        let shown = filter_options(&options, "ch", "cl");
+        let (labels, selected) = dropdown_items(&options, &shown, "cl");
+        assert_eq!(labels.len(), 2);
+        assert_eq!(selected, Some(1));
+        assert_eq!(dropdown_items(&options, &shown, "de").1, None);
+    }
+
+    #[test]
+    fn months_shift_across_years() {
+        assert_eq!(shift_month("2026-11", 1), "2026-12");
+        assert_eq!(shift_month("2026-12", 1), "2027-01");
+        assert_eq!(shift_month("2026-01", -1), "2025-12");
+        assert_eq!(shift_month("2026-03", -14), "2025-01");
+    }
+
+    #[test]
+    fn split_columns_are_visited() {
+        let tree = json!({ "type": "split", "left": [{ "type": "input", "id": "l" }], "right": [{ "type": "slider", "id": "r", "min": 0, "max": 1 }] });
+        let mut ids = Vec::new();
+        visit_nodes(&tree, &mut |node| ids.extend(node.get("id").and_then(Value::as_str).map(str::to_owned)));
+        assert_eq!(ids, ["l", "r"]);
     }
 }

@@ -55,7 +55,7 @@ pub use sandbox::SandboxPlugin;
 pub use session::{Session, SessionOptions};
 pub use steer::{SteerMessage, SteerQueue};
 pub use surface::{
-    CommandEntry, CommandResult, EntryPlace, FileMentions, MAX_MENTION_BYTES, MAX_MENTION_ITEMS, MentionContent, MentionItem,
+    CommandEntry, CommandResult, EntryPlace, FileMentions, MAX_MENTION_BYTES, MAX_MENTION_ITEMS, MAX_TAGS, MentionContent, MentionItem,
     MentionSource, MentionSources, NODE_ICONS, NODE_TONES, SlashEntry, ThemeDef, ToolCardView, UiEntry, UiSurface, UiSurfaces, hideable,
     notify_page_refresh, page_refreshes, validate_tree,
 };

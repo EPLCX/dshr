@@ -213,18 +213,23 @@ export const ui = {
 
 - **Nodes**:
   - Any node: `hidden` (skip it), `disabled` (controls greyed out), `tooltip`, `icon` (see Icons), `tone`: neutral|secondary|accent|success|warning|danger.
-  - `size`: small|medium|large (control height 28 / 32 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `number`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`. On `row` it is the default for the controls inside.
+  - `size`: small|medium|large (control height 28 / 32 / 40) on `button`, `link`, `input`, `textarea`, `select`, `radio`, `checkbox`, `checkboxes`, `number`, `date`, `tags-input`, `switch`, `badge`, `list`, `table`, `stat`, `tabs`. On `row` it is the default for the controls inside.
   - `column` / `row` (`children`, `gap`: small|medium|large, `align`: start|center|end|stretch, `justify`: start|center|end|between, `padding`: none|small|medium|large; `row` also `wrap`: false)
   - `grid` (`children`, `columns` 1–6, `gap`), `spacer` (in a `row`, without `size` it pushes what follows to the right)
   - `card` (`title`, `description`, `icon`, `children`, `actions`: nodes on the right of the title, `variant`: outlined|filled|plain, `collapsible`, `open`)
+  - `section` (`title`, `description`, `children`), `split` (`left`, `right`: node arrays, `ratio` 0.2–0.8; the right column wraps below on narrow windows)
   - `collapsible` (`title`, `children`, `open`, `id`), `tabs` (`tabs`: [{ `id`, `label`, `icon`, `children` }], `value`, `action`): switching tabs and folding are kept by the app and do not re-render; with `action` switching a tab also runs it with the tab id as `value`
   - `text` (`text`, `style`: title|heading|body|caption|mono, `weight`: regular|medium|bold, `align`: start|center|end, `truncate`, `lines` 1–10)
   - `button` (`label`, `action`, `payload`, `variant`: primary|outline|ghost|danger|link, `icon`, `iconOnly` (needs `icon`; `label` is read aloud), `full`, `confirm`: a sentence shown on a second click before the action runs)
-  - `input` (`id`, `label`, `placeholder`, `value`), `textarea` (`id`, `label`, `placeholder`, `value`, `rows`)
+  - `input` (`id`, `label`, `placeholder`, `value`, `kind`: text|password|search|url|email, `prefix`, `suffix`, `maxLength`, `submit`: action run on Enter), `textarea` (`id`, `label`, `placeholder`, `value`, `rows`)
   - `number` (`id`, `label`, `value`, `min`, `max`, `step`, `unit`): `inputs[id]` is a number (clamped to min / max) or null
   - `checkbox` (`id`, `label`, `checked`, `description`, `action`): `inputs[id]` is true / false; without `action` it is only submitted with the next action
   - `radio` (`id`, `options`: strings or { value, label }, `value`, `label`, `action`, `style`: list|segmented (at most 4 options))
-  - `select` (`id`, `options`, `label`, `value`, `action`), `switch` (`id`, `label`, `checked`, `action`, `description`)
+  - `select` (`id`, `options`, `label`, `value`, `action`, `style`: buttons|dropdown|segmented|radio, `searchable`: a filter box above a dropdown), `switch` (`id`, `label`, `checked`, `action`, `description`, `layout`: inline|row)
+  - `checkboxes` (`id`, `options`, `value`: array, `label`, `action`, `layout`: vertical|horizontal): `inputs[id]` is the array of checked values
+  - `slider` (`id`, `min`, `max`, `value`, `step`, `label`, `unit`, `showValue`, `action`: runs when the thumb is released, with the number as `value`)
+  - `date` (`id`, `value`: "2026-11-28" or "", `label`, `placeholder`, `action`): a button that opens a month calendar
+  - `tags-input` (`id`, `value`: strings, `label`, `placeholder`, `max`, `action`: runs after a tag is added or removed): Enter adds a tag
   - `list` (`items`: [{ `title`, `detail`, `icon`, `badge`, `trailing`, `tone`, `action`, `payload` }], `dividers`, `empty`: text when there are no items)
   - `table` (`columns`: strings, `rows`: arrays with one cell per column; a cell may be { `text`, `tone`, `badge` }; `align`: left|center|right per column, `widths`: relative width per column, `striped`, `maxHeight`, `empty`, `rowAction`: runs with `value` = { index, row })
   - `badge` (`text`, `tone`, `variant`: soft|outline|solid), `divider`

@@ -321,9 +321,38 @@ pub const NODE_TONES: &[&str] = &["neutral", "secondary", "accent", "success", "
 
 /// 有 `size`（small / medium / large）的节点；`row` 的 `size` 是子控件的默认值。
 const SIZED_NODES: &[&str] = &[
-    "button", "link", "input", "select", "switch", "checkbox", "radio", "number", "badge", "list", "table", "stat", "tabs", "row",
+    "button",
+    "link",
+    "input",
+    "select",
+    "switch",
+    "checkbox",
+    "radio",
+    "number",
+    "badge",
+    "list",
+    "table",
+    "stat",
+    "tabs",
+    "row",
     "textarea",
+    "checkboxes",
+    "date",
+    "tags-input",
 ];
+
+/// `tags-input` 最多这么多个标签。
+pub const MAX_TAGS: usize = 100;
+
+/// `YYYY-MM-DD` 格式的日期。
+fn is_date(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('-').collect();
+    matches!(parts.as_slice(), [year, month, day]
+        if year.len() == 4 && month.len() == 2 && day.len() == 2
+            && year.parse::<u32>().is_ok()
+            && month.parse::<u32>().is_ok_and(|month| (1..=12).contains(&month))
+            && day.parse::<u32>().is_ok_and(|day| (1..=31).contains(&day)))
+}
 
 /// 检查一棵页面节点树，返回节点数；不合规时说明是哪个节点、哪里不对。界面画之前、创造模式里重载时都用它。
 ///
@@ -513,13 +542,78 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
             "input" => {
                 require(text("id"), "needs a string `id`")?;
                 require(
-                    ["label", "placeholder", "value"].iter().all(|key| object.get(*key).is_none_or(Value::is_string)),
-                    "`label`, `placeholder` and `value` must be strings",
-                )
+                    optional_text(&["label", "placeholder", "value", "prefix", "suffix", "submit"]),
+                    "`label`, `placeholder`, `value`, `prefix`, `suffix` and `submit` must be strings",
+                )?;
+                require(
+                    one_of("kind", &["text", "password", "search", "url", "email"]),
+                    "`kind` must be text, password, search, url or email",
+                )?;
+                require(number_in("maxLength", 1., 10000.), "`maxLength` must be 1 to 10000")
             }
             "switch" => {
                 require(text("id") && text("label") && text("action"), "needs a string `id`, `label` and `action`")?;
-                require(optional_text(&["description"]), "`description` must be a string")
+                require(optional_text(&["description"]), "`description` must be a string")?;
+                require(one_of("layout", &["inline", "row"]), "`layout` must be inline or row")
+            }
+            "checkboxes" => {
+                require(text("id"), "needs a string `id`")?;
+                require(
+                    options_ok(object.get("options").and_then(Value::as_array)),
+                    "`options` must be a non-empty array of strings or { value, label? }",
+                )?;
+                require(
+                    object.get("value").is_none_or(|value| value.as_array().is_some_and(|values| values.iter().all(Value::is_string))),
+                    "`value` must be an array of strings",
+                )?;
+                require(optional_text(&["label", "action"]), "`label` and `action` must be strings")?;
+                require(one_of("layout", &["vertical", "horizontal"]), "`layout` must be vertical or horizontal")
+            }
+            "slider" => {
+                require(text("id"), "needs a string `id`")?;
+                let (min, max) = (object.get("min").and_then(Value::as_f64), object.get("max").and_then(Value::as_f64));
+                require(
+                    matches!((min, max), (Some(min), Some(max)) if min < max),
+                    "needs numeric `min` and `max`, with `min` below `max`",
+                )?;
+                let (min, max) = (min.unwrap_or_default(), max.unwrap_or_default());
+                require(number_in("value", min, max), "`value` must be a number from `min` to `max`")?;
+                require(
+                    object.get("step").is_none_or(|step| step.as_f64().is_some_and(|step| step > 0.)),
+                    "`step` must be greater than 0",
+                )?;
+                require(optional_text(&["label", "action", "unit"]), "`label`, `action` and `unit` must be strings")?;
+                require(flag("showValue"), "`showValue` must be a boolean")
+            }
+            "date" => {
+                require(text("id"), "needs a string `id`")?;
+                require(optional_text(&["label", "placeholder", "action"]), "`label`, `placeholder` and `action` must be strings")?;
+                require(
+                    object.get("value").is_none_or(|value| value.as_str().is_some_and(|value| value.is_empty() || is_date(value))),
+                    "`value` must look like 2026-11-16",
+                )
+            }
+            "tags-input" => {
+                require(text("id"), "needs a string `id`")?;
+                require(
+                    object.get("value").is_none_or(|value| {
+                        value.as_array().is_some_and(|values| values.len() <= MAX_TAGS && values.iter().all(Value::is_string))
+                    }),
+                    "`value` must be an array of at most 100 strings",
+                )?;
+                require(optional_text(&["label", "placeholder", "action"]), "`label`, `placeholder` and `action` must be strings")?;
+                require(number_in("max", 1., MAX_TAGS as f64), "`max` must be 1 to 100")
+            }
+            "section" => {
+                require(text("title"), "needs a string `title`")?;
+                require(optional_text(&["description"]), "`description` must be a string")?;
+                require(one_of("gap", &["small", "medium", "large"]), "`gap` must be small, medium or large")?;
+                nodes(object.get("children"), "children", count)
+            }
+            "split" => {
+                require(number_in("ratio", 0.2, 0.8), "`ratio` must be 0.2 to 0.8")?;
+                nodes(object.get("left"), "left", count)?;
+                nodes(object.get("right"), "right", count)
             }
             "list" => {
                 let items = object.get("items").and_then(Value::as_array);
@@ -590,9 +684,18 @@ pub fn validate_tree(tree: &Value) -> Result<usize, String> {
                 let options = object.get("options").and_then(Value::as_array);
                 require(options_ok(options), "`options` must be a non-empty array of strings or { value, label? }")?;
                 require(
-                    ["label", "value", "action"].iter().all(|key| object.get(*key).is_none_or(Value::is_string)),
-                    "`label`, `value` and `action` must be strings",
-                )
+                    optional_text(&["label", "value", "action", "placeholder"]),
+                    "`label`, `value`, `action` and `placeholder` must be strings",
+                )?;
+                require(
+                    one_of("style", &["buttons", "dropdown", "segmented", "radio"]),
+                    "`style` must be buttons, dropdown, segmented or radio",
+                )?;
+                require(
+                    object.get("style").and_then(Value::as_str) != Some("segmented") || options.is_some_and(|options| options.len() <= 4),
+                    "a segmented `select` has at most 4 options",
+                )?;
+                require(flag("searchable"), "`searchable` must be a boolean")
             }
             "textarea" => {
                 require(text("id"), "needs a string `id`")?;
@@ -847,5 +950,52 @@ mod tests {
             "align": ["left", "right"], "widths": [2, 1], "striped": true, "rowAction": "open", "maxHeight": 300 }));
         bad(json!({ "type": "table", "columns": ["a", "b"], "rows": [], "align": ["left"] }), "`align`");
         bad(json!({ "type": "table", "columns": ["a"], "rows": [[{ "text": "x", "tone": "pink" }]] }), "`rows`");
+    }
+
+    #[test]
+    fn second_round_controls_are_checked() {
+        let ok = |tree: Value| validate_tree(&tree).map_err(|error| format!("{tree}: {error}")).unwrap();
+        let bad = |tree: Value, needle: &str| {
+            let error = validate_tree(&tree).expect_err(&tree.to_string());
+            assert!(error.contains(needle), "{error} should mention {needle}");
+        };
+
+        ok(json!({ "type": "checkboxes", "id": "c", "options": ["a", "b"], "value": ["a"], "layout": "horizontal", "size": "small" }));
+        bad(json!({ "type": "checkboxes", "id": "c", "options": ["a"], "value": "a" }), "`value`");
+        bad(json!({ "type": "checkboxes", "id": "c", "options": [] }), "`options`");
+
+        ok(json!({ "type": "slider", "id": "s", "min": 0, "max": 1, "step": 0.1, "value": 0.5, "action": "set", "unit": "x" }));
+        bad(json!({ "type": "slider", "id": "s", "min": 5, "max": 5 }), "`min` below `max`");
+        bad(json!({ "type": "slider", "id": "s", "max": 5 }), "`min`");
+        bad(json!({ "type": "slider", "id": "s", "min": 0, "max": 5, "value": 9 }), "`value`");
+        bad(json!({ "type": "slider", "id": "s", "min": 0, "max": 5, "step": -1 }), "`step`");
+
+        ok(json!({ "type": "date", "id": "d", "value": "2026-11-28", "label": "Due" }));
+        ok(json!({ "type": "date", "id": "d", "value": "" }));
+        bad(json!({ "type": "date", "id": "d", "value": "28/11/2026" }), "`value`");
+        bad(json!({ "type": "date", "id": "d", "value": "2026-13-01" }), "`value`");
+
+        ok(json!({ "type": "tags-input", "id": "t", "value": ["a", "b"], "max": 5, "placeholder": "Add" }));
+        bad(json!({ "type": "tags-input", "id": "t", "value": [1] }), "`value`");
+        bad(json!({ "type": "tags-input", "id": "t", "max": 0 }), "`max`");
+
+        ok(
+            json!({ "type": "input", "id": "i", "kind": "password", "prefix": "https://", "suffix": ".com", "maxLength": 20, "submit": "go" }),
+        );
+        bad(json!({ "type": "input", "id": "i", "kind": "phone" }), "`kind`");
+        bad(json!({ "type": "input", "id": "i", "maxLength": 0 }), "`maxLength`");
+
+        ok(json!({ "type": "select", "id": "s", "options": ["a", "b"], "style": "dropdown", "searchable": true, "placeholder": "Pick" }));
+        bad(json!({ "type": "select", "id": "s", "options": ["a"], "style": "menu" }), "`style`");
+        bad(json!({ "type": "select", "id": "s", "options": ["a", "b", "c", "d", "e"], "style": "segmented" }), "at most 4");
+
+        ok(json!({ "type": "switch", "id": "w", "label": "On", "action": "t", "layout": "row" }));
+        bad(json!({ "type": "switch", "id": "w", "label": "On", "action": "t", "layout": "grid" }), "`layout`");
+
+        assert_eq!(validate_tree(&json!({ "type": "section", "title": "General", "children": ["a", "b"] })), Ok(3));
+        bad(json!({ "type": "section", "children": [] }), "`title`");
+        assert_eq!(validate_tree(&json!({ "type": "split", "ratio": 0.3, "left": ["a"], "right": ["b", "c"] })), Ok(4));
+        bad(json!({ "type": "split", "ratio": 0.9 }), "`ratio`");
+        bad(json!({ "type": "split", "left": [{ "type": "gauge" }] }), "page.left[0]");
     }
 }

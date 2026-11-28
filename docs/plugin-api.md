@@ -595,6 +595,8 @@ API 密钥在钥匙串里，这里碰不到。
 | `card` | `title`、`description`、`icon`、`children`、`gap`、`actions`（标题行右侧的节点，通常是按钮）、`variant`（`outlined` 描边，默认 / `filled` 下沉底色 / `plain` 无边框）、`collapsible`（标题可点击折叠）、`open`（可折叠时默认是否展开，默认 `true`） |
 | `collapsible` | `title`、`description`、`icon`、`children`、`open`（默认 `false`）、`id` |
 | `tabs` | `tabs`：`[{ id, label, icon, children }]`、`value`（默认选中的标签页 `id`）、`action`、`id`；有 `size` |
+| `section` | `title`、`description`、`icon`、`children`、`gap`；设置页式的分区：标题、说明，下面是内容 |
+| `split` | `left`、`right`（各是一组节点）、`ratio`（左栏占的比例，0.2–0.8，默认 0.5）、`gap`；每栏至少 240 宽，窗口窄时右栏换到下面 |
 
 折叠区的展开状态和标签页的选择由界面记住（按节点的 `id`，没有 `id` 时按节点位置），切换时不重新渲染页面。
 `tabs` 写了 `action` 时，切换标签页还会执行该动作，`value` 为标签页的 `id`。只读场合（工具卡片、对话区）中，
@@ -628,15 +630,19 @@ API 密钥在钥匙串里，这里碰不到。
 |---|---|---|
 | `button` | `label`、`action`、`payload`、`variant`（`primary` / `outline` / `ghost` / `danger` / `link`）、`icon`、`iconOnly`（只显示图标，需要 `icon`，`label` 用作读屏名称和提示）、`full`（占满宽度）、`confirm`（第一次点击时按钮上显示这句话，再次点击才执行）；有 `size`，默认 `small` | — |
 | `link` | `label`、`url`（http / https；点击后经用户确认，用系统浏览器打开）、`icon`；有 `size` | — |
-| `input` | `id`、`label`、`placeholder`、`value`；有 `size` | 字符串 |
+| `input` | `id`、`label`、`placeholder`、`value`、`kind`（`text` / `password` 遮蔽并带显示按钮 / `search` 前面有放大镜 / `url` / `email`）、`prefix` / `suffix`（框内两头的固定文字）、`maxLength`（1–10000）、`submit`（在框里按 Enter 时执行的动作）；有 `size` | 字符串 |
 | `textarea` | `id`、`label`、`placeholder`、`value`、`rows`（1–40）；有 `size` | 字符串 |
 | `number` | `id`、`label`、`placeholder`、`value`、`min`、`max`、`step`（加减按钮的步长，默认 1）、`unit`；有 `size` | 数字（超出范围时取边界值），为空或不是数字时为 `null` |
-| `select` | `id`、`options`（字符串或 `{ value, label }`）、`label`、`value`、`action`；有 `size`，默认 `small` | 字符串 |
+| `select` | `id`、`options`（字符串或 `{ value, label }`）、`label`、`value`、`action`、`style`（`buttons` 一排按钮，默认 / `dropdown` 下拉框 / `segmented` 分段控件，最多 4 项 / `radio` 一列圆点）、`searchable`（仅 `dropdown`：上方加一个筛选框）；有 `size`，默认 `small` | 字符串 |
 | `radio` | `id`、`options`、`label`、`value`、`action`、`style`（`list` 竖排，默认 / `segmented` 分段控件，最多 4 项）；有 `size` | 字符串 |
 | `checkbox` | `id`、`label`、`checked`、`description`、`action`；有 `size` | `true` / `false` |
-| `switch` | `id`、`label`、`checked`、`action`、`description`；有 `size`（影响文字） | — |
+| `checkboxes` | `id`、`options`、`value`（选中项的数组）、`label`、`action`、`layout`（`vertical`，默认 / `horizontal`）；有 `size` | 字符串数组，按选项的顺序 |
+| `slider` | `id`、`min`、`max`（必填，`min` 小于 `max`）、`value`、`step`（默认 1）、`label`、`unit`、`showValue`（默认 `true`）、`action`（松开滑块时执行，`value` 为新值） | 数字 |
+| `date` | `id`、`value`（`2026-11-28`，可为空字符串）、`label`、`placeholder`、`action`；点击后在下方展开月历，可切换月份；有 `size` | 字符串（`YYYY-MM-DD`），未选时为空字符串 |
+| `tags-input` | `id`、`value`（字符串数组，最多 100 个）、`label`、`placeholder`、`max`（1–100）、`action`（加或删标签后执行，`value` 为新的数组）；在框里输入后按 Enter 添加，空的、重复的和超过 `max` 的不添加；有 `size` | 字符串数组 |
+| `switch` | `id`、`label`、`checked`、`action`、`description`、`layout`（`inline` 开关在左，默认 / `row` 文字在左、开关在右并占满一行）；有 `size`（影响文字） | — |
 
-`select`、`radio`、`checkbox` 写了 `action` 时，选择后立即执行（`checkbox` 的 `checked` 为新状态）；没写 `action` 时只记录选择，
+`select`、`radio`、`checkbox`、`checkboxes`、`date` 写了 `action` 时，选择后立即执行（`checkbox` 的 `checked` 为新状态）；没写 `action` 时只记录选择，
 在下一次执行其他动作时随 `inputs` 一并提交。
 
 ### 图标
